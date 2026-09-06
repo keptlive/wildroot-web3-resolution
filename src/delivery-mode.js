@@ -52,7 +52,9 @@ export function policyFor (mode) {
     /** Row 15: Nostr relays dialled through Tor. */
     nostrThroughTor: priv,
     /** Row 19: hyper / SSB / BitTorrent discovery refused, with the reason on the page. */
-    p2pDiscovery: priv ? 'refused' : 'allowed'
+    p2pDiscovery: priv ? 'refused' : 'allowed',
+    /** Row 8: the local content node runs offline (no swarm, no DHT client) in Private. */
+    contentNode: priv ? 'offline' : 'dhtclient'
   })
 }
 

@@ -17,13 +17,18 @@
 
 import { createHash } from 'node:crypto'
 import { isCanonicalTxid } from '../../../src/pointers.js'
+import { bytesMatchRoot } from './ar-merkle.js'
+
+/** The largest body checked against its data root in memory (8 MiB). */
+export const MAX_VERIFY_BYTES = 8 * 1024 * 1024
 
 /**
  * THE HEADER CHECK. An Arweave transaction id IS the SHA-256 of the
  * transaction's signature (the protocol's definition of the id), so a
  * transaction header fetched from a SECOND gateway can be proven to be the
  * transaction the id names with one hash and no trust in either gateway. It
- * does not yet prove the BYTES — that needs `data_root` and the chunk Merkle
+ * proves the BYTES too, for a top-level transaction under MAX_VERIFY_BYTES,
+ * against `data_root` and the chunk Merkle
  * tree, which this browser does not compute — but it closes the cheapest
  * lie: a gateway answering a transaction id with a header for something else.
  * Applied to the transaction's own data (no manifest path), and only when a
@@ -238,9 +243,9 @@ export default function createArHandler ({ gateway = null, gateways = null, fetc
     if (!res) throw (lastErr || new Error('no Arweave gateway answered'))
     // The header check, against a gateway OTHER than the one that served the
     // bytes: a lying gateway would supply a matching header too.
+    let header = null
     if (res.status === 200 && !path && hosts.length > 1 && verifyHeader) {
       const other = hosts.find((h) => h !== servedBy) || hosts[1]
-      let header = null
       try {
         const h = await doFetch(`${other}/tx/${txid}`, 'GET', { 'user-agent': 'hns.one-browser', accept: 'application/json' })
         if (h.status === 200) header = await h.json()
@@ -254,16 +259,40 @@ export default function createArHandler ({ gateway = null, gateways = null, fetc
       }
       if (header) headerVerified = true
     }
+    // THE BYTES, against the header's data root (src/hns/ar-merkle.js). A
+    // proven header names the Merkle root the transaction committed to; the
+    // body either hashes to it or is not this transaction's. Only a whole
+    // body can be checked — not a Range — and only up to MAX_VERIFY_BYTES,
+    // because the check needs the bytes in memory before the first one is
+    // handed on; above that the header check stands alone and the response
+    // says so. A bundled data item has no top-level header and is never here.
+    let body = res.body
+    let bytesVerified = false
+    if (headerVerified && header && header.data_root && res.status === 200 &&
+        !(request.headers && request.headers.get('range'))) {
+      const declared = Number(header.data_size)
+      if (Number.isFinite(declared) && declared >= 0 && declared <= MAX_VERIFY_BYTES) {
+        const bytes = Buffer.from(await res.arrayBuffer())
+        if (!bytesMatchRoot(bytes, header.data_root)) {
+          return new Response(`The bytes ${servedBy} served for ${txid} do not hash to the transaction's data root. Refused.`, {
+            status: 502, headers: { 'content-type': 'text/plain' }
+          })
+        }
+        body = bytes
+        bytesVerified = true
+      }
+    }
     const out = new Headers()
     for (const k of RETURNED) {
       const v = res.headers.get(k)
       if (v) out.set(k, v)
     }
     // What was and was not checked, machine-readable for the trust panel:
-    // `header` when the transaction header was proven to be this id's;
-    // `none` otherwise. Never `bytes` — the data_root is not computed here.
-    out.set('X-Arweave-Verified', headerVerified ? 'header' : 'none')
-    return new Response(res.body, { status: res.status, headers: out })
+    // `bytes` when the body hashed to the proven header's data root,
+    // `header` when only the transaction header was proven to be this id's,
+    // `none` otherwise.
+    out.set('X-Arweave-Verified', bytesVerified ? 'bytes' : headerVerified ? 'header' : 'none')
+    return new Response(body, { status: res.status, headers: out })
   }
 
   function doFetch (target, method, headers) {

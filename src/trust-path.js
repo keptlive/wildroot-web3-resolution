@@ -42,9 +42,11 @@ const step = (label, state, source, detail) => ({ label, state, source, ...(deta
  */
 const CONTENT_ADDRESSED = new Set(['ipfs', 'ipns', 'bittorrent', 'hyper'])
 
-const ARWEAVE_CONTENT = 'The transaction id names immutable content, but the ' +
-  'bytes came from an Arweave gateway and were not checked against the ' +
-  'transaction, so the gateway is trusted the way any HTTPS site is.'
+const ARWEAVE_CONTENT = 'The transaction id names immutable content. The bytes ' +
+  'came from an Arweave gateway; for a top-level transaction under 8 MiB they ' +
+  'are checked against the transaction\'s data root (the response header ' +
+  'X-Arweave-Verified says "bytes"), otherwise the gateway is trusted the way ' +
+  'any HTTPS site is.'
 
 function contentLabel (resolution, id) {
   switch (resolution.kind) {

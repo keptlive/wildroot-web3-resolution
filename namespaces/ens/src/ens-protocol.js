@@ -107,6 +107,23 @@ const CONTENTHASH_ABI = [{
   outputs: [{ type: 'bytes' }]
 }]
 
+/** ENSIP-5 `text(node, key)`. */
+const TEXT_ABI = [{
+  type: 'function',
+  name: 'text',
+  stateMutability: 'view',
+  inputs: [{ type: 'bytes32' }, { type: 'string' }],
+  outputs: [{ type: 'string' }]
+}]
+
+/**
+ * The ENSIP-5 text records shown when a name has no website: the global keys
+ * the specification names (plus ENSIP-12's `avatar`) and the service keys in
+ * common use. Read only for a name with no contenthash — one RPC call per key
+ * — and rendered as text; `url` becomes a link only when it is https.
+ */
+export const TEXT_KEYS = Object.freeze(['url', 'description', 'avatar', 'email', 'com.twitter', 'com.github', 'org.telegram'])
+
 /**
  * @param {object} [options]
  * @param {Function} [options.fetchImpl]  proxied fetch for the Ethereum RPC
@@ -296,6 +313,62 @@ export default function createEnsHandler ({
     return { kind: 'content', pointer }
   }
 
+  /**
+   * ENSIP-5 text records for `name`, through the same Universal Resolver
+   * path as the contenthash (so wildcard and CCIP names answer too). A key
+   * that reverts, is empty or cannot be read is simply absent; nothing about
+   * the name is claimed from it. Values are capped, and are TEXT to the
+   * page — never markup, never fetched.
+   * @param {string} name
+   * @param {readonly string[]} [keys]
+   * @returns {Promise<Record<string, string>>}
+   */
+  async function textRecords (name, keys = TEXT_KEYS) {
+    await ensureDeps()
+    const { encodeFunctionData, normalize, namehash, packetToBytes, toHex } = deps
+    let node, dnsName
+    try {
+      const normalized = normalize(name)
+      node = namehash(normalized)
+      dnsName = toHex(packetToBytes(normalized))
+    } catch {
+      return {}
+    }
+    const out = {}
+    await Promise.all(keys.map(async (key) => {
+      try {
+        const inner = encodeFunctionData({ abi: TEXT_ABI, functionName: 'text', args: [node, key] })
+        const outer = encodeFunctionData({ abi: UNIVERSAL_RESOLVER_ABI, functionName: 'resolve', args: [dnsName, inner] })
+        const raw = await call(deps.universalResolver, outer)
+        if (!raw) return
+        const [encoded] = deps.decodeAbiParameters([{ type: 'bytes' }, { type: 'address' }], raw)
+        if (!encoded || encoded === '0x') return
+        const [value] = deps.decodeAbiParameters([{ type: 'string' }], encoded)
+        const text = String(value || '').trim()
+        if (text) out[key] = text.slice(0, 512)
+      } catch { /* absent */ }
+    }))
+    return out
+  }
+
+  /** The no-website page's record list, as safe HTML (or '' when there is nothing). */
+  function textRecordsHtml (records) {
+    const rows = []
+    for (const key of TEXT_KEYS) {
+      const value = records[key]
+      if (!value) continue
+      const label = { url: 'Website', description: 'Description', avatar: 'Avatar', email: 'Email', 'com.twitter': 'Twitter', 'com.github': 'GitHub', 'org.telegram': 'Telegram' }[key] || key
+      let shown = escapeHtml(value)
+      if (key === 'url' && /^https:\/\/[^\s"'<>]+$/i.test(value)) {
+        shown = `<a href="${escapeHtml(value)}" rel="noopener noreferrer">${escapeHtml(value)}</a>`
+      }
+      rows.push(`<dt>${escapeHtml(label)}</dt><dd>${shown}</dd>`)
+    }
+    if (!rows.length) return ''
+    return '<p>The name does publish these records (ENSIP-5), read from the same resolver and taken on its word:</p>' +
+      `<dl>${rows.join('')}</dl>`
+  }
+
   async function handler (request) {
     const { name, path } = parseEnsUrl(request.url)
     if (!name) return page(400, 'Not an ENS address', 'This does not name a .eth name to resolve.')
@@ -332,10 +405,12 @@ export default function createEnsHandler ({
         'It was NOT looked up as a Handshake name.')
     }
     if (resolution.kind === 'no-content') {
+      let records = {}
+      try { records = await textRecords(name) } catch { records = {} }
       return page(404, `${escapeHtml(name)} has no website`,
         'This .eth name has no <code>contenthash</code> record — it may hold only an ' +
         'address (for receiving funds) and no website content. Nothing was guessed at, ' +
-        'and it was NOT looked up as a Handshake name.')
+        'and it was NOT looked up as a Handshake name.' + textRecordsHtml(records))
     }
     if (resolution.kind === 'unsupported') {
       const proto = escapeHtml(resolution.pointer.protocol)
@@ -365,7 +440,7 @@ export default function createEnsHandler ({
     return tagEns(res)
   }
 
-  return { handler, resolve, ensureDeps }
+  return { handler, resolve, textRecords, ensureDeps }
 }
 
 /**

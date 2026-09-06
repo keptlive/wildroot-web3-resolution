@@ -53,7 +53,7 @@ a departure that no longer exists is not described.
   - HS-12 A DANE mismatch re-resolves once, then fails closed; there is no "pinned before" memory
   - HS-13 Product decisions that deviate from what the naming systems themselves say
   - HS-14 Internationalized names go through the URL parser, not through our own IDNA
-  - HS-15 No nameserver failover at query time
+  - HS-15 Nameserver failover at query time (resolved 2026-09-06)
   - HS-16 Changing the anonymization mode restarts the SPV node, which re-syncs
   - 2.1 SVCB/HTTPS and ECH (HS-3)
   - 2.2 Registry TLDs that refer, and NS targets that are themselves Handshake names
@@ -119,7 +119,7 @@ a departure that no longer exists is not described.
   - IP-D8 Two measurements this chapter cannot make
   - IP-D9 Let a stated-origin name load while anonymised, by stopping the node routing
 - [Chapter 4 — Arweave](#chapter-4-arweave) — [chapter file](namespaces/arweave/DEVIATIONS.md)
-  - AR-1 The BYTES are never verified against the transaction
+  - AR-1 The BYTES are verified against the transaction for a top-level transaction under 8 MiB (resolved 2026-09-06, with a stated limit)
   - AR-2 ar:// is a de-facto scheme with no registration
   - AR-3 An arweave resolution is cached for a flat 60 seconds
   - AR-U1 Is delegating manifest resolution to the gateway defensible at all?
@@ -240,7 +240,7 @@ a departure that no longer exists is not described.
   - KY-D6 The two BitTorrent key shapes are defined twice
 - [Chapter 10 — Experimental: HIP-5 `_op` and numeric Handshake TLDs](#chapter-10-experimental-hip-5-op-and-numeric-handshake-tlds) — [chapter file](namespaces/experimental/DEVIATIONS.md)
   - OP-1 Two fall-throughs to the seller's nameservers
-  - NT-1 Whether numeric Handshake top-level names are supported at all is undecided
+  - NT-1 Numeric Handshake top-level names: DECIDED 2026-09-06 — off by default, behind a switch
   - NT-2 A numeric TLD is written with a leading underscore in a URL
   - NT-3 The http:// spelling of a numeric name cannot be rewritten
   - OP-2.1 _op is chain-pointed and RPC-answered
@@ -1250,11 +1250,16 @@ any real name differs.
 
 ---
 
-#### HS-15. No nameserver failover at query time
+#### HS-15. Nameserver failover at query time (resolved 2026-09-06)
 
-**What.** `_nameserverFor` tries every `NS` record while it is looking for an
-*address*, but once a nameserver has been chosen, the first query failure
-against it is final. `../../src/resolver.js`.
+**What.** Until 2026-09-06, once a nameserver had been chosen the first query
+failure against it was final. Now `_withFailover` in `../../src/resolver.js`
+walks the zone's nameservers lazily, in the zone's order, each with its glue
+addresses IPv4 first, and puts the whole question to the next one when a
+server cannot be ASKED — unreachable, timed out, or answered a different
+question. An answer that fails validation is returned as it is: a second
+server cannot make a forged answer honest, and asking it would be shopping.
+`../../tests/nameserver-failover.test.js`.
 
 **The standard says.** RFC 1034 §4.3.2 and ordinary resolver practice: a zone's
 NS set is a set, and a resolver is expected to try another server when one does
@@ -1263,10 +1268,9 @@ not answer.
 **Consequence.** A zone with two nameservers, one of which is dark, does not
 resolve — even though the other one would have answered.
 
-**Status.** OPEN. Carry the remaining candidates into the query step and retry
-the *whole* zone context against the next one on a transport failure, keeping
-every validation rule unchanged; a failure that is a validation failure must
-not be retried against another server, which would be shopping for an answer.
+**Status.** RESOLVED as recommended. What remains a limitation: a server that
+answers slowly rather than not at all costs its full timeout before the next
+is tried; there is no parallel race.
 
 ---
 
@@ -2794,7 +2798,7 @@ the Wildroot tree, and against `../../src/pointers.js` and
 
 ### 1. Deviations
 
-#### AR-1. The BYTES are never verified against the transaction
+#### AR-1. The BYTES are verified against the transaction for a top-level transaction under 8 MiB (resolved 2026-09-06, with a stated limit)
 
 *SPEC §9.2 · `src/ar.js` (whole module)*
 
@@ -2834,13 +2838,19 @@ the content step `unverified`, the aggregate verdict is `partial`, the scheme
 table says `partial`, and the response header says `header`, never `bytes`
 (SPEC §9.2, §9.1.1).
 
-**Status: OPEN**, and confined to the bytes: the header step of AR-D1 holds and
-the `data_root` step does not exist. What remains is to hash a buffered single-chunk body
-against the `data_root` the header delivers, with a size threshold, and to
-fall back to a cross-gateway body comparison above it — then full chunk proofs.
-The trust label may say `verified` only for content that was actually checked,
-and never for content the threshold skipped: a check that silently stops
-applying above a size is worse than no check, because the label does not stop.
+**Status: RESOLVED for the common case, with the limit stated.** Since
+2026-09-06 `../../src/ar-merkle.js` computes the chunk Merkle root (256 KiB
+chunks, the last two rebalanced; leaf `H(H(H(chunk))‖H(note))`, branch
+`H(H(l)‖H(r)‖H(note))`; validated live against top-level transactions) and
+`../../src/ar.js` holds a whole body of a proven header's transaction up to
+`MAX_VERIFY_BYTES` (8 MiB), refuses one that does not hash to `data_root`,
+and answers `X-Arweave-Verified: bytes`. Above the limit, on a Range request,
+and for a bundled data item (no top-level header: `/tx/<id>` is 404 on every
+gateway), the header check stands alone and the header says `header` or
+`none` — the label never claims what was not checked. The trust panel's
+content step remains `unverified` because it is written at resolution time,
+before the fetch; the response header is the per-fetch truth. What remains:
+chunk proofs for bodies above the limit, and bundled items via their bundle.
 
 ---
 
@@ -5924,7 +5934,7 @@ pinned by a test (`../../tests/hip5-op.test.js`, "every RPC failing falls back
 
 ---
 
-#### NT-1. Whether numeric Handshake top-level names are supported at all is undecided
+#### NT-1. Numeric Handshake top-level names: DECIDED 2026-09-06 — off by default, behind a switch
 
 **What.** An all-numeric final label is classified as a Handshake name
 (`../../src/router.js`: ICANN has no all-numeric top-level domains), and the
@@ -5943,11 +5953,16 @@ them costs a written convention nobody else implements.
 have to be rewritten: links, documentation, and any other client's
 interoperation.
 
-**Status.** OPEN, and it is a product decision rather than a technical one.
-The recommendation is to decide it explicitly — support them with a convention
-we are willing to publish and defend, or state that numeric top-level names are
-out of scope and classify them as such — rather than letting the current
-implementation stand as an implicit answer.
+**Status.** DECIDED (Matt, 2026-09-06): pure-number names are excluded by
+default for simplicity. The resolution method and the `_` URL form of Part B
+stay in the code and in this chapter; `setNumericNames()` in
+`../../src/classify-host.cjs` is the one switch (the browser exposes it as
+`hnsOptions.numericNames`, Settings › Operator panel). Off, an all-numeric
+final label classifies as `web` — what the URL parser makes of it — and a bare
+number typed alone is a search; the WebSocket PAC copy of the rule takes the
+same answer (`buildWsPac({ numericNames })`). An `hns://hello._14898/` URL
+still resolves when reached explicitly. Part B is therefore an OPTIONAL
+convention, published, and not a default.
 
 ---
 
@@ -6621,7 +6636,7 @@ Chapter 8), the only privacy setting the browser has today. Sizes are rough:
 | 5 | **ODoH configuration fetch** (`/.well-known/odohconfigs`, Ch. 2 IC-9) | fetched directly from the target at startup | through a relay, or pinned in the release | **Leak** of "this user runs Wildroot's oblivious path" to the target, once per start | **BOTH, in principle.** An ODoH relay forwards only the oblivious query (RFC 9230 §4.2), not a GET for `/.well-known/odohconfigs`, so "through the relay" is not available as written; the both-sides shape is a config pinned in the release and refreshed through Tor when IP Protection is on | **S–M** |
 | 6 | **ICANN browsing DNS** (Ch. 2 §5) | Chromium's own secure DNS to the configured pool (encrypted, not oblivious) | the loopback ODoH bridge | **Degrade with a stated cost**: the bridge replaces the pool; in `automatic` mode the fallback below it is **plaintext system DNS** (IC-7); in `secure` mode there is none; the panel reports which happened | **BOTH, mostly.** The bridge is the both-sides answer for the lookup itself (private, and encrypted DNS was already a round trip). The remaining trade is availability: what happens when the bridge cannot answer — DoH to the pool (fast, not oblivious) or nothing. A cache of bridge answers narrows the window; more relays narrow it further | **S–M** — a PRIVATE mode is `secure` + bridge; measure the engine on a mixed template list before deciding whether the pool sits behind the bridge |
 | 7 | **ICANN page fetches** (Ch. 2) | direct | through Tor (the session proxy) | **Shipped as the Private/Fast switch**: Private routes the session through the device-local Tor and **fails closed** when Tor cannot be had (`MODES.BLOCKED`, a loopback blackhole proxy — never a direct fallback); ICANN names resolve through the oblivious bridge only (`privateDns()`); the site sees a Tor exit | **No** — the site must see *some* address; only Tor or a VPN-shaped relay hides the user's, and both cost latency and Tor-blocking sites. This is the divergence the switch *is* | done |
-| 8 | **IPFS: the local node's DHT and bitswap** (Ch. 3 §7) | kubo dials peers directly; peers learn the user's IP and every CID asked for | a trustless gateway over the proxied fetch with every block verified, or kubo over Tor | **Refuse** (503) for `ipfs://`, `ipns://` and an `ipfs=` name while anonymization is on — the stated-origin fetch itself is proxied (row 9), but the local node would PROVIDE the imported blocks to the DHT, which is the disclosure the gate exists for | **BOTH, for named sites.** A Handshake name can state its origin (`car=`, Ch. 3 §8) and the browser can fetch the whole CAR from it over HTTPS and verify every block on import — no DHT, no peers, first byte from one round trip. Private because the origin sees a Tor exit when proxied and one CID it already serves; fast because it is a single HTTPS fetch. Our own provider (pinthis) already announces every sub-root so that the default mode is both private and fast. What it does not cover: a bare `ipfs://` CID with no stated origin, which needs a configured trustless gateway (a third party sees the CID) | **M** — kubo with `Routing.Type=none` (no DHT, no announces) while anonymized, then the stated-origin fetch serves named sites privately; **L** for kubo over Tor |
+| 8 | **IPFS: the local node's DHT and bitswap** (Ch. 3 §7) | kubo dials peers directly; peers learn the user's IP and every CID asked for | a trustless gateway over the proxied fetch with every block verified, or kubo over Tor | **Refuse** (503) for `ipfs://`, `ipns://` and an `ipfs=` name while anonymization is on — the stated-origin fetch itself is proxied (row 9), but the local node would PROVIDE the imported blocks to the DHT, which is the disclosure the gate exists for | **BOTH, for named sites.** A Handshake name can state its origin (`car=`, Ch. 3 §8) and the browser can fetch the whole CAR from it over HTTPS and verify every block on import — no DHT, no peers, first byte from one round trip. Private because the origin sees a Tor exit when proxied and one CID it already serves; fast because it is a single HTTPS fetch. Our own provider (pinthis) already announces every sub-root so that the default mode is both private and fast. What it does not cover: a bare `ipfs://` CID with no stated origin, which needs a configured trustless gateway (a third party sees the CID) | **DONE 2026-09-06** — the local node runs `kubo daemon --offline` in Private (no swarm, no DHT client, no announces; `IPFSNode.setRouting`, the policy table's `contentNode`) and as a DHT client in Fast, restarted on the switch; the stated-origin fetch serves named sites privately from the imported archive. **L** for kubo over Tor remains for a bare CID |
 | 9 | **Origin warming and the `car=` stated origin** (Ch. 3 §8, experimental) | an HTTPS fetch of a CAR from the stated origin: faster first paint; the origin sees the user's IP and the CID | the same fetch over the proxied session fetch | **Proxied** — origin-warm rides the proxied session fetch; still unreachable while anonymized by inheritance from row 8's gate | **BOTH** — this row *is* the no-trade-off attempt for row 8: the fetch is verification-on-import already; injecting the proxied fetch makes it private with no loss. The warm path should stop being a warm-up and become the anonymized delivery path | the fetch is built; ungating waits on row 8's node-side change |
 | 10 | **Cooperative delivery** (the coop project, not in this specification yet) | fetch from other Wildroot users' nodes: fast, and every peer learns the user's IP and CID | peers reached as onion services, or refuse | not shipped in either mode (Phase 0 blocked on provider peer identity); the switch's disclosure says so | **Unknown.** The both-sides shape would be peers that serve as onion services, so a fetcher learns nothing about a peer and a peer nothing about a fetcher; whether that is fast enough to be worth having is unmeasured. Serving-on-by-default is a disclosure by construction | **L** — a design decision before it ships |
 | 11 | **Arweave gateways** (Ch. 4 §6) | `ar.io` gateway over the proxied session fetch; the gateway sees the txid and the user's IP | the same over Tor | **Proxied** — works while anonymized | **BOTH, already.** The same code path serves both; the only cost is Tor latency, which is the IP Protection switch (row 7) | done; byte verification (AR-1) is a trust item, not a privacy one |

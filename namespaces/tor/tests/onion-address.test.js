@@ -129,8 +129,9 @@ test('an http(s) URL on an onion host is rewritten into onion://, not hns://', (
 })
 
 test('a Handshake name whose LABEL is "onion" is still Handshake', () => {
-  // Only the FINAL label is reserved. `onion.14898` is a Handshake name.
-  assert.equal(classifyHost('onion.14898'), NAMESPACES.HNS)
+  // Only the FINAL label is reserved. `onion.w3` is a Handshake name (and so
+  // is `onion.14898` with numeric names on — off by default since 2026-09-06).
+  assert.equal(classifyHost('onion.w3'), NAMESPACES.HNS)
   assert.equal(isReservedHost('onion.14898'), false)
 })
 

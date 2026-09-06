@@ -30,6 +30,10 @@ import { classify, classifyHost, NAMESPACES, isReservedHost as routerReserved } 
 import { isHnsHost, isReservedHost, rewriteToHns } from '../../../src/hns-host.js'
 
 const require = createRequire(import.meta.url)
+const { setNumericNames } = require('../../../src/classify-host.cjs')
+// Numeric Handshake names are OFF by default (NT-1, decided 2026-09-06); this
+// file exercises the convention, so the switch is on for the whole file.
+setNumericNames(true)
 const ICANN_TLDS = require('../../../src/icann-tlds.cjs')
 
 // --- SPEC §2: ICANN first ---------------------------------------------------
@@ -113,7 +117,16 @@ test('every other alt-root is Handshake, not its own registry', () => {
   assert.equal(classifyHost('a'.repeat(56) + '.onion'), NAMESPACES.TOR)
 })
 
-test('ICANN has no all-numeric TLD, so a numeric final label is Handshake', () => {
+test('numeric names are OFF by default: an all-numeric final label is then not a name, and a bare number is a search', () => {
+  setNumericNames(false)
+  try {
+    assert.equal(classifyHost('hello.14898'), NAMESPACES.WEB)
+    assert.equal(classify('14898').namespace, 'search')
+    assert.equal(isHnsHost('hello.14898'), false)
+  } finally { setNumericNames(true) }
+})
+
+test('ICANN has no all-numeric TLD, so a numeric final label is Handshake (with the switch on)', () => {
   assert.equal(classifyHost('hello.14898'), NAMESPACES.HNS)
   assert.equal([...ICANN_TLDS].filter((t) => /^\d+$/.test(t)).length, 0)
 })

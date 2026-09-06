@@ -21,6 +21,10 @@ import { WsProxy, parseConnectHead, parseAuthority, basicCredential } from '../s
 import { buildWsPac, rulesToPacDirective } from '../src/ws-proxy-pac.js'
 import { isHnsHost } from '../../../src/hns-host.js'
 import icannTlds from '../../../src/icann-tlds.cjs'
+import { createRequire } from 'node:module'
+// Numeric Handshake names are OFF by default (NT-1, decided 2026-09-06); this
+// file exercises the convention, so the switch is on for the whole file.
+createRequire(import.meta.url)('../../../src/classify-host.cjs').setNumericNames(true)
 
 const PORT = 4444
 const PROXY = `PROXY 127.0.0.1:${PORT}`
@@ -28,7 +32,7 @@ const TOR = 'SOCKS5 127.0.0.1:9050'
 
 /** Evaluate a generated PAC exactly as Chromium does: source in, decision out. */
 function pacRunner ({ baseDirective = 'DIRECT', tlds = icannTlds } = {}) {
-  const source = buildWsPac(tlds, { port: PORT, baseDirective })
+  const source = buildWsPac(tlds, { port: PORT, baseDirective, numericNames: true })
   // eslint-disable-next-line no-new-func
   const find = new Function('url', 'host', `${source}\nreturn FindProxyForURL(url, host)`)
   return { source, find, wss: (h) => find(`wss://${h}/ws`, h), ws: (h) => find(`ws://${h}/ws`, h), https: (h) => find(`https://${h}/`, h) }

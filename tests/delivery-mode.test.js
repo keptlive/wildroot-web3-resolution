@@ -33,7 +33,8 @@ test('the policy table: Fast is today\'s defaults, Private is the five private p
     strictOblivious: false,
     icannDns: null,
     nostrThroughTor: false,
-    p2pDiscovery: 'allowed'
+    p2pDiscovery: 'allowed',
+    contentNode: 'dhtclient'
   })
   const priv = policyFor('private')
   assert.deepEqual(priv, {
@@ -42,7 +43,8 @@ test('the policy table: Fast is today\'s defaults, Private is the five private p
     strictOblivious: true,
     icannDns: 'secure',
     nostrThroughTor: true,
-    p2pDiscovery: 'refused'
+    p2pDiscovery: 'refused',
+    contentNode: 'offline'
   })
   assert.ok(Object.isFrozen(priv), 'a consumer cannot edit the table it reads')
 })

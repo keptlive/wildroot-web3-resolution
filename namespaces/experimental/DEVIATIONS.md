@@ -51,7 +51,7 @@ pinned by a test (`../../tests/hip5-op.test.js`, "every RPC failing falls back
 
 ---
 
-### NT-1. Whether numeric Handshake top-level names are supported at all is undecided
+### NT-1. Numeric Handshake top-level names: DECIDED 2026-09-06 — off by default, behind a switch
 
 **What.** An all-numeric final label is classified as a Handshake name
 (`../../src/router.js`: ICANN has no all-numeric top-level domains), and the
@@ -70,11 +70,16 @@ them costs a written convention nobody else implements.
 have to be rewritten: links, documentation, and any other client's
 interoperation.
 
-**Status.** OPEN, and it is a product decision rather than a technical one.
-The recommendation is to decide it explicitly — support them with a convention
-we are willing to publish and defend, or state that numeric top-level names are
-out of scope and classify them as such — rather than letting the current
-implementation stand as an implicit answer.
+**Status.** DECIDED (Matt, 2026-09-06): pure-number names are excluded by
+default for simplicity. The resolution method and the `_` URL form of Part B
+stay in the code and in this chapter; `setNumericNames()` in
+`../../src/classify-host.cjs` is the one switch (the browser exposes it as
+`hnsOptions.numericNames`, Settings › Operator panel). Off, an all-numeric
+final label classifies as `web` — what the URL parser makes of it — and a bare
+number typed alone is a search; the WebSocket PAC copy of the rule takes the
+same answer (`buildWsPac({ numericNames })`). An `hns://hello._14898/` URL
+still resolves when reached explicitly. Part B is therefore an OPTIONAL
+convention, published, and not a default.
 
 ---
 

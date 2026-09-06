@@ -56,7 +56,7 @@ test('ar:// is TRUSTED, not trustless — the gateway is believed', () => {
   assert.equal(v.secure, true)
   const content = schemeSteps('ar://sometxid/').find((s) => s.label === 'Content')
   assert.equal(content.state, 'unverified')
-  assert.match(content.detail, /not checked against the transaction/)
+  assert.match(content.detail, /otherwise the gateway is trusted the way any HTTPS site is/, 'bytes are checked only for a top-level transaction under the limit; the step stays unverified because the check happens after resolution')
 })
 
 test('a hyper:// DNSLink name is TRUSTED; a hyper:// key is TRUSTLESS', () => {

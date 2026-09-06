@@ -318,24 +318,97 @@ export class HNSResolver {
    * @returns {Promise<{ server?: {server:string, port:number}, blocked?: object }>}
    */
   async _nameserverFor (tld, records, nsRecords) {
-    let lastErr = null
+    for await (const candidate of this._nameserverCandidates(tld, records, nsRecords)) {
+      return candidate
+    }
+    throw new Error(`no reachable nameserver for ${tld}`)
+  }
+
+  /**
+   * Every server the zone can be asked at, lazily, in the order it named them
+   * (HS-15: failover at query time). For each NS: its glue addresses (IPv4
+   * first, then IPv6), else the chain's answer for the nameserver's own name,
+   * else the ICANN lookup — resolved only when the walk reaches that entry,
+   * so a zone whose first nameserver answers costs no lookup for the rest.
+   * A private or reserved address is yielded as `blocked`, exactly where it
+   * was met: a zone that names one is refused, not skipped.
+   *
+   * @param {string} tld
+   * @param {Array} records the chain resource
+   * @param {Array} nsRecords its NS records, in order
+   * @returns {AsyncGenerator<{server?: {server: string, port: number}, blocked?: object}>}
+   */
+  async * _nameserverCandidates (tld, records, nsRecords) {
     for (const ns of nsRecords) {
       const nsHost = ns.ns.replace(/\.$/, '')
-      let address
+      let addresses = glueAddresses(records, nsHost)
+      if (!addresses.length) {
+        let address = null
+        try {
+          address = (await this._chainAddress(nsHost)) || (await this.lookup(nsHost))
+        } catch {
+          address = null
+        }
+        if (address) addresses = [address]
+      }
+      for (const address of addresses) {
+        if (!isPublicAddress(address)) {
+          yield { blocked: { kind: 'blocked', address } }
+          return
+        }
+        yield { server: { server: address, port: 53 } }
+      }
+    }
+  }
+
+  /**
+   * The servers a question may be put to: the configured `authoritative`
+   * (one, or a list, in order) when there is one, else the zone's own
+   * nameservers. One shape for both, so the failover loop is written once.
+   * @param {string} tld
+   * @param {Array} records
+   * @param {Array} nsRecords
+   */
+  async * _servers (tld, records, nsRecords) {
+    if (this.authoritative) {
+      for (const server of [].concat(this.authoritative)) yield { server }
+      return
+    }
+    yield * this._nameserverCandidates(tld, records, nsRecords)
+  }
+
+  /**
+   * Put a question to the zone, moving to its next nameserver when one
+   * cannot be ASKED. A server that could not be reached, timed out, or
+   * answered a different question (a transport-level failure, thrown by
+   * `query`) is not the zone's answer; the next server in the zone's own
+   * order is. An answer that fails validation is a RESULT and is returned as
+   * it is — a second server cannot make a forged answer honest, and asking
+   * it would only give an attacker who controls the path a second try.
+   * Until 2026-09-06 the first nameserver with an address was the only one
+   * asked, and a zone with two nameservers went dark with its first
+   * (HS-15); the same held for a nameserver whose only glue was an IPv6 on
+   * a network without one.
+   *
+   * @param {string} tld
+   * @param {Array} records
+   * @param {Array} nsRecords
+   * @param {(server: {server: string, port: number}) => Promise<any>} ask
+   */
+  async _withFailover (tld, records, nsRecords, ask) {
+    let lastErr = null
+    let asked = 0
+    for await (const candidate of this._servers(tld, records, nsRecords)) {
+      if (candidate.blocked) return candidate.blocked
+      asked++
       try {
-        address = await this._addressForNsHost(nsHost, records)
+        return await ask(candidate.server)
       } catch (err) {
         lastErr = err
-        continue
       }
-      if (!address) {
-        lastErr = lastErr || new Error(`no address for ${nsHost}`)
-        continue
-      }
-      if (!isPublicAddress(address)) return { blocked: { kind: 'blocked', address } }
-      return { server: { server: address, port: 53 } }
     }
-    throw lastErr || new Error(`no reachable nameserver for ${tld}`)
+    if (!asked) throw lastErr || new Error(`no reachable nameserver for ${tld}`)
+    throw lastErr
   }
 
   /**
@@ -519,14 +592,20 @@ export class HNSResolver {
     }
     if (!resource || !Array.isArray(resource.records)) return this._absent('unregistered')
     const records = resource.records
-    let server = this.authoritative
-    if (!server) {
-      const nsRecords = dnsNameservers(records)
-      if (!nsRecords.length) return { kind: 'unregistered' }
-      const found = await this._nameserverFor(tld, records, nsRecords)
-      if (found.blocked) return found.blocked
-      server = found.server
-    }
+    const nsRecords = dnsNameservers(records)
+    if (!this.authoritative && !nsRecords.length) return { kind: 'unregistered' }
+    return this._withFailover(tld, records, nsRecords, (server) =>
+      this._txtFromServer(host, tld, records, server))
+  }
+
+  /**
+   * txtRecords, asked at ONE server (the failover loop above picks it).
+   * @param {string} host
+   * @param {string} tld
+   * @param {Array} records
+   * @param {{server: string, port: number}} server
+   */
+  async _txtFromServer (host, tld, records, server) {
     const opts = { timeout: this.timeout, dial: this.dial }
     // Same delegation walk the site path takes (`_fromZone`): an identity TXT
     // under a registry TLD lives in the delegated zone, not the TLD's own, and
@@ -683,30 +762,24 @@ export class HNSResolver {
       }
     }
 
-    if (!server) {
-      const nsRecords = dnsNameservers(records)
-      if (!nsRecords.length) {
-        // The chain resource is the TLD's. Handing it to a SUBDOMAIN would
-        // serve the TLD's own site at every name under it — the same mistake
-        // the SYNTH4 guard above exists to prevent. With no nameserver there
-        // is nobody who can answer for a sub-name, and that is `unregistered`.
-        const pointer = host === tld ? onchainPointer(records) : null
-        if (pointer) return pointer
-        return this._absent('unregistered')
-      }
-      const found = await this._nameserverFor(tld, records, nsRecords)
-      if (found.blocked) return found.blocked
-      server = found.server
+    const nsRecords = dnsNameservers(records)
+    if (!server && !nsRecords.length) {
+      // The chain resource is the TLD's. Handing it to a SUBDOMAIN would
+      // serve the TLD's own site at every name under it — the same mistake
+      // the SYNTH4 guard above exists to prevent. With no nameserver there
+      // is nobody who can answer for a sub-name, and that is `unregistered`.
+      const pointer = host === tld ? onchainPointer(records) : null
+      if (pointer) return pointer
+      return this._absent('unregistered')
     }
 
     // Everything below is the ZONE's answer, and a zone can hand the question
     // on: `pinner.hns` lives in a zone `hns` delegates to `ns1.lumeweb`, so
     // the work is a re-entrant step over a delegation chain, not a single hop.
-    return this._fromZone(host, {
-      zone: tld,
-      server,
-      dsRecords: chainDs(records)
-    }, 0)
+    // Asked at each of the zone's nameservers in turn until one can be asked.
+    const dsRecords = chainDs(records)
+    return this._withFailover(tld, records, nsRecords, (server) =>
+      this._fromZone(host, { zone: tld, server, dsRecords }, 0))
   }
 
   /**
@@ -1427,11 +1500,22 @@ export function preferV4 (addresses) {
  * @returns {string|null}
  */
 function glueAddress (records, nsHost) {
+  return glueAddresses(records, nsHost)[0] || null
+}
+
+/**
+ * Every glue address a chain resource gives for `nsHost`, IPv4 first, then
+ * IPv6 — the order the failover loop asks them in.
+ * @param {Array} records
+ * @param {string} nsHost
+ * @returns {string[]}
+ */
+function glueAddresses (records, nsHost) {
   const of = (type) => (records || [])
     .filter((r) => r.type === type && r.ns && r.address &&
       String(r.ns).replace(/\.$/, '') === nsHost)
     .map((r) => r.address)
-  return preferV4([...of('GLUE4'), ...of('GLUE6')])
+  return [...of('GLUE4'), ...of('GLUE6')]
 }
 
 /**

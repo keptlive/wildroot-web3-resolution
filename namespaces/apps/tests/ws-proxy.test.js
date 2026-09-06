@@ -20,6 +20,7 @@
 // lost by the override.
 
 import { test } from 'node:test'
+import { createRequire } from 'node:module'
 import assert from 'node:assert/strict'
 import net from 'node:net'
 import tls from 'node:tls'
@@ -29,6 +30,10 @@ import { WsProxy, parseConnectHead, parseAuthority, basicCredential, AUTH_REALM 
 import { buildWsPac } from '../src/ws-proxy-pac.js'
 import { verifyDane } from '../../../src/dane.js'
 import { generateLoopbackCert } from '../../../src/self-cert.js'
+
+// Numeric Handshake names are OFF by default (NT-1, decided 2026-09-06); this
+// file exercises the convention, so the switch is on for the whole file.
+createRequire(import.meta.url)('../../../src/classify-host.cjs').setNumericNames(true)
 
 const CREDS = { user: 'sess-user', pass: 'sess-pass-1234' }
 const basic = ({ user, pass } = CREDS) => 'Basic ' + Buffer.from(`${user}:${pass}`, 'utf8').toString('base64')

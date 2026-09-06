@@ -16,7 +16,7 @@ the Wildroot tree, and against `../../src/pointers.js` and
 
 ## 1. Deviations
 
-### AR-1. The BYTES are never verified against the transaction
+### AR-1. The BYTES are verified against the transaction for a top-level transaction under 8 MiB (resolved 2026-09-06, with a stated limit)
 
 *SPEC §9.2 · `src/ar.js` (whole module)*
 
@@ -56,13 +56,19 @@ the content step `unverified`, the aggregate verdict is `partial`, the scheme
 table says `partial`, and the response header says `header`, never `bytes`
 (SPEC §9.2, §9.1.1).
 
-**Status: OPEN**, and confined to the bytes: the header step of AR-D1 holds and
-the `data_root` step does not exist. What remains is to hash a buffered single-chunk body
-against the `data_root` the header delivers, with a size threshold, and to
-fall back to a cross-gateway body comparison above it — then full chunk proofs.
-The trust label may say `verified` only for content that was actually checked,
-and never for content the threshold skipped: a check that silently stops
-applying above a size is worse than no check, because the label does not stop.
+**Status: RESOLVED for the common case, with the limit stated.** Since
+2026-09-06 `../../src/ar-merkle.js` computes the chunk Merkle root (256 KiB
+chunks, the last two rebalanced; leaf `H(H(H(chunk))‖H(note))`, branch
+`H(H(l)‖H(r)‖H(note))`; validated live against top-level transactions) and
+`../../src/ar.js` holds a whole body of a proven header's transaction up to
+`MAX_VERIFY_BYTES` (8 MiB), refuses one that does not hash to `data_root`,
+and answers `X-Arweave-Verified: bytes`. Above the limit, on a Range request,
+and for a bundled data item (no top-level header: `/tx/<id>` is 404 on every
+gateway), the header check stands alone and the header says `header` or
+`none` — the label never claims what was not checked. The trust panel's
+content step remains `unverified` because it is written at resolution time,
+before the fetch; the response header is the per-fetch truth. What remains:
+chunk proofs for bodies above the limit, and bundled items via their bundle.
 
 ---
 

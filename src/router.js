@@ -50,7 +50,7 @@ import { decodeNip19 } from '../namespaces/nostr/src/nip19.js'
 // re-exported from here so existing importers keep their names.
 const {
   ICANN_TLDS, NEVER_HNS_TLDS, ONION_V3,
-  isReservedHost, isOnionHost, isEthName, bareHost, asciiTld, classifyHost
+  isReservedHost, isOnionHost, isEthName, bareHost, asciiTld, classifyHost, isBareNumberOff
 } = classifier
 
 export { ICANN_TLDS, NEVER_HNS_TLDS, isReservedHost, isOnionHost, isEthName, classifyHost }
@@ -405,8 +405,9 @@ export function classify (input, opts = {}) {
   // accident, because a sentence rarely ends in a slash. Now that a bare label
   // navigates, the exclusion has to be deliberate, or every multi-word search
   // becomes a Handshake lookup. Caught by its own test on the way in.
+  // A bare number is a name only with numeric names on (classify-host.cjs).
   const label = /\s/.test(raw) ? '' : asciiTld(host)
-  if (label && !ICANN_TLDS.has(label)) {
+  if (label && !ICANN_TLDS.has(label) && !isBareNumberOff(label)) {
     return { url: makeHnsURL(raw), scheme: 'hns', namespace: NAMESPACES.HNS, explicit: false, reason: 'hns-bare-label' }
   }
   return { url: searchURL(raw), scheme: 'search', namespace: NAMESPACES.SEARCH, explicit: false, reason: 'search' }

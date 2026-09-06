@@ -82,7 +82,7 @@ test('each scheme names its OWN verification step, not a generic one', () => {
     ssb: [/Content/, /feed key/, 'verified'],
     magnet: [/Address/, /only a pointer to a torrent/, 'none'],
     did: [/Identifier/, /not audited/, 'unverified'],
-    ar: [/Content/, /not checked against the/, 'unverified'],
+    ar: [/Content/, /trusted the way any HTTPS site is/, 'unverified'],
     onion: [/Connection/, /plain HTTP inside the tunnel/, 'unverified']
   }
   for (const [scheme, [label, detail, state]] of Object.entries(named)) {

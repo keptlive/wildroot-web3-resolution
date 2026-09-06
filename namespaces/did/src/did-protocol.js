@@ -23,6 +23,7 @@
 import { isPublicAddress } from '../../../src/safe-address.js'
 import { isReservedHost } from '../../../src/hns-host.js'
 import { safeStatus } from '../../../src/safe-status.js'
+import { localDidDocument } from './did-local.js'
 
 const DEFAULT_PLC_DIRECTORY = 'https://plc.directory'
 const FETCH_TIMEOUT_MS = 10000
@@ -97,6 +98,30 @@ export default async function createHandler (options = {}) {
 
       const method = parts[1]
 
+      // did:key, did:jwk, did:pkh: the document is derived from the
+      // identifier itself, so nothing is fetched and nobody's word is taken
+      // (did-local.js). A malformed one is a 400 with the reason.
+      if (method === 'key' || method === 'jwk' || method === 'pkh') {
+        let doc
+        try {
+          doc = localDidDocument(did)
+        } catch (err) {
+          return sendError(400, `Cannot resolve ${did}: ${err.message}`)
+        }
+        return new Response(JSON.stringify(doc), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'X-Resolution-Namespace': 'did',
+            // Derived, not fetched: the only DID document a browser can call
+            // verified, because there was nobody to trust.
+            'X-Resolution-Trust': 'derived',
+            'Access-Control-Allow-Origin': '*',
+            'Content-Security-Policy': "default-src 'none'"
+          }
+        })
+      }
+
       /** @type {string} */
       let resolveURL
 
@@ -112,7 +137,7 @@ export default async function createHandler (options = {}) {
           return sendError(400, `Refusing to fetch ${did}: its host is not a public web host`)
         }
       } else {
-        return sendError(400, `Unsupported DID method: ${method}. Supported methods: plc, web`)
+        return sendError(400, `Unsupported DID method: ${method}. Supported methods: plc, web, key, jwk, pkh`)
       }
 
       const response = await fetchImpl(resolveURL, {

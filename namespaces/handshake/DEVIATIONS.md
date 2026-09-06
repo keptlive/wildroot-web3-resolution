@@ -358,11 +358,16 @@ any real name differs.
 
 ---
 
-### HS-15. No nameserver failover at query time
+### HS-15. Nameserver failover at query time (resolved 2026-09-06)
 
-**What.** `_nameserverFor` tries every `NS` record while it is looking for an
-*address*, but once a nameserver has been chosen, the first query failure
-against it is final. `../../src/resolver.js`.
+**What.** Until 2026-09-06, once a nameserver had been chosen the first query
+failure against it was final. Now `_withFailover` in `../../src/resolver.js`
+walks the zone's nameservers lazily, in the zone's order, each with its glue
+addresses IPv4 first, and puts the whole question to the next one when a
+server cannot be ASKED — unreachable, timed out, or answered a different
+question. An answer that fails validation is returned as it is: a second
+server cannot make a forged answer honest, and asking it would be shopping.
+`../../tests/nameserver-failover.test.js`.
 
 **The standard says.** RFC 1034 §4.3.2 and ordinary resolver practice: a zone's
 NS set is a set, and a resolver is expected to try another server when one does
@@ -371,10 +376,9 @@ not answer.
 **Consequence.** A zone with two nameservers, one of which is dark, does not
 resolve — even though the other one would have answered.
 
-**Status.** OPEN. Carry the remaining candidates into the query step and retry
-the *whole* zone context against the next one on a transport failure, keeping
-every validation rule unchanged; a failure that is a validation failure must
-not be retried against another server, which would be shopping for an answer.
+**Status.** RESOLVED as recommended. What remains a limitation: a server that
+answers slowly rather than not at all costs its full timeout before the next
+is tried; there is no parallel race.
 
 ---
 

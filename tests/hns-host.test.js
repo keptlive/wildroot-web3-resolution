@@ -1,7 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
+import { createRequire } from 'node:module'
 import { isHnsHost, rewriteToHns, reservedNamespaceScheme, isReservedHost } from '../src/hns-host.js'
+const { setNumericNames } = createRequire(import.meta.url)('../src/classify-host.cjs')
 
 // A small TLD set so the tests do not depend on the bundled IANA snapshot.
 const TLDS = new Set(['com', 'org', 'one', 'io', 'blog', 'xn--p1ai'])
@@ -10,7 +12,9 @@ test('isHnsHost: handshake hosts, single labels and numeric TLDs included', () =
   assert.equal(isHnsHost('nathan.woodburn', TLDS), true)
   assert.equal(isHnsHost('hnshosting', TLDS), true) // single label
   assert.equal(isHnsHost('proofofconcept', TLDS), true)
-  assert.equal(isHnsHost('hello.14898', TLDS), true) // numeric TLD
+  assert.equal(isHnsHost('hello.14898', TLDS), false, 'numeric TLD: off by default (2026-09-06)')
+  setNumericNames(true)
+  try { assert.equal(isHnsHost('hello.14898', TLDS), true, 'numeric TLD, switch on') } finally { setNumericNames(false) }
   assert.equal(isHnsHost('d.yup.', TLDS), true) // trailing dot form
 })
 

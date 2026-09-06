@@ -294,9 +294,18 @@ An implementation MUST:
   **400** and no network request;
 - refuse a method it does not implement with a **400** and no network request.
 
-The reference implementation supports exactly two methods: `plc` and `web`.
-Everything else — `did:key`, `did:ion`, `did:ethr`, `did:pkh` — is refused, and
-the refusal names the supported set so a user sees why.
+The reference implementation fetches documents for two methods, `plc` and
+`web`, and DERIVES them — no network, no trust decision — for three whose
+identifier is the key or the account itself: `did:key` (a multibase
+multicodec public key → a `Multikey` document), `did:jwk` (a base64url JSON
+Web Key → `JsonWebKey2020`; a key carrying private material is refused) and
+`did:pkh` (a CAIP-10 account id → `EcdsaSecp256k1RecoveryMethod2020` for
+`eip155`/`bip122`, `Ed25519VerificationKey2018` for `solana`/`tezos`). Those
+answer with `X-Resolution-Trust: derived`, the one DID document a browser can
+call verified, because nobody was asked (`../src/did-local.js`, pinned to
+the specifications' own vectors in `../tests/did-local.test.js`). Everything
+else — `did:ion`, `did:ethr` — is refused, and the refusal names the
+supported set so a user sees why.
 
 **Refusing before the network is normative, not an optimisation.** A malformed
 or unsupported DID that reaches `fetch` is a request an attacker chose the

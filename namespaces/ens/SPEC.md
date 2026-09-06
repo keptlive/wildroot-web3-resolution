@@ -423,6 +423,18 @@ An unrecognised **revert selector** defaults to `no-content` rather than
 an error raised by a resolver that exists. What it did not do is tell us which
 error, so the weaker of the two sentences is the honest one.
 
+### 5.6a ENSIP-5 text records, on the no-website page only
+
+A name whose resolver holds no `contenthash` is a name with no website, not
+an unregistered one (§5.6). Since 2026-09-06 that page also lists the ENSIP-5
+text records the name does publish — `url`, `description`, `avatar`
+(ENSIP-12), `email`, `com.twitter`, `com.github`, `org.telegram` — read
+through the same Universal Resolver path (`text(node, key)` inside
+`resolve()`), one call per key, only for that page. Values are TEXT: escaped,
+capped at 512 characters, never fetched; `url` becomes a link only when it is
+`https:`. They are on the resolver's word exactly as the contenthash is, and
+the page says so. `textRecords()` in `../src/ens-protocol.js`.
+
 ### 5.7 Resolution kinds
 
 | kind | meaning | status served |

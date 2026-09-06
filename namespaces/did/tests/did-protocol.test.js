@@ -141,9 +141,9 @@ test('an unsupported method or a malformed DID is refused without a network requ
   const fetchImpl = recording(() => { throw new Error('must not fetch') })
   const handler = await createHandler({ fetchImpl })
 
-  const unsupported = await handler({ url: 'did:key:z6Mk' })
+  const unsupported = await handler({ url: 'did:ion:EiClkZMDxPKqC9c-umQfTkR8vvZ9JPhl_xLDI9Nfk38w5w' })
   assert.equal(unsupported.status, 400)
-  assert.match(await unsupported.text(), /Unsupported DID method: key/)
+  assert.match(await unsupported.text(), /Unsupported DID method: ion/)
 
   for (const id of ['did:plc', 'did:', 'did::x', 'notadid', 'did:web:']) {
     const res = await handler({ url: id })

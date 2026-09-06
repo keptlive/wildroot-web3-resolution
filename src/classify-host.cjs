@@ -17,6 +17,31 @@
 const ICANN_TLDS = require('./icann-tlds.cjs')
 const { isReservedHost, NEVER_HNS_TLDS } = require('./reserved-names.cjs')
 
+// NUMERIC HANDSHAKE NAMES (`hello.14898`, `14898`) ARE OFF BY DEFAULT.
+// Matt, 2026-09-06 (NT-1 decided): pure-number names are excluded for
+// simplicity. ICANN has no all-numeric TLD, so the rule is sound, and
+// Handshake sells such names — but the URL Standard reads a host ending in
+// digits as an IPv4 address, so writing them needs the `_` marker of
+// src/hns/hns-url.cjs, a convention nobody else implements. The resolution
+// method stays in the code and the documentation (docs/RESOLUTION-ROUTER.md,
+// the public specification's experimental chapter Part B); this switch
+// turns it on — Settings › Operator panel › "Names that are only numbers"
+// (`hnsOptions.numericNames`). Main sets it from the config; the chrome UI's
+// copy of this module is set from the window URL (src/ui/script.js).
+let numericNames = false
+
+/** @param {unknown} on */
+function setNumericNames (on) { numericNames = !!on }
+function numericNamesEnabled () { return numericNames }
+const NUMERIC_LABEL = /^\d+$/
+/**
+ * A bare all-digit label (`14898`) typed on its own: a Handshake name only
+ * when numeric names are on. The single-label decision belongs to the
+ * callers (classifyHost returns null for it), so both of them ask this.
+ * @param {string} label
+ */
+function isBareNumberOff (label) { return NUMERIC_LABEL.test(String(label || '')) && !numericNames }
+
 /** The namespace names classifyHost returns; the router's NAMESPACES agree. */
 const NAMESPACE = Object.freeze({
   TOR: 'tor',
@@ -107,11 +132,13 @@ function classifyHost (rawHost, tlds = ICANN_TLDS) {
   if (isIpLiteral(host)) return NAMESPACE.WEB
 
   const labels = host.split('.').filter(Boolean)
-  if (labels.length < 2) return null // single label: caller decides HNS vs search
+  if (labels.length < 2) return null // single label: caller decides HNS vs search (isBareNumberOff)
 
   const tld = asciiTld(host)
-  // ICANN has no all-numeric TLDs; a numeric final label (14898) is Handshake.
-  if (/^\d+$/.test(tld)) return NAMESPACE.HNS
+  // ICANN has no all-numeric TLDs; a numeric final label (14898) is Handshake
+  // — when numeric names are on. Off, it is what the URL parser will make of
+  // it anyway: an address, which is to say not a name.
+  if (NUMERIC_LABEL.test(tld)) return numericNames ? NAMESPACE.HNS : NAMESPACE.WEB
   return tlds.has(tld) ? NAMESPACE.ICANN : NAMESPACE.HNS
 }
 
@@ -126,5 +153,8 @@ module.exports = {
   isReservedHost,
   bareHost,
   asciiTld,
-  classifyHost
+  classifyHost,
+  setNumericNames,
+  numericNamesEnabled,
+  isBareNumberOff
 }

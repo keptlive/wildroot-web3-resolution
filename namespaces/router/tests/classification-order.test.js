@@ -16,6 +16,10 @@ import assert from 'node:assert/strict'
 
 import { classify, classifyHost, isValidV3Onion, NAMESPACES } from '../../../src/router.js'
 import { isReservedHost, isHnsHost } from '../../../src/hns-host.js'
+import { createRequire } from 'node:module'
+// Numeric Handshake names are OFF by default (NT-1, decided 2026-09-06); this
+// file exercises the convention, so the switch is on for the whole file.
+createRequire(import.meta.url)('../../../src/classify-host.cjs').setNumericNames(true)
 
 const V3 = 'p53lf57qovyuvwsc6xnrppyply3vtqm7l6pcobkmyqsiofyeznfu5uqd.onion'
 

@@ -394,8 +394,10 @@ only case that falls through.
 
 Every address obtained here **MUST** pass §11.2 before a query is sent to it. A
 query to `127.0.0.1:53` is server-side request forgery just as much as an HTTP
-fetch is. Once a server has been chosen, a query failure against it is final
-here (`HS-15`).
+fetch is. A server that cannot be asked — unreachable, timed out, a reply to a
+different question — hands the whole question to the zone's next server, in
+the zone's order (`HS-15`); an answer that fails validation is never retried
+elsewhere.
 
 If the chain resource carries no `NS` records at all: if `host === tld` and
 there is a content pointer, return it; otherwise `unregistered`. In particular

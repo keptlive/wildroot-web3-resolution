@@ -26,7 +26,7 @@ test('a bare ar:// URL reports its content as UNVERIFIED and names the gateway',
   assert.match(content.source, /gateway/i)
   assert.match(content.source, /HTTPS/)
   assert.ok(content.source.includes(TX), 'the transaction id is named')
-  assert.match(content.detail, /not checked against the transaction/)
+  assert.match(content.detail, /otherwise the gateway is trusted the way any HTTPS site is/, 'bytes are checked after resolution, for a top-level transaction under the limit (AR-1); the step itself stays unverified')
   assert.equal(summarize(steps).state, 'partial')
 })
 

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.7.0
+
+The open items the 2026-09-06 review left, closed where they belong to the
+resolver:
+
+- **Nameserver failover** (HS-15, resolved) — a server that cannot be asked
+  hands the whole question to the zone's next nameserver, in the zone's
+  order, IPv4 glue before IPv6; a validation failure is never retried
+  elsewhere. `tests/nameserver-failover.test.js`.
+- **Arweave bytes verified** (AR-1, resolved with a stated limit) —
+  `namespaces/arweave/src/ar-merkle.js` is the chunk Merkle tree, validated
+  live against top-level transactions; a body under 8 MiB must hash to the
+  proven header's `data_root` or is refused; `X-Arweave-Verified: bytes`.
+- **did:key, did:jwk, did:pkh** (`namespaces/did/src/did-local.js`) —
+  derived from the identifier with no network and no trust decision,
+  answered as `X-Resolution-Trust: derived`; pinned to the specifications'
+  own vectors.
+- **ENSIP-5 text records** on the no-website page (Chapter 5 §5.6a) —
+  read through the Universal Resolver, shown as text, `url` a link only
+  when https.
+- **Numeric Handshake names decided** (NT-1) — off by default, behind one
+  switch (`setNumericNames`, `buildWsPac({ numericNames })`); the method and
+  the `_` URL form stay in the code and Part B.
+- **The content node is offline in Private** (DIVERGENCE row 8, done) —
+  the policy table carries `contentNode`; the browser restarts its kubo
+  with `--offline`.
+
 ## 0.6.0
 
 - **The route workup** (`src/route-path.js`, the mirror of

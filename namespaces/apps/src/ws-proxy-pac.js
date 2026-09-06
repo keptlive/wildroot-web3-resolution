@@ -33,8 +33,11 @@ export function rulesToPacDirective (rules) {
 }
 
 /** Build the PAC script. `icannTlds` is the Set from ui/icann-tlds.cjs. */
-export function buildWsPac (icannTlds, { port, baseDirective = 'DIRECT' }) {
+export function buildWsPac (icannTlds, { port, baseDirective = 'DIRECT', numericNames = false }) {
   const tlds = JSON.stringify(Object.fromEntries([...icannTlds].map((t) => [t, 1])))
+  // Numeric Handshake names are a switch (src/hns/classify-host.cjs); the PAC
+  // copy of the rule takes the same answer.
+  const numeric = numericNames ? 'true' : 'false'
   // The reserved-name list (src/hns/reserved-names.cjs) is embedded the same
   // way, so `nas.local` stays direct for the same reason `localhost` does.
   const reserved = JSON.stringify(Object.fromEntries([...NEVER_HNS_TLDS].map((t) => [t, 1])))
@@ -48,11 +51,11 @@ function _isHns(h){
   if(h.indexOf(':')>=0 || h.charAt(0)==='[') return false;
   var labels = h.split('.').filter(Boolean);
   if(RESERVED[labels[labels.length-1]]) return false;
-  if(labels.length < 2) return true;
   var tld = labels[labels.length-1];
+  if(/^\\d+$/.test(tld)) return ${numeric};
+  if(labels.length < 2) return true;
   if(tld === 'eth') return false;
   if(tld === 'onion') return false;
-  if(/^\\d+$/.test(tld)) return true;
   return !ICANN[tld];
 }
 function FindProxyForURL(url, host){
