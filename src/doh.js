@@ -22,7 +22,7 @@
  */
 
 import { timers } from './resolution-timing.js'
-import { buildQuery, parseAnswers, TYPES } from './dns-query.js'
+import { buildQuery, parseAnswers, assertAnswersTo, TYPES } from './dns-query.js'
 import { originFrom, pointerFrom, txtStringsFrom } from './pointers.js'
 
 const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/
@@ -66,6 +66,9 @@ export class DoHResolver {
   async _query (name, typeName) {
     const wire = buildQuery(name, TYPES[typeName], 0)
     const param = b64url(wire)
+    // The id is fixed at zero over DoH (RFC 8484 §4.1), so the question
+    // section is the only thing that binds a reply to this query.
+    const parse = (buf) => assertAnswersTo(parseAnswers(buf), name, TYPES[typeName])
     let lastErr = null
     let emptyNoerror = null
 
@@ -78,7 +81,7 @@ export class DoHResolver {
       const label = this.odoh.label
       try {
         const { answer, via } = await this.odoh.query(wire)
-        const parsed = parseAnswers(Buffer.from(answer))
+        const parsed = parse(Buffer.from(answer))
         const outcome = `rcode ${parsed.rcode}, ${parsed.answers.length} answers (via relay ${via})`
         if (parsed.rcode === 0 && parsed.answers.length === 0) {
           // Weak empty-NOERROR needs confirmation — but confirming via PLAIN
@@ -89,7 +92,7 @@ export class DoHResolver {
           // of the plain path. Only if the confirmation TRANSPORT fails does
           // plain DoH get involved.
           try {
-            const second = parseAnswers(Buffer.from((await this.odoh.query(wire)).answer))
+            const second = parse(Buffer.from((await this.odoh.query(wire)).answer))
             if (second.rcode === 0 && second.answers.length === 0) {
               this._log(name, typeName, label, `${outcome} — empty confirmed obliviously`)
               second.oblivious = true
@@ -133,7 +136,7 @@ export class DoHResolver {
           outcome = `http ${res.status}`
         } else {
           const body = Buffer.from(await res.arrayBuffer())
-          const parsed = parseAnswers(body)
+          const parsed = parse(body)
           outcome = `rcode ${parsed.rcode}, ${parsed.answers.length} answers`
           if (parsed.rcode === 0 && parsed.answers.length === 0) {
             // NOERROR with nothing in it is a weak answer: a cold or

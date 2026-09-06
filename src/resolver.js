@@ -208,7 +208,9 @@ export class HNSResolver {
     this.timeout = timeout
     // The Optimism endpoints a HIP-5 `_op` delegation is read from, in order
     // (src/hns/hip5-op.js; the user-visible default is config.hnsOptions).
-    // fetchImpl is injected by tests; production uses the global fetch.
+    // fetchImpl is the proxied session fetch in production
+    // (src/protocols/index.js) and a fake in tests; the global-fetch default
+    // in hip5-op.js is for library use only, and it is NOT proxied.
     this.opRpcUrls = opRpcUrls
     this.opTimeout = opTimeout
     this.fetchImpl = fetchImpl

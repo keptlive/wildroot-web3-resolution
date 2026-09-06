@@ -33,8 +33,18 @@ const step = (label, state, source, detail) => ({ label, state, source, ...(deta
  * a signed BEP-46/IPNS record, a hypercore key. For all of them the CONTENT is
  * verified and only the name->content binding depends on the chain, which is
  * why they share one branch and one caveat below.
+ *
+ * Arweave is NOT in this set. An `ar=` pointer names immutable content, but
+ * src/hns/ar.js fetches the bytes from a gateway and does not check them
+ * against the transaction's data_root, so the gateway is trusted the way any
+ * HTTPS host is. The panel says so (ARWEAVE_CONTENT below) instead of
+ * borrowing the content-addressed sentence.
  */
-const CONTENT_ADDRESSED = new Set(['ipfs', 'ipns', 'bittorrent', 'hyper', 'arweave'])
+const CONTENT_ADDRESSED = new Set(['ipfs', 'ipns', 'bittorrent', 'hyper'])
+
+const ARWEAVE_CONTENT = 'The transaction id names immutable content, but the ' +
+  'bytes came from an Arweave gateway and were not checked against the ' +
+  'transaction, so the gateway is trusted the way any HTTPS site is.'
 
 function contentLabel (resolution, id) {
   switch (resolution.kind) {
@@ -44,8 +54,7 @@ function contentLabel (resolution, id) {
       return resolution.mutable
         ? `Torrent, signed by public key ${id}`
         : `Torrent infohash ${id}`
-    case 'hyper': return `Hypercore key ${id}`
-    default: return `Arweave tx ${id}`
+    default: return `Hypercore key ${id}`
   }
 }
 
@@ -86,8 +95,8 @@ export function hnsSteps (host, resolution = {}, extra = {}) {
   //     contract answers for this name; nothing proved the contract's answer,
   //     which was read from a public Optimism RPC with no light client and no
   //     Merkle proof against a block header. So: unverified, in those words —
-  //     the same standing ens:// has, and the reason the lock stays open even
-  //     when the records themselves carry a DANE pin.
+  //     the same standing ens:// has, and the reason the verdict is `partial`
+  //     (TRUSTED, never green) even when the records carry a DANE pin.
   if (resolution.op) {
     steps.push(step('Name records', 'unverified',
       `Optimism registry ${resolution.op.registry}, read via ${resolution.op.rpc || 'a public RPC'}`,
@@ -211,6 +220,14 @@ export function hnsSteps (host, resolution = {}, extra = {}) {
         'The content is intact, but the record saying THIS name points at ' +
         'that content was not chain-verified.'))
     }
+  } else if (resolution.kind === 'arweave') {
+    steps.push(step('Content', 'unverified',
+      `Arweave tx ${resolution.txid}, fetched from a gateway over HTTPS`, ARWEAVE_CONTENT))
+    if (!chain) {
+      steps.push(step('Pointer', 'unverified', 'DoH resolver',
+        'The record saying THIS name points at that transaction was not ' +
+        'chain-verified.'))
+    }
   } else if (resolution.kind === 'site') {
     if (extra.transport === 'https-dane') {
       steps.push(step('Connection', 'verified',
@@ -263,26 +280,97 @@ export function schemeSteps (url, dns = null, bridge = null) {
       ]
     case 'ipfs':
     case 'ipns':
-      return [step('Content', 'verified', `IPFS ${protocol === 'ipfs' ? 'CID' : 'IPNS name'} ${host}`,
-        protocol === 'ipfs'
-          ? 'Content-addressed: the bytes are verified against the CID.'
-          : 'An IPNS name is a signed pointer; the content it names is ' +
-            'CID-verified once fetched.')]
+    case 'ipld':
+      return [step('Content', 'verified', `IPFS ${protocol === 'ipns' ? 'IPNS name' : 'CID'} ${host}`,
+        protocol === 'ipns'
+          ? 'An IPNS name is a signed pointer; the content it names is ' +
+            'CID-verified once fetched.'
+          : protocol === 'ipld'
+            ? 'Content-addressed: each node on the path is verified against its CID.'
+            : 'Content-addressed: the bytes are verified against the CID.')]
+    case 'pubsub':
+      // A topic is a free-form string. The only authentication a message
+      // carries is its publishing peer's libp2p signature, which says who sent
+      // it and nothing about what the topic "should" contain.
+      return [step('Content', 'none', `IPFS pubsub topic ${host}`,
+        'A pubsub topic is not a content address: messages are signed by ' +
+        'whichever peer published them, and anyone may publish to a topic.')]
     case 'hyper':
-    case 'bt':
+      // A hypercore KEY verifies its own feed. A DOTTED host is a DNSLink name,
+      // and the name→key mapping came from a DoH resolver's unsigned answer
+      // (hyper-sdk resolves it itself), which is the ens:// shape: the pointer
+      // is someone's word, the content it names verifies.
+      return host.includes('.')
+        ? [
+            step('Name records', 'unverified', `DNSLink name ${host}, read via a DoH resolver`,
+              'Which hypercore key this name points at was read from a public ' +
+              'DNS resolver and taken on its word — no DNSSEC, no chain proof.'),
+            step('Content', 'verified', 'Key-addressed once resolved',
+              'Whatever key the record named, every block is checked against ' +
+              'that key\'s signatures.')
+          ]
+        : [step('Content', 'verified', `Hypercore key ${host}`,
+            'Key-addressed: every block is checked against the signature of ' +
+            'the key in the address. That proves who wrote it, not that you ' +
+            'were shown the newest version.')]
     case 'ssb':
-      return [step('Content', 'verified', `${protocol} address ${host}`,
-        'Content-addressed or key-addressed: integrity is checked against the ' +
-        'address itself.')]
+      return [step('Content', 'verified', `SSB feed ${host}`,
+        'Key-addressed: every message is checked against the feed key\'s ' +
+        'signature. That proves who wrote it, not that the feed is complete.')]
+    case 'bt':
+    case 'bittorrent':
+      return /^[0-9a-f]{40}$/i.test(host)
+        ? [step('Content', 'verified', `Torrent infohash ${host}`,
+            'Content-addressed: every piece is checked against the infohash, ' +
+            'so the bytes cannot have been altered.')]
+        : [step('Content', 'verified', `Torrent, signed by public key ${host}`,
+            'Key-addressed (BEP 46): the pointer is signed by the key in the ' +
+            'address and the pieces are hash-checked. The key proves who ' +
+            'published it, not that this is the newest version.')]
+    case 'magnet':
+      return [step('Address', 'none', 'Magnet link',
+        'A magnet link is only a pointer to a torrent; nothing loads until ' +
+        'it is added, and the torrent itself is verified against its infohash.')]
     case 'ar':
-      return [step('Content', 'verified', `Arweave transaction ${host}`,
-        'Content-addressed: the bytes are checked against the transaction id.')]
+      return [step('Content', 'unverified',
+        `Arweave transaction ${host}, fetched from a gateway over HTTPS`, ARWEAVE_CONTENT)]
+    case 'gemini':
+      // The Gemini client connects with certificate verification off and keeps
+      // no record of the certificates it has seen, so there is no TOFU pin to
+      // compare against. Encrypted, and that is all.
+      return [step('Connection', 'unverified', 'Gemini over TLS, certificate not verified',
+        'Encrypted in transit, but the server\'s certificate is neither ' +
+        'checked against an authority nor remembered from a previous visit, ' +
+        'so nothing establishes who answered.')]
+    case 'nostr':
+      // The mirror image of the `ens` case below. There the pointer is
+      // unverified and the content is content-addressed; here the OBJECT is
+      // proven — id recomputed and BIP-340 signature checked in this process
+      // (src/protocols/nostr/event.js) — and what cannot be proven is the
+      // ANSWER SET. A relay can withhold, and nothing signs "these are all the
+      // events". So the lock never closes green.
+      return [
+        step('Authorship', 'verified', 'Schnorr signature (BIP-340) checked in this browser',
+          'Every event on this page had its id recomputed from its own ' +
+          'contents and its signature checked here. A relay cannot alter or ' +
+          'forge one.'),
+        step('Completeness', 'unverified', 'Whichever relays answered',
+          'Relays can withhold events, and there is no way to prove you were ' +
+          'shown all of them — or the newest one. The page lists which relays ' +
+          'answered.')
+      ]
+    case 'did':
+      return [step('Identifier', 'unverified', 'DID document fetched over HTTPS',
+        'This identifier was looked up at a directory (did:plc) or on the ' +
+        'domain it names (did:web). The document is checked to be about the ' +
+        'identifier asked for, but for did:plc the operation log that would ' +
+        'prove it was not audited — so this is that server\'s word.')]
     case 'ens':
       // The bytes ARE content-addressed once fetched. What is not verified is
       // the mapping — which contenthash this name points at — read from a
       // public Ethereum RPC with no light client and no proof against a block
       // header. src/protocols/ens-protocol.js already marks its responses
-      // `ens-rpc-unverified` and keeps the lock open for exactly this reason;
+      // `ens-rpc-unverified` and stays TRUSTED (never green) for this reason;
       // without a case here the panel fell through to "this browser has no
       // verification path for this scheme", which is both wrong and silent
       // about the one hop that actually needs saying. The `_op` route says the
@@ -351,6 +439,30 @@ function icannNameStep (host, dns, bridge = null) {
       'ciphertext, the target saw the question and only the relay. Neither ' +
       'alone can link you to this site. The ANSWER is still the resolver\'s ' +
       'word — that is what "not verified" means here.')
+  }
+  if (dns && dns.oblivious) {
+    // The bridge is the ONLY resolver the engine was given, and it did not
+    // answer this name. In `secure` mode nothing else could have; in
+    // `automatic` mode the engine may have fallen back to system DNS in the
+    // clear, and there is no way to tell from here which it was. Say that,
+    // rather than naming a pool the engine no longer has.
+    return step('Domain name', 'unverified',
+      mode === 'secure'
+        ? 'Oblivious bridge only — this name was not answered by it'
+        : 'Resolver not determined — the oblivious bridge did not answer this name',
+      mode === 'secure'
+        ? `${host} could only have been resolved through the oblivious bridge ` +
+          '(unencrypted DNS is refused), but the bridge has no record of ' +
+          'answering it — the answer may have come from the engine\'s cache.'
+        : `${host} was not resolved by the oblivious bridge, which is the only ` +
+          'encrypted resolver the engine was given. In automatic mode the ' +
+          'engine falls back to unencrypted system DNS when that fails, so ' +
+          'this lookup may have gone out in the clear.')
+  }
+  if (dns && dns.failClosed) {
+    return step('Domain name', 'failed', 'Secure DNS with no server — lookups refused',
+      `dns.mode is "secure" and no resolver is configured, so ${host} could ` +
+      'not be looked up at all. Unencrypted DNS was refused rather than used.')
   }
   if (!servers.length || mode === 'off') {
     return step('Domain name', 'unverified', 'System DNS, unencrypted',

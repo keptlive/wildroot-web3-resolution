@@ -1,187 +1,164 @@
-# Handshake name resolution — a specification
+# Web3 name resolution — a specification
 
-**Version:** 0.1 (draft for public comment)
+**Version:** 0.2 (draft for public comment)
 **Status:** Describes the behaviour of the reference implementation in this
 repository, which ships in the Wildroot browser. Not endorsed by any standards
-body. Normative statements below describe what an implementation
-must do *to interoperate with this one*; where they are inherited from an
-existing standard, that standard is cited and its rule governs.
-**Licence:** CC-BY-4.0 (see `LICENSE-SPEC`). The reference implementation is
-licensed separately.
+body. Normative statements describe what an implementation must do *to
+interoperate with this one*; where they are inherited from an existing
+standard, that standard is cited and its rule governs. One chapter (Chapter 10)
+is marked **experimental** and says what that means.
+**Licence:** CC-BY-4.0 (`LICENSE-SPEC`). The reference implementation is
+licensed separately (Apache-2.0, `LICENSE`).
 
-The reference implementation is in `src/`, its tests in `tests/`. Every
-deviation from a cited standard, and every question we are unsure of, is in
-`DEVIATIONS.md`. Every standard cited is listed with its purpose in
-`REFERENCES.md`. **Those two files are part of this specification, not
-appendices to it.**
-
----
-
-## Contents
-
-1. [What this specifies, and why it exists](#1-what-this-specifies-and-why-it-exists) — including [**scope**](#11-scope)
-2. [Terminology](#2-terminology)
-3. [Namespace selection](#3-namespace-selection)
-4. [Trust states](#4-trust-states)
-5. [The `hns://` URL form](#5-the-hns-url-form)
-6. [The resolution algorithm](#6-the-resolution-algorithm)
-7. [HIP-5 `_op`: on-chain resolution](#7-hip-5-_op-on-chain-resolution)
-8. [DANE for HTTPS](#8-dane-for-https)
-9. [Transport: DoH and Oblivious DoH](#9-transport-doh-and-oblivious-doh)
-10. [Content pointers](#10-content-pointers)
-11. [Security considerations](#11-security-considerations)
+This document is the **spine**. Part I is the model every namespace shares.
+Part II is namespace selection — the one decision made before any resolution.
+Part III is one chapter per namespace; each chapter is its own file under
+`namespaces/<ns>/SPEC.md`, and each is normative for its namespace. Every
+deviation from a cited standard, every open question and every open design
+decision is in `DEVIATIONS.md`; every standard cited is in `REFERENCES.md`,
+with what it is used for; every place where privacy and speed pull apart is in
+`DIVERGENCE.md`. **Those files are part of this specification, not appendices
+to it.**
 
 Key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT** and **MAY** are
 used as in RFC 2119 / RFC 8174.
 
 ---
 
+## Contents
+
+**Part I — The shared model**
+1. [What this specifies, and why it exists](#1-what-this-specifies-and-why-it-exists)
+2. [Terminology](#2-terminology)
+3. [The two laws](#3-the-two-laws)
+4. [Trust states](#4-trust-states)
+
+**Part II — Namespace selection**
+5. [The scheme registry](#5-the-scheme-registry)
+6. [Classification of bare input](#6-classification-of-bare-input)
+7. [Dispatch and failure](#7-dispatch-and-failure)
+
+**Part III — The namespaces**
+- [Chapter 1 — Handshake](namespaces/handshake/SPEC.md)
+- [Chapter 2 — ICANN names](namespaces/icann/SPEC.md)
+- [Chapter 3 — IPFS, IPNS and DNSLink](namespaces/ipfs/SPEC.md)
+- [Chapter 4 — Arweave](namespaces/arweave/SPEC.md)
+- [Chapter 5 — ENS and `web3://`](namespaces/ens/SPEC.md)
+- [Chapter 6 — Nostr](namespaces/nostr/SPEC.md)
+- [Chapter 7 — DID, AT Protocol and ActivityPub](namespaces/did/SPEC.md)
+- [Chapter 8 — Tor](namespaces/tor/SPEC.md)
+- [Chapter 9 — Key-addressed namespaces: hyper, SSB, Gemini, BitTorrent](namespaces/keys/SPEC.md)
+- [Chapter 10 — Experimental: HIP-5 `_op` on-chain resolution, and numeric Handshake TLDs](namespaces/experimental/SPEC.md)
+- [Chapter 11 — Native applications on a Handshake name](namespaces/apps/SPEC.md)
+
+The full text of Part II, with its own security considerations and conformance
+section, is [`namespaces/router/SPEC.md`](namespaces/router/SPEC.md); §§5–7
+below are the normative summary.
+
+---
+
+# Part I — The shared model
+
 ## 1. What this specifies, and why it exists
 
-Handshake replaces the ICANN root zone with a blockchain. A name's records —
-its nameservers, its glue, and critically its **DS record** — are committed in
-an authenticated tree whose root is in a block header. A client with a header
-chain can therefore prove, without asking anybody's permission and without
-trusting any resolver, what a top-level name's records are.
+A browser that resolves more than one naming system has a problem the single
+system never had: an address has to be assigned to exactly one system before
+anything else can happen, the systems have different roots of trust, and a
+failure in one must not quietly become a lookup in another. Handshake names are
+proven from a chain; ICANN names come from a resolver; a CID proves its own
+bytes; an ENS name is an RPC endpoint's word; an onion address must never be
+seen by a DNS server at all. A browser that blurs those together — by falling
+back from one to the next, or by drawing one padlock for all of them — is
+making claims it cannot support.
 
-Almost no client does this. The usual Handshake browser or extension asks a
-DNS-over-HTTPS resolver that happens to understand Handshake names, which
-means the entire chain guarantee is replaced by "hnsdoh.com said so". That is a
-reasonable engineering choice and a poor security story, and it is worth being
-explicit that it is *the same trust model as ordinary DNS with a different
-operator*.
+This specification does three things.
 
-This document specifies the other thing: resolution that starts from a chain
-proof, carries a DNSSEC validation anchored to the **on-chain DS** rather than
-to the ICANN root, pins TLS with DANE because no CA can issue for a Handshake
-name, fails closed on every unproven step, and reports honestly — in a form a
-user interface can render — which parts of the answer were proven and which
-were taken on somebody's word.
-
-It also specifies the awkward parts: what a URL for such a name looks like when
-the WHATWG URL parser refuses to accept it (§5), and what happens when the chain
-delegates a name to a smart contract instead of a nameserver (§7).
+1. **It chooses one namespace for every input, once** (Part II). The scheme, if
+   there is one, decides. Without one, a fixed classification order decides,
+   and the decision is final: there is no "try Handshake, and if that fails,
+   try DNS".
+2. **It specifies each namespace's resolution** (Part III): the address grammar,
+   the algorithm, what is verified in this process and what is trusted, and
+   the failure modes — each in the namespace's own terms and against the
+   standards that define it.
+3. **It makes the trust state a first-class output** (§4). Every resolution
+   yields an ordered list of steps, each saying what was checked and *who told
+   us*. An interface is given that list, not a boolean, and three lock states
+   — trustless, trusted, open — are distinguished because the second one is
+   what the ordinary web is, and rendering it like the first is a lie.
 
 ### 1.1 Scope
 
-**In scope: Handshake name resolution, and only that.** Precisely: how a
-Handshake name becomes an *answer*, where an answer is one of
+**In scope:** everything between an address and an answer. Which namespace an
+input belongs to; the grammar of each address form; the resolution algorithm of
+each namespace; what is cryptographically verified in this process and what is
+taken on somebody's word; how a failure is reported without becoming a lookup
+in another namespace; the transport a lookup travels over and what that
+transport discloses.
 
-- an **address** (with the trust facts that go with it),
-- a **content pointer** — `ipfs=`, `ipns=`, `ar=`, or an EIP-1577 contenthash —
-  as a parsed record, not as fetched bytes,
-- a **DANE pin** (a TLSA record) to be applied to the TLS handshake, or
-- a **failure**, distinguished by kind (§6.9),
+**Out of scope:** content transport (fetching and rendering bytes once a name
+has resolved — the chapters state what is and is not *verified* about those
+bytes, never how they are fetched); publishing (how a record gets into a zone,
+a registry or a relay); the trust user interface (this document specifies the
+model an interface is given and the claims it must not make, not a rendering);
+and the composition layer that wires these modules to a session, a proxy and a
+window (each chapter specifies its policy normatively).
 
-together with the **trust state** that says which parts of that answer were
-proven and which were taken on somebody's word (§4).
-
-The mechanisms in scope are the ones that produce those answers: the chain
-proof via an SPV node, DNSSEC validation anchored to the on-chain DS, DANE,
-HIP-5 `_op`, the DoH and Oblivious DoH transports, and the `hns://` URL form.
-
-**Out of scope, explicitly.** A browser that resolves Handshake names generally
-resolves other things too and has to fetch something at the end. None of that
-is specified here:
-
-| Out of scope | Why it is a different document |
-|---|---|
-| **Fetching content once a pointer is resolved** — IPFS, Arweave, Hyper, BitTorrent: retrieval, verification of the retrieved bytes, rendering, caching, privilege | This specification ends at the pointer. What a pointer *guarantees* is stated in §10 because it changes the trust state; how bytes are obtained does not. |
-| **Other naming systems** — ENS (`.eth`), Nostr, AT Protocol / DID, Tor `.onion`, Gemini, SSB, and the ordinary ICANN DNS path | Each has its own trust model and its own document. This one says only which names are *not* Handshake names and must be routed elsewhere (§3). |
-| **The user interface** — the padlock, the security panel, the address bar | §4 specifies the *model* an interface must be given and the claims it must not make. It does not specify a rendering. |
-| **Publishing** — how a record gets into a zone, who may write it, what a publish must invalidate | The read path and the write path are different problems with different threat models. |
-| **Handshake itself** — consensus, the auction, hsd's internals, the Urkel tree | Cited (REFERENCES §8), not restated. §11.5 states what an implementation may conclude from a proof, which is the only part a resolver needs. |
-
-A consequence worth stating plainly: an implementation of this specification is
-a **resolver**, not a browser. It answers "what does this name mean, and how
-sure are we?" and stops there.
-
-**Non-goals** beyond scope: this document does not attempt to be a general
-alt-naming specification, and does not describe a resolution router for
-multiple namespaces beyond the single rule of §3 that decides whether a name is
-Handshake's at all.
-
----
+An implementation of this specification is a **resolver**, not a browser. It
+answers "what does this address mean, and how sure are we?" and stops there.
 
 ## 2. Terminology
 
-DNS terms are used as defined in **RFC 8499**: *authoritative server*, *zone*,
-*zone cut*, *delegation*, *referral*, *NODATA*, *bailiwick*, *validating
-resolver*, *secure*/*insecure*/*bogus*, *insecure delegation*, *closest
-encloser*, *source of synthesis*. Where this document uses one of those words
-it means what RFC 8499 says it means.
+- **Namespace** — a distinct address space with its own root of trust. Two
+  schemes may share one namespace (`ipfs://`, `ipns://`, `ipld://` and
+  `pubsub://` are all IPFS). Failures never cross a namespace boundary (§3).
+- **Scheme** — the token before the first `:` of an explicit URL. The registry
+  (§5) maps every scheme this implementation dispatches to exactly one
+  namespace.
+- **Classification** — the assignment of a scheme-less input to one namespace
+  (§6).
+- **Dispatch** — handing a request to the one handler its scheme names (§7).
+- **Resolution** — a namespace's own process from address to answer; each
+  chapter defines its answers and their kinds.
+- **Trust step** / **trust state** — §4.
+- **Content-addressed** — an address that names bytes by a hash of them (a
+  CID, an infohash), so that the bytes verify themselves. **Key-addressed** —
+  an address that names a signing key (a hypercore key, an SSB feed, a BEP-46
+  key, a Nostr key), so that a signature proves *who wrote* the content but
+  nothing proves it is the *newest*. The distinction matters to §4 and is
+  drawn in Chapter 9 §K.3.
+- DNS terms are used as defined in **RFC 8499**; DNSSEC validation states are
+  those of **RFC 4033 §5** (Chapter 1 §2 states the mapping this document
+  makes).
 
-DNSSEC validation states are those of **RFC 4033 §5**. Note the mapping this
-specification makes:
+## 3. The two laws
 
-| RFC 4033 state | Here |
-|---|---|
-| Secure | the answer validated to the on-chain DS anchor |
-| Insecure | the zone has **no** DS *and the absence was proven* (§6.6) |
-| Bogus | any validation failure — **the resolution fails**, §11.1 |
-| Indeterminate | does not arise: the anchor is either on the chain or it is not |
+Everything in Part II, and the boundaries of every chapter, follow from two
+rules, which an implementation **MUST** hold structurally — in the one place
+that routes — rather than as a convention each handler is trusted to keep.
 
-Terms specific to this document:
+**L1 — An explicit scheme selects the protocol, always.** `ipfs://vitalik.eth`
+is an IPFS request whose host happens to look like an ENS name; it goes to the
+IPFS handler and nothing re-sniffs it. An unknown scheme is preserved as itself
+and fails as itself (§7); it is never reinterpreted as a host, a domain or a
+search. Content is never sniffed to override a scheme.
 
-- **Chain resource** — the record set committed on the Handshake chain for a
-  top-level name. It may contain `NS`, `GLUE4`/`GLUE6`, `SYNTH4`/`SYNTH6`, `DS`
-  and `TXT` records.
-- **Chain proof** — an Urkel tree inclusion (or exclusion) proof for a name,
-  verified against a tree root committed in a block header on the most-work
-  header chain the client has verified. See §11.5 for exactly what this does
-  and does not establish.
-- **On-chain DS anchor** — a `DS` record in the chain resource. It plays the
-  role the ICANN root's trust anchor plays in ordinary DNSSEC, with the
-  difference that it is *proven*, not configured.
-- **Authoritative walk** — the sequence of queries to authoritative servers
-  that follows the chain proof. It is a walk, not a single query, because a
-  registry TLD refers rather than answers (§6.5).
-- **Content pointer** — a `TXT` record, or an EIP-1577 contenthash, naming
-  content by a self-authenticating address (`ipfs=`, `ipns=`, `ar=`, …).
-- **Trust state** — the four-valued per-step verdict of §4.
-- **Resolution kind** — the discriminant of a resolution result (§6.9).
+**L2 — No silent cross-namespace fallback.** A failure in one namespace
+surfaces as *that* namespace's failure. A Handshake name that does not resolve
+is not looked up in ICANN's DNS; an ENS name with no record is not looked up as
+a Handshake name (whoever holds the Handshake TLD `eth` does not receive ENS
+traffic); an onion address is never sent to a resolver, valid or not. RFC 9498
+§9.10 states the same rule for GNS — resolve in the alternative namespace when
+its suffix matches and do not continue into DNS on failure — and this document
+adopts it for every namespace it dispatches.
 
----
-
-## 3. Namespace selection
-
-Before any resolution, an implementation MUST decide which namespace a name
-belongs to. This specification adopts the rule of **RFC 9498 §9.10** (stated
-there for GNS, and the only place it is written down in an RFC): resolve in the
-alternative namespace when its suffix matches, and **MUST NOT** continue into
-DNS when that resolution fails.
-
-The order is:
-
-1. **Special-use names are never Handshake names.** A host whose final label is
-   one of the labels reserved by RFC 6761 (`localhost`, `invalid`, `test`,
-   `example`), RFC 6762 (`local`), RFC 7686 (`onion`), or RFC 8375 and adjacent
-   practice (`arpa`, `internal`, `home`, `lan`, `corp`, `intranet`, `private`)
-   MUST be routed to the mechanism that owns it, and MUST NOT be sent to a
-   Handshake resolver. This is not politeness: without it, every NAS, printer
-   and internal service name on a user's network is disclosed to whoever
-   registers the Handshake top-level name `local`, who can then answer for it.
-
-2. **ICANN first.** A host whose final label is a delegated ICANN top-level
-   domain is an ICANN domain and MUST be resolved through the ordinary DNS.
-
-3. **Everything else is Handshake.** Any other final label — including
-   alt-root labels claimed by other systems (`.crypto`, `.sol`, `.bnb`) and
-   including all-numeric labels — is a Handshake name.
-
-Rule 2 is a deliberate deviation from Handshake's own model, in which ICANN
-labels are reserved and claimable and a claimed one would make the chain
-authoritative. See `DEVIATIONS.md` D-16 for why, and for the consequences of
-rule 3.
-
-An implementation MUST apply the same rule on every path that classifies a host
-(address bar, link click, `http→hns` rewrite, subresource load). Ours does not
-yet — see D-14.
-
-An internationalized host MUST be converted to A-labels before comparison and
-before resolution (D-17 records what our conversion actually is).
-
----
+Two things are **not** breaches of L2 and are called out so nobody mistakes
+them for one. A **search** for a scheme-less input that classifies to no
+namespace (§6) is not a fallback: no protocol was named, so there is nothing to
+fall back *from*. A **transport downgrade inside one namespace** — Chapter 1's
+retry of a failed chain lookup over DoH, resolving the same Handshake name in
+the same namespace with a weaker trust state that is reported — is not a
+fallback either: L2 governs a named protocol failing into another.
 
 ## 4. Trust states
 
@@ -192,825 +169,215 @@ states:
 | State | Meaning |
 |---|---|
 | `verified` | checked cryptographically, in this process, in this resolution |
-| `unverified` | taken on somebody's word — a resolver, a CA, an RPC endpoint, the network |
+| `unverified` | taken on somebody's word — a resolver, a CA, an RPC endpoint, a directory, a relay, a gateway, the network |
 | `failed` | checked and did not pass |
 | `none` | does not apply, or is absent and *known* to be absent |
 
 An implementation **MUST** expose these steps, or an equivalent, to the user
 interface, and **MUST NOT** collapse them into a single boolean before the user
-sees them. The reason is concrete: "chain-verified, DANE pinned" hides whether
-the *pin itself* was proven, and a lock that cannot explain itself is
-decoration.
+sees them. Each chapter specifies the steps its namespace produces; the shared
+rules are these.
 
-The steps a Handshake resolution produces, in order, are:
-
-1. **Handshake name** — `verified` when the records came from a chain proof;
-   `unverified` when they came from a DoH resolver (which MUST be named, and
-   which MUST be distinguished from an oblivious lookup — §9.2).
-2. **Name records** — present only on the `_op` route (§7). Always
-   `unverified`, naming the registry contract and the RPC endpoint.
-3. **Zone records** — the authoritative hop. `verified` only if step 4 is
-   `verified`; a nameserver's unsigned answer is `unverified` however the
-   nameserver was found.
-4. **DNSSEC** — `verified` when the answer validated to the on-chain DS anchor;
-   `none` when the zone provably has no DS (an insecure delegation, §6.6);
-   `failed` otherwise, in which case the resolution has already failed.
-5. **Connection** — `verified` when a DANE pin matched the presented
-   certificate; `none` when the zone *proved* it publishes no pin and the
-   connection is therefore plaintext; `unverified` when the pin came from a DoH
-   resolver (§9.1); `failed` on a mismatch.
-6. **Content** — `verified` for a content pointer whose bytes authenticate
-   themselves against the pointer (§10).
+- A step is `verified` only for a check performed in this process during this
+  resolution: a chain proof verified against headers this client checked, a
+  signature verified against a key the address names, bytes hashed against the
+  address they were requested by. Anything read from a server, an endpoint or
+  a relay and believed is `unverified`, however reputable the source and
+  however encrypted the transport.
+- **Under-claiming is as misleading as over-claiming.** A scheme with a real
+  verification story (a CID, a Nostr signature) MUST NOT fall through to "no
+  verification path"; a scheme with none (a gateway's bytes, a directory's
+  document) MUST NOT borrow a content-addressed sentence.
+- The source of an `unverified` step MUST be named (which resolver, which RPC,
+  which relay set, which gateway), and an oblivious lookup MUST be
+  distinguished from a plain one, so that the interface can say who saw the
+  question.
 
 ### 4.1 Aggregating to a lock
 
 An implementation that shows a single indicator SHOULD distinguish **three**
 states, not two:
 
-- **TRUSTLESS** (closed, and marked as such): every step is `verified` or
-  `none`. Nobody was believed. A chain-proven name resolving to a content
-  pointer, or to an address with a matched DANE pin under a validated zone, is
-  in this state.
-- **TRUSTED** (closed, but not trustless): the connection is confidential and
-  authenticated, but at least one step is `unverified` — a CA vouched for it, a
-  DoH resolver supplied the pin, an RPC endpoint supplied the record. **This is
-  what an ordinary `https://` page is**, and an indicator that renders it
-  identically to the state above is lying by omission.
-- **OPEN**: any step `failed`, or the connection is plaintext.
+- **TRUSTLESS** (closed, and marked as such — the "verified" verdict): every
+  step is `verified` or `none`. Nobody was believed. A chain-proven Handshake
+  name resolving to a content pointer, or to an address with a matched DANE
+  pin under a validated zone; an `ipfs://` CID; a `hyper://` key.
+- **TRUSTED** (closed, but not trustless — the "partial" verdict): the
+  transport is confidential and authenticated, but at least one step is
+  `unverified`. **This is what an ordinary `https://` page is**, and it is
+  where `ens://`, `ar://`, `did:`, `nostr:`, a DNSLink-resolved `hyper://` name
+  and Chapter 10's `_op` resolution sit. An indicator that renders this state
+  identically to the one above is lying by omission.
+- **OPEN**: a step `failed`, or the connection itself carries no protection (a
+  `Connection` step of `none`: plain HTTP, an onion service's HTTP inside the
+  tunnel is reported as `unverified`, not `none`).
 
-A `failed` step MUST NOT aggregate to a closed lock. Where an implementation's
-presentation layer can render `partial` in the same colour as `trustless`, that
-is a bug in the presentation layer and should be pinned by a test.
-
----
-
-## 5. The `hns://` URL form
-
-```
-hns://<host>[:<port>]/<path>[?<query>][#<fragment>]
-```
-
-`hns:` SHOULD be registered as a **standard** (special) URL scheme. That is
-what gives a Handshake site a real web origin — `fetch`, service workers,
-same-origin policy, secure-context features — rather than an opaque-origin
-sandbox. In Electron this is
-`protocol.registerSchemesAsPrivileged({ scheme: 'hns', privileges: { standard: true, secure: true, ... } })`.
-
-Registering it as standard has one consequence that this section exists for.
-
-### 5.1 The numeric-TLD problem
-
-A standard scheme's host is parsed by the [WHATWG URL host
-parser](https://url.spec.whatwg.org/#host-parsing). That parser runs the
-["ends in a number" checker](https://url.spec.whatwg.org/#ends-in-a-number-checker),
-which returns true when the host's last label is non-empty and contains only
-ASCII digits, and then parses the host as an
-[IPv4 address](https://url.spec.whatwg.org/#concept-ipv4-parser).
-
-A Handshake top-level name may legitimately be all digits. Therefore:
-
-```
-hns://14898/          canonicalises to hns://0.0.58.50/
-hns://hello.14898/    is not a valid URL at all
-```
-
-This is not an implementation quirk. `new URL('http://hello.14898')` throws in
-every conforming browser for the same reason. Every name under such a top-level
-name is unlinkable, untypeable and unnavigable as written.
-
-### 5.2 The convention — PROVISIONAL
-
-> **This subsection is provisional. It describes a convention invented for this
-> implementation. It has no standing anywhere else, and we are not confident it
-> is the right long-term answer. If a different convention gains traction we
-> would rather adopt it than defend this one. See `DEVIATIONS.md` §2.1 for the
-> alternatives considered and rejected.**
-
-In an `hns://` URL, a **final** label consisting entirely of ASCII digits is
-written with a single leading `_`:
-
-| Handshake name | URL form |
-|---|---|
-| `14898` | `hns://_14898/` |
-| `hello.14898` | `hns://hello._14898/` |
-| `hello.world` | `hns://hello.world/` (unchanged) |
-
-An implementation following this convention:
-
-- **MUST** apply the marker only to the final label. Non-final labels are
-  written as they are, and a `_` on a non-final label is not a marker (DNS
-  owner names inside a Handshake zone routinely begin with `_` —
-  `_443._tcp.…`, `_dnslink.…` — and those are not affected because they are
-  never the final label).
-- **MUST** strip the marker before the name is used for resolution, for a
-  chain lookup, or for any comparison against a name as registered.
-- **MUST** apply the marker when constructing a URL from a name, including
-  from user input in an address bar, *before* any IDNA/punycode pass — because
-  the URL constructor throws on the unmarked form and so cannot be used to
-  perform that pass.
-- **SHOULD** display the unmarked form wherever a URL is shown to a person
-  rather than navigated.
-- **SHOULD** rewrite an incoming unmarked link (`hns://hello.14898/…`, which a
-  third party may reasonably have written) to the marked form before
-  navigating, since the browser will otherwise refuse it before any handler
-  runs.
-
-`_` is chosen because a Handshake label is `[a-z0-9-]` and can never contain
-one, so the decoding is unambiguous and cannot collide with a real name; and
-because `_` is not a
-[forbidden host code point](https://url.spec.whatwg.org/#forbidden-host-code-point),
-so the marked host parses in every browser.
+The rule is the weakest link: a `failed` step MUST NOT aggregate to a closed
+lock; a single `unverified` step MUST NOT aggregate to trustless. The reference
+implementation's aggregation is `summarize()` in `src/trust-path.js`, and its
+verdicts for every scheme are pinned by `tests/lock-semantics.test.js`.
 
 ---
 
-## 6. The resolution algorithm
-
-Input: a lowercased host with any trailing dot removed, already classified as a
-Handshake name by §3. Output: a **resolution** (§6.9) and a list of trust steps
-(§4).
-
-Throughout: `tld` is the final label of the host, and `host === tld` is the
-apex case.
-
-### 6.1 Step 1 — the chain resource
-
-Fetch the chain resource for `tld` and its inclusion/exclusion proof, and
-verify the proof against the header chain.
-
-Three outcomes must be told apart, and conflating any two of them is a
-user-visible defect:
-
-| Outcome | Result |
-|---|---|
-| a proven record set | continue |
-| the chain answered, and there is nothing for this name | `unregistered` |
-| we could not ask the chain at all (node down, not synced) | `unreachable` |
-
-An implementation **MUST NOT** report the third case as the second. "There is
-no name *alice.w3*", stated with confidence about a name that exists, because a
-local daemon was not running, is the worst failure a naming system can produce.
-
-### 6.2 Step 2 — decisions made from the chain resource alone
-
-Before any server is contacted:
-
-- **Apex content pointer.** If `host === tld`, the resource carries a content
-  pointer (§10), and it carries **no** `NS` record, return that pointer. (The
-  `NS` condition matters: a zone with a nameserver can be asked for a TLSA
-  record and this branch cannot, so the nameserver is the better source.)
-- **Unsupported anchor.** If the resource carries `DS` records and **none** of
-  them uses a supported algorithm and digest (§6.7), fail immediately with
-  `dnssec-unsupported`. No nameserver answer could change the outcome, and
-  reporting this as a validation failure would tell the user somebody is
-  tampering with a zone that has merely chosen an algorithm we do not
-  implement.
-- **`SYNTH4` apex.** If `host === tld`, the resource has a `SYNTH4` address and
-  no `NS` record, the address is a chain-attested address for the name itself.
-  It MUST pass the address guard of §11.2. Plaintext to it is permitted:
-  consensus attests the address, which is a stronger source than an off-chain
-  `A` record, and there is no zone to ask for a pin. An implementation **MUST
-  NOT** apply this branch to a name *below* the apex — serving the top-level
-  name's own address for every name under it is a total compromise of a
-  registry TLD.
-
-### 6.3 Step 3 — the `_op` route
-
-If `host !== tld` and the resource carries a well-formed `0x<40 hex>._op.` `NS`
-record, attempt the HIP-5 route of §7 **first**, before any nameserver is
-contacted. It is the trust-minimised route: the chain itself names the
-answering party, and no machine belonging to the top-level name's owner gets to
-answer for a name that owner has sold.
-
-Every `._op.` target, well-formed or not, **MUST** be removed from the list of
-nameservers offered to step 4. Nothing under that pseudo-TLD is a host.
-
-### 6.4 Step 4 — finding the authoritative server
-
-From the chain resource's `NS` records, in order, find an address for each
-until one yields a usable server:
-
-1. `GLUE4` in the chain resource matching that nameserver host;
-2. otherwise **the chain**: take the nameserver host's own final label, fetch
-   *its* chain resource, and read its glue or `SYNTH4`, or make one query to
-   its own nameservers. This step is bounded to **one level** — a nameserver
-   whose address needs a nameserver whose address needs a nameserver is a loop
-   waiting to happen, and no legitimate zone requires it. It is also not an
-   optimisation: `pinner.hns` delegates to `ns1.lumeweb`, a host that exists
-   only on Handshake. Without this step, every name sold under such a registry
-   resolves as `unregistered`.
-3. otherwise the operating system's resolver (an ICANN nameserver host).
-
-Chain before OS is the correct precedence and is what hsd's own resolver does:
-the Handshake root is authoritative for any name registered on it, and a
-top-level name with no chain records — which today is every ICANN TLD — is the
-only case that falls through.
-
-Every address obtained here **MUST** pass §11.2 before a query is sent to it. A
-query to `127.0.0.1:53` is server-side request forgery just as much as an HTTP
-fetch is.
-
-If the chain resource carries no `NS` records at all: if `host === tld` and
-there is a content pointer, return it; otherwise `unregistered`. In particular
-an implementation **MUST NOT** answer a *sub*-name from the top-level name's own
-chain resource.
-
-### 6.5 Step 5 — the authoritative walk
-
-The remainder is a re-entrant step over a delegation chain, not a single query.
-A registry top-level name holds none of the names it sells: asked about
-`maya.persist`, its server returns a **referral**.
-
-The walk carries a context: the zone currently authoritative for the question,
-the server that answers for it, and the DS records that anchor that zone's
-keys — the on-chain DS at the top, and at each level below, the DS the parent
-published *and this client verified*. Depth is bounded (3 in the reference
-implementation).
-
-For each zone:
-
-**a. Anchor.** If the context has DS records, this zone is signed and every
-record the resolution rests on MUST validate up to them. Fetch the zone's
-`DNSKEY` RRset **once** per resolution and reuse it. If none of the DS records
-uses a supported algorithm, fail `dnssec-unsupported` (not a validation
-failure — say the true thing).
-
-**b. Pointer query.** Query `TXT` for `host` with DO=1.
-
-**c. Referral check.** RFC 1034 §4.3.2: if the reply has an empty ANSWER
-section and the AUTHORITY section contains `NS` records **and no `SOA`**, this
-is a referral, not an answer. Detecting it from the `TXT` reply already made,
-rather than a speculative `NS` query, costs an ordinary name nothing. A
-referral out of bailiwick (sideways or upward) MUST be refused. Then descend
-(§6.6) and re-enter.
-
-**d. Pointer.** If the `TXT` answer yields a content pointer (§10):
-  - on a **signed** zone, the RRset MUST validate to the anchor, including the
-    wildcard proof of RFC 4035 §5.3.4 if it was wildcard-expanded. A signed
-    zone whose pointer does not validate is an attack or a broken zone; fail
-    closed.
-  - return the pointer.
-
-**e. Proven absence of a pointer.** If the `TXT` answer is **empty** and the
-zone is signed, the absence MUST be proven (NSEC/NSEC3 NODATA or NXDOMAIN,
-§6.7) *before* the algorithm moves on to the address. Without this, an on-path
-party who merely withholds the `ipfs=` record walks the browser from a
-content-addressed site down to an address. A `TXT` that exists and is not a
-pointer (SPF, a verification token) is an ordinary non-answer and needs no
-proof.
-
-**f. Address.** Query `A` for `host` with DO=1. On a signed zone the `A` RRset
-MUST validate to the anchor, wildcard proof included. (This is not optional
-hardening. An unvalidated address beside the zone's own honest proof of "no
-TLSA" is a complete plaintext downgrade to a forged address, with the trust
-panel reporting the zone as anchored — so the most protected configuration a
-zone can publish becomes the easiest one to redirect; §11.3 rung 1.) A `CNAME`
-to an ICANN host MAY be followed through the
-system resolver; the target's address is then ICANN's word and the resolution
-MUST be reported as unvalidated. See D-11 for CNAME *within* a signed zone.
-
-On a signed zone a `CNAME` in the reply **MUST NOT** be followed until the
-`CNAME` RRset itself validates to the anchor, with the §5.3.4 wildcard proof
-where the answer was wildcard-expanded. Its canonical RDATA is the target name,
-lowercased, in wire form (RFC 4034 §6.2). An unsigned or invalid `CNAME` on a
-signed zone is a validation failure, not an unvalidated answer.
-
-No separate proof of the `A` RRset's absence is required alongside it: **RFC
-1034 §3.6.2** — a CNAME stands alone, and a name that owns one owns no other
-data — so a *validated* `CNAME` is the zone's own signed statement that no `A`
-exists at that name. Requiring an NSEC on top would demand a proof the zone has
-no reason to produce.
-
-A `CNAME` that is followed without this check is a fail-open on the most
-protected configuration a zone can have: strip the signed `A`, inject a `CNAME`,
-and the zone's own honest proof of "no TLSA" completes a plaintext redirect to
-an attacker-chosen host. `DEVIATIONS.md` D-11 records what is still not
-validated beyond this point.
-
-The address MUST pass §11.2.
-
-**g. Pin.** Query `TLSA` at `_443._tcp.<host>` (D-7 on the fixed port). Three
-outcomes, which MUST be told apart:
-
-| | |
-|---|---|
-| records present | HTTPS with a DANE pin (§8) |
-| **authenticated** NODATA | the zone declares it publishes no pin — plaintext permitted |
-| lookup error or timeout | **unknown** — refuse; do not downgrade |
-
-On a signed zone the NODATA MUST be proven. "No answer" is forgeable by anyone
-on the cleartext DNS path, and treating it as "no pin" is the downgrade this
-whole design exists to prevent.
-
-### 6.6 Descending a zone cut
-
-When following a referral to a child zone, before anything the child says is
-believed:
-
-- **Secure delegation:** the parent's `DS` RRset for the child must be present
-  and must validate under the parent's anchored keys. That DS becomes the
-  child's anchor.
-- **Insecure delegation:** a signed parent with *no* DS for the child is
-  accepted **only when the parent proves the absence** — its NSEC or NSEC3 at
-  the cut without the DS bit set, or an NSEC3 Opt-Out gap covering the cut
-  (RFC 4035 §5.2, RFC 5155 §8.9). The child is then read unsigned: its DANE pin
-  still applies, its answers are simply not chain-anchored.
-- **A DS deleted from a referral is a validation failure**, not an insecure
-  delegation. Believing an empty DS answer lets an on-path party demote a
-  signed child to unsigned — re-opening at the cut exactly the hole that §6.5(e)
-  and §6.5(g) close at the leaf.
-
-### 6.7 Validation rules
-
-Anchored to the **on-chain DS**, not to the ICANN root. That substitution is
-the whole design.
-
-**Algorithms** (RFC 8624 §3.1, §3.3). Supported:
-
-| | |
-|---|---|
-| 8 RSASHA256 | RFC 5702; key format RFC 3110 §2; modulus bounded 1024–4096 bits |
-| 13 ECDSAP256SHA256 | RFC 6605 §4; key X‖Y uncompressed |
-| 14 ECDSAP384SHA384 | RFC 6605 §4 |
-| 15 ED25519 | RFC 8080 §3 |
-| DS digest 2 (SHA-256) | RFC 4509 |
-| DS digest 4 (SHA-384) | RFC 6605 §5 |
-
-Refused, fail-closed, with the gap named as the implementation's: 5 and 7
-(SHA-1), 12 (GOST), 16 (Ed448), DS digest 1 (SHA-1 — a validator MUST NOT use
-it). RSASHA256 is a validator **MUST** in RFC 8624: an implementation that omits it
-refuses every RSA-signed zone, which is an easy omission to ship because the
-zones it breaks are somebody else's.
-
-**Keys.** A DNSKEY anchors or verifies nothing unless it has the Zone Key bit
-set (RFC 4034 §2.1.1), does **not** have the REVOKE bit set (RFC 5011 §2.1),
-and has protocol 3. An RRSIG MUST be verified with a key of the RRSIG's own
-algorithm; keys of another algorithm MUST NOT be tried.
-
-**Canonical form.** RRs are sorted by raw RDATA before the signing input is
-built (RFC 4034 §6.2). Owner names are ordered rightmost-label-first with octet
-comparison, a missing label sorting first (RFC 4034 §6.1).
-
-**Wildcards.** The RRSIG **Labels** field counts labels excluding the root and
-excluding a leading `*` — RFC 4034 §3.1.3's own example, `*.example.com.` = 2.
-Counting the `*` makes every RRset *owned* by a wildcard name look
-wildcard-expanded, demand a proof that cannot exist, and drop out of every
-denial — including the NSEC of `*.zone`, which is the record most denials need.
-A wildcard-expanded answer MUST be verified against `*.` plus the rightmost
-*Labels* labels (RFC 4035 §5.3.2), and MUST be accompanied by a proof that the
-queried name has no exact match (RFC 4035 §5.3.4). That proof is required on
-every path: pointer, address, TLSA and identity records alike.
-
-**Validity period.** The RRSIG inception/expiration window is checked against
-the real clock with no skew tolerance (D-12).
-
-**Denial of existence.** NSEC (RFC 4035 §5.4) and NSEC3 (RFC 5155). NXDOMAIN
-requires **both** halves — the name covered, *and* the source of synthesis
-`*.<closest encloser>` covered (RFC 4592 §3.3.1). NODATA includes the wildcard
-form (RFC 4035 §3.1.3.4, RFC 5155 §8.7). NSEC3 requires the closest-encloser
-proof of RFC 5155 §8.3, and iterations MUST be capped (RFC 9276 §3.1; 100 here)
-— the hashing work is the validator's to do, so an uncapped count is a cost a
-hostile zone imposes on the client.
-
-Two rules that are easy to get wrong and are the difference between a proof and
-a shrug:
-
-- **NSEC3 Opt-Out proves exactly one thing: an insecure delegation** (RFC 5155
-  §8.9). It is accepted for the DS-absence case of §6.6 and refused everywhere
-  else (§6). "There is no signed delegation here" is not "there is no TLSA
-  here".
-- **A mixed NSEC/NSEC3 answer proves nothing.** A zone signs with one scheme or
-  the other. Records of both kinds in one reply is a broken signer or somebody
-  splicing, and reading it as either leaves the other kind's records sitting
-  there unexamined. The whole set MUST be refused.
-
-**Unvalidatable ⇒ refuse** (RFC 4035 §5.5). Every failure kind is a refusal,
-including a failure to *fetch* the keys. See §11.1.
-
-### 6.8 Caching
-
-The reference implementation caches only **positive** resolutions, for a flat
-60 seconds, ignoring TTLs (D-1). Caching a failure is a real defect and not
-merely impolite: one dropped DNSKEY query then pins a name as failed through
-exactly the retry the user is already making. An implementation **MUST NOT**
-cache `unreachable` or a validation failure.
-
-A publish flow that moves a pointer SHOULD invalidate the affected name
-explicitly.
-
-### 6.9 Resolution kinds
-
-| Kind | Meaning |
-|---|---|
-| `ipfs` / `ipns` / `arweave` / `bittorrent` / `hyper` | a content pointer (§10) |
-| `site` | an address, with `tlsa` (possibly empty) and `allowInsecure` |
-| `txt` | a non-pointer TXT answer |
-| `unregistered` | the chain, or the zone, authoritatively has nothing |
-| `unreachable` | we could not ask — **not** the same as the above |
-| `dnssec-fail` | validation failed; fail closed |
-| `dnssec-unsupported` | the zone is signed with an algorithm we do not implement |
-| `blocked` | the address is not a public-internet address (§11.2) |
-| `unsupported-pointer` | a pointer whose codec we recognise and cannot fetch — refused **by name**, never silently discarded |
-
----
-
-## 7. HIP-5 `_op`: on-chain resolution
-
-**Status: HIP-0005 is a permanent Draft and the HIP process is not active.**
-`_op` as specified here is our extension of that draft's mechanism, shipping on
-Handshake mainnet for the top-level name `persist`. It is prior art with a
-number, not a ratified standard.
-
-### 7.1 The problem
-
-A Handshake top-level name's chain resource carries `NS` records, and those are
-hostnames — a delegation to a *machine*, run by whoever owns the top-level name.
-For a **registry** that sells names to other people, that is the whole weakness:
-the seller's nameserver can answer anything it likes for a name the seller no
-longer holds, and nothing in the chain proof contradicts it. The buyer's
-ownership is on a chain; their *resolution* is on the seller's server.
-
-HIP-5's answer is that a label under a `_<chain>` pseudo-TLD is not a host at
-all — it is a pointer into another naming system, and the resolver strips the
-suffix and reads that system directly. The draft's shipped example is `_eth`
-(ENS on Ethereum). `_op` is the same idea aimed at **Optimism mainnet, chainId
-10**, where the label is the address of an ENS-shaped registry contract.
-
-```
-persist.   NS  ns1.hns.one.
-persist.   NS  ns2.hns.one.
-persist.   NS  0x233b4fbf4e8f0e60bff0a5f1a24ffa257987dbf2._op.
-```
-
-### 7.2 The route
-
-For a name below the apex, lowercased:
-
-```
-node     = namehash(name)                                    EIP-137
-resolver = Registry.resolver(node)          -> address       0x0178b8bf
-content  = Resolver.contenthash(node)       -> bytes         0xbc1c58d1  (EIP-1577)
-exists   = Resolver.hasDNSRecords(node, nameKey) -> bool      0x4cbf6ba4
-rrset    = Resolver.dnsRecord(node, nameKey, type) -> bytes   0xa8fa5682
-
-nameKey  = keccak256(RFC 1035 wire-format, lowercased, root-terminated owner name)
-```
-
-Records read, and what they become:
-
-| owner | type | becomes |
+# Part II — Namespace selection
+
+Part II is specified in full in [`namespaces/router/SPEC.md`](namespaces/router/SPEC.md)
+and implemented by `src/router.js` (the classifier and the registry),
+`src/hns-host.js` (the `http(s)`→`hns` rewrite), `src/reserved-names.cjs` and
+`src/icann-tlds.cjs` (the two lists every classifier copy reads) and
+`src/trust-path.js` (the trust model). What follows is normative and
+complete for interoperation; the chapter adds the rationale, the security
+considerations and the conformance clauses.
+
+## 5. The scheme registry
+
+An implementation **MUST** keep one table mapping every scheme it dispatches to
+exactly one namespace, with a stated verification story, and **MUST** refuse to
+wire a handler for a scheme absent from it. The reference table is
+`SCHEME_TABLE`; its namespaces are:
+
+| Namespace | Schemes | Verified by (the native layer) |
 |---|---|---|
-| `<name>` | TXT (16) | a content pointer (§10) |
-| `<name>` | A (1) | `{ kind: 'site', address }` |
-| `_443._tcp.<name>` | TLSA (52) | the DANE pin, the same shape the DNS route yields |
+| `hns` | `hns` | SPV chain proof + DANE `3 1 1`, or a content pointer's own hash (Chapter 1) |
+| `ipfs` | `ipfs`, `ipns`, `ipld`, `pubsub` | CID; an IPNS record + CID; a pubsub topic is **not** a content address — a message carries only its publisher's libp2p signature (Chapter 3) |
+| `arweave` | `ar` | the transaction id's shape and canonical spelling only; bytes are gateway-trusted (Chapter 4) |
+| `ens` | `ens` | an EIP-1577 contenthash read over a public Ethereum RPC — RPC-trusted, not chain-proven; the content it names is CID-verified (Chapter 5) |
+| `web3` | `web3` | an ERC-4804 EVM read over a public RPC (Chapter 5); there is deliberately **no** `w3://` — `.w3` is a Handshake TLD |
+| `nostr` | `nostr` | BIP-340 signature and event id recomputed locally, answer bound to the query; relay completeness not proven (Chapter 6) |
+| `atproto` | `at` | recognised and refused: 501 with no network request (Chapter 7) |
+| `did` | `did` | a DID document fetched from a directory or the named host, its `id` checked; not proven (Chapter 7) |
+| `activitypub` | `activitypub` | recognised and refused: 501 with no network request (Chapter 7) |
+| `tor` | `onion` | the onion-service key, reached only through the device-local Tor; never DNS (Chapter 8) |
+| `web` | `https`, `http`, `https+raw` | WebPKI; none for `http`. An ICANN name's navigation is an `https://` URL and so carries this namespace on dispatch, while classification reports the finer `icann` (Chapter 2) |
+| `gemini` | `gemini` | none — TLS with no certificate verification and nothing pinned (Chapter 9) |
+| `hyper` | `hyper` | a hypercore key; a DNSLink name→key binding is resolver-trusted (Chapter 9) |
+| `ssb` | `ssb` | a feed signature (Chapter 9) |
+| `bittorrent` | `bittorrent`, `bt` | an infohash, or a BEP-46 key (Chapter 9) |
+| `magnet` | `magnet` | an infohash; only ever redirects (Chapter 9) |
+| `browser` | `wildroot` and its silent aliases `agregore`, `browser`; `paste`, `editor`, `bluesky`, `mastodon`, `media`, `docview` | built into the browser; not part of this specification beyond their presence in the table |
+| `search` | `search` | the terminal for "no protocol was named" |
 
-Precedence inside the route matches the DNS route exactly: `contenthash` first
-(it is the native form and costs one call), then a TXT content pointer, then
-the address. An address MUST pass §11.2.
+`icann` is a classification result (§6) with no scheme of its own; the
+dispatch vocabulary is the table's. The `X-Resolution-Namespace` response
+header (§7) speaks the table's vocabulary.
 
-The three record reads MUST be issued together and **one failure retires the
-whole route**. An endpoint that can serve the `A` record but not the `TLSA` one
-would strip the pin and look exactly like a name that has none.
+## 6. Classification of bare input
 
-Stored records MUST NOT be trusted to be free of compression pointers: a length
-octet ≥ 0xC0 ends the parse. Following a pointer in bytes that arrived from a
-public RPC endpoint is how a parser becomes a loop.
+Given an input with no explicit scheme, an implementation **MUST** decide in
+this order; the first match is final.
 
-The **apex** is untouched: its records are the chain resource, already proven.
+1. **Explicit scheme** (L1): the input is returned as it is, with the
+   namespace the table gives its scheme (or none, for an unknown scheme), and
+   with a `known` flag so that a navigating caller can refuse `javascript:`,
+   `data:` and `file:`. A `host:port` shape (`example.com:8080`) is a host, not
+   a scheme.
+2. **`@user@host`** — the Fediverse address form — is `activitypub:`. It is
+   not a host: the URL parser would read the second `@` as userinfo.
+3. **A bare CID** (`bafy…` base32 CIDv1, or `Qm…` base58 CIDv0, *parsed*, not
+   shape-matched) is `ipfs://<cid>/`; a CIDv0 is written as its CIDv1 because
+   a case-sensitive host does not survive the URL parser. An IPNS key is
+   deliberately **not** sniffed: `Qm…` is both a legacy IPNS key and a CIDv0.
+4. **`/ipfs/…` and `/ipns/…`** gateway paths are `ipfs://` and `ipns://`.
+5. **`localhost[:port]`** is `http://`.
+6. **Host classification**, in this order:
+   1. any whitespace → no namespace (a search);
+   2. `*.onion` → `tor`, valid or not — a mistyped onion address leaks to a
+      resolver as effectively as a real one, so the suffix decides;
+   3. `*.eth` → `ens`;
+   4. a **reserved name** → `web`, reached as `http://` on the platform
+      resolver: the labels of RFC 6761 (`localhost`, `invalid`, `test`,
+      `example`), RFC 6762 (`local`), RFC 7686 (`onion`, already taken above),
+      RFC 8375 (`arpa`, for `home.arpa`) and the home-network labels
+      `internal`, `home`, `lan`, `corp`, `intranet`, `private`
+      (`src/reserved-names.cjs`). A NAS, a printer or an internal service
+      name is the user's own device; sending it to whoever registers the
+      Handshake TLD `local` would disclose it and let them answer for it;
+   5. an **IP literal**, IPv4 or IPv6 with or without brackets → `web`,
+      checked *before* the label count so that `::1` is an address and not a
+      bare label;
+   6. a single label → step 7;
+   7. an all-numeric final label → `hns` (ICANN has no numeric TLDs).
+      **Experimental:** whether numeric Handshake TLDs are supported at all is
+      undecided, and the URL form such a name needs is Chapter 10 Part B;
+   8. a final label in the ICANN root → `icann`, navigated as `https://`;
+   9. any other final label → `hns`.
+7. **A single bare label** is a Handshake name unless the label is itself an
+   ICANN TLD (`com`, `org`, `app` — a word somebody is mid-way through typing),
+   which is a **search**.
 
-### 7.3 Contract properties a client relies on
+The ICANN root used in 6.8 is a bundled snapshot of IANA's list of delegated
+TLDs, held to the live root by a test (Chapter 2 §2). An internationalized host
+is converted to A-labels before comparison (the reference implementation does
+so through the WHATWG URL parser; `DEVIATIONS.md` RT records what that means).
+The same rule **MUST** be applied on every path that classifies a host — typed
+input, a link click, an `http(s)`→`hns` rewrite, a subresource load, a
+WebSocket — and the reference implementation holds its three copies (the
+router, the omnibox, the PAC script) to one answer with a test that lifts the
+predicates out of the other two.
 
-- `dnsRecord` returns concatenated RFC 1035 resource records, byte-compatible
-  with ENS's DNSResolver. The owner name baked into each RR is the on-chain
-  name.
-- `resolver(node)` **may** answer with a registry default, so the zero address
-  means "this registry has nothing for this name", not "no override set".
-- **A revert is not a failure.** A resolver that does not implement
-  `contenthash` reverts; that means "no content", and the route continues.
-- Records are versioned by ownership epoch, so when a name changes hands
-  everything the previous holder wrote stops being served — with no transaction
-  and with no version parameter in the read path. **This is the property that
-  makes the registry route safer than the seller's nameserver**, not merely
-  different.
+**A search is a terminal, not a fallback.** An input that reaches step 7 and is
+an ICANN TLD, or contains whitespace, named no protocol; there is nothing to
+fall back from.
 
-### 7.4 Fallback
+## 7. Dispatch and failure
 
-1. `_op` first when the record is present and well-formed.
-2. The ordinary `NS` records when the route yields **nothing**: a zero resolver;
-   `hasDNSRecords` false with no contenthash (a minted name whose holder has
-   published nothing); records but no address and no usable pointer; or every
-   RPC endpoint failing. The reason SHOULD be logged once per name — a silent
-   fallback is how a dead endpoint survives a release unnoticed. **See D-8: two
-   of these cases arguably should not fall back at all.**
-3. A **non-public address** from the registry is not a fallback case. The
-   record was found and it says something we refuse to fetch; asking a second
-   source for permission would be theatre.
+`dispatch(request)` reads the scheme from the URL and nothing else, and has
+exactly four outcomes, none of which crosses a namespace:
 
-### 7.5 Trust
+- **the handler's own response**, returned verbatim — a 404 from the
+  Handshake handler is a Handshake 404 and is not retried anywhere;
+- **501** when no handler is registered for a scheme, tagged with the scheme's
+  namespace; the URL is not reinterpreted as a host, a domain or a search;
+- **502** when the handler throws, tagged the same way;
+- **400**, untagged, when the input is not a URL and names no scheme.
 
-The chain proof covers the **pointer**: consensus says the top-level name
-delegates to contract `0x…`. Nothing covers the contract's **answer**, which is
-read from a public JSON-RPC endpoint over HTTPS with no light client and no
-Merkle proof against a block header.
+When the input names a scheme but the URL Standard's parser refuses it — the
+canonical AT-URI `at://did:plc:…/…` has a colon in its host — the scheme is
+read by prefix and the request still reaches, or fails inside, that scheme's
+namespace: a named protocol's failure never escapes its namespace on the way to
+the interface.
 
-Therefore an implementation:
-
-- **MUST** mark the route `unverified` and name the registry and the RPC
-  endpoint in the trust steps;
-- **MUST NOT** present an `_op` answer as cryptographically verified unless it
-  verified the contract's storage against a block header;
-- **SHOULD** apply the same lock rule it applies to the DNS route — a content
-  pointer closes on the chain proof, an address closes only on a matched DANE
-  pin — on the reasoning that the DNS route also takes an unsigned answer on a
-  nameserver's word, and over plaintext where this hop is HTTPS. We are not
-  certain of this; see `DEVIATIONS.md` §2.7.
-
-Two consequences worth stating in a user interface: the RPC endpoint learns
-which name was asked, and a name that publishes records **only** on chain is
-unreachable from any client that does not implement HIP-5 — which is nearly all
-of them. That is an argument for a registry writing a DNS mirror too, not an
-argument against the route.
-
-### 7.6 Draft normative text for a HIP
-
-> A Handshake name MAY delegate resolution of names beneath it to a smart
-> contract on Optimism mainnet (chainId 10) by publishing an `NS` record whose
-> target is `<address>._op.`, where `<address>` is the 20-byte contract address
-> in lowercase hexadecimal with a `0x` prefix — 42 characters, exactly as it
-> appears on chain — followed by the pseudo-TLD label `_op`.
->
-> The contract MUST implement the ENS registry interface
-> `resolver(bytes32) returns (address)` (EIP-137 `namehash` over the full
-> dotted name, lowercased), and the resolver it names SHOULD implement
-> `contenthash(bytes32)` (EIP-1577) and MAY implement the ENS DNSResolver
-> methods `hasDNSRecords(bytes32,bytes32)` and
-> `dnsRecord(bytes32,bytes32,uint16)`, where the second argument is
-> `keccak256` of the lowercased, root-terminated, RFC 1035 wire-format owner
-> name and stored records are wire-format RRsets containing no compression
-> pointer.
->
-> A resolver that understands `_op` **MUST** prefer it over any other `NS`
-> record on the same name: the pointer to the contract is proven by Handshake
-> consensus, whereas an ordinary `NS` delegation names a server the name's
-> current holder does not control. It **MAY** fall back to the remaining `NS`
-> records when the `_op` route yields no answer — no resolver set, no records
-> and no contenthash, or no reachable RPC endpoint — and it **MUST NOT** treat
-> a `._op.` target as a hostname to resolve.
->
-> A resolver **MUST NOT** present an `_op` answer as cryptographically
-> verified unless it verified the contract's storage against a block header:
-> absent a light client, the RPC endpoint is a trusted third party for the
-> record, and the user interface must say so.
->
-> `_op` is one member of a family; `_eth` (ENS on Ethereum mainnet) is the
-> existing prior art. A registry of `_<chain>` labels belongs in the HIP
-> itself so two chains cannot claim one label.
-
----
-
-## 8. DANE for HTTPS
-
-No CA can issue a certificate for a Handshake name, so PKIX is not available
-and is not the fallback. Trust is pinned in the zone instead. As far as we can
-establish this is the only shipping browser that validates DANE for HTTPS at
-all — Firefox closed its bug WONTFIX and Chrome has no such feature.
-
-**Profile.** Exactly one: `_443._tcp.<host> TLSA 3 1 1 <sha256(SPKI)>` —
-DANE-EE / SPKI / SHA-256. Any other parameter combination MUST be treated as a
-**mismatch**, not as an unusable record (D-6: this deviates from RFC 7671
-§4.1, deliberately). Downgrading on confusion is how a pinning scheme quietly
-stops pinning.
-
-**Validation.** The DER certificate the peer presents is parsed (RFC 5280), its
-SubjectPublicKeyInfo hashed with SHA-256, and the digest compared against the
-record. No chain is built. No CA store is consulted.
-
-**Expiry.** Per RFC 7671 §5.1 the pin replaces the CA chain, expiry included.
-An implementation **MUST NOT** reject a DANE-EE match on `notAfter`: doing so
-breaks a correctly-pinned self-signed site the day its arbitrary expiry passes,
-for no security gain.
-
-**Base domain across a CNAME.** The pin is looked up at the **original** name,
-never at a CNAME target. RFC 7671 §7.2 requires exactly this when the CNAME
-expansion is not secure, and ours never is (D-11). We conform, by accident;
-worth knowing which.
-
-**Rotation.** On a mismatch, the cache entry is dropped and the name is
-re-resolved **once**; a second mismatch fails closed. This recovers the case
-where a zone published its new TLSA seconds after rotating the key. Operators
-are still expected to pre-publish per RFC 7671 §8.1. There is no memory that a
-host was ever pinned — see D-15 and `DEVIATIONS.md` §2.5 for the downgrade this
-leaves open.
-
-**Absence.** Plaintext is permitted **only** when the zone's authenticated
-NODATA proves there is no pin (§6.5g). A failed TLSA lookup is not an absence.
-
-A mismatch whose reported SPKI equals the *current* published pin means the
-zone rotated its key before its TLSA; that is a correct refusal, and the
-certificate's `notBefore` is the thing to check before hunting a resolver bug.
+Every failure response an implementation produces **SHOULD** carry
+`X-Resolution-Namespace: <namespace>` (the table's vocabulary), a
+machine-readable proof for the interface that the failure stayed where it
+started; the reference implementation's namespace handlers carry it on every
+response, success included.
 
 ---
 
-## 9. Transport: DoH and Oblivious DoH
+# Part III — The namespaces
 
-### 9.1 DoH fallback
+Each chapter is normative for its namespace and follows one shape: what it
+specifies and why; terminology; namespace membership (which inputs are its);
+the address grammar; the resolution algorithm; what is verified and what is
+trusted, as trust steps of §4; failure modes; security considerations. Each
+chapter's deviations and open questions are in `DEVIATIONS.md` under the
+chapter's prefix.
 
-When the chain path is unavailable — no local node, node not synced, or an
-infrastructure failure — an implementation MAY fall back to DNS-over-HTTPS
-against resolvers that understand Handshake names (RFC 8484, wire format, GET
-with `?dns=<base64url>`; POST is rejected by several Handshake DoH servers).
+| Chapter | Namespace | Root of trust | Verdict when it succeeds |
+|---|---|---|---|
+| [1 — Handshake](namespaces/handshake/SPEC.md) (`HS`) | `hns` | a chain proof from a local SPV node; DNSSEC anchored to the on-chain DS; DANE `3 1 1` | TRUSTLESS for a content pointer or a pinned, validated address; TRUSTED over the DoH fallback |
+| [2 — ICANN names](namespaces/icann/SPEC.md) (`IC`) | `icann` / `web` | WebPKI; the address from encrypted DNS (plain or oblivious) per a transport plan decided once and reported truthfully | TRUSTED |
+| [3 — IPFS, IPNS and DNSLink](namespaces/ipfs/SPEC.md) (`IP`) | `ipfs` | the CID: every block hash-checked by the local node; an IPNS record's signature | TRUSTLESS |
+| [4 — Arweave](namespaces/arweave/SPEC.md) (`AR`) | `arweave` | the transaction id names immutable bytes, but the bytes are fetched from an ar.io gateway and **not** checked against it | TRUSTED |
+| [5 — ENS and `web3://`](namespaces/ens/SPEC.md) (`EN`) | `ens`, `web3` | an EIP-1577 contenthash read over a public Ethereum RPC (with ERC-3668 CCIP-Read and a local ENSIP-21 batch); the content it names is CID-verified | TRUSTED |
+| [6 — Nostr](namespaces/nostr/SPEC.md) (`NO`) | `nostr` | every event's id recomputed and BIP-340 signature checked here, and bound to the question asked; relays are a transport | TRUSTED (authorship proven, completeness not) |
+| [7 — DID, AT Protocol and ActivityPub](namespaces/did/SPEC.md) (`DI`) | `did`, `atproto`, `activitypub` | a DID document fetched from `plc.directory` or the `did:web` host and checked to be about the DID asked for; `at://` and `activitypub:` recognised and refused | TRUSTED for `did:`; a refusal for the other two |
+| [8 — Tor](namespaces/tor/SPEC.md) (`TO`) | `tor` | the onion-service key, at the Tor layer, over the device-local Tor only; the page is HTTP inside the tunnel | TRUSTED |
+| [9 — Key-addressed](namespaces/keys/SPEC.md) (`KY`) | `hyper`, `ssb`, `gemini`, `bittorrent`, `magnet` | a hypercore key, an SSB feed key, an infohash or a BEP-46 key verify their own content; Gemini verifies nothing | TRUSTLESS for a key or a hash; TRUSTED for a DNSLink-resolved hyper name and for Gemini |
+| [10 — Experimental](namespaces/experimental/SPEC.md) (`OP`, `NT`) | Part A: HIP-5 `_op`, a route within `hns`; Part B: numeric Handshake TLDs and the `_` URL marker | A: the chain proves *which* Optimism registry contract answers; the contract's answer arrives over a public RPC and is taken on its word. B: a URL-form convention forced by the URL Standard's IPv4 host rule | A: TRUSTED (never TRUSTLESS), lock closed on the chain proof for a content pointer or with a DANE pin for an address. B: as the Handshake chapter, for a name whose support is undecided |
 
-Everything resolved this way:
+| [11 — Native applications on a Handshake name](namespaces/apps/SPEC.md) (`AP`) | `hns` as an origin | `hns://` is a standard, secure scheme, so a name is a real origin with storage, cookies and service workers; a `wss://` upgrade to a Handshake name goes through a loopback CONNECT tunnel that resolves the name by chain proof and pins the TLS with DANE, and is fenced to loopback, Handshake hosts, public addresses and the anonymization gate; sign-in with a name from a page on another name goes through the browser as mediator | as Chapter 1 for the name; the tunnel adds no trust of its own and is never a proxy for anything but a Handshake host |
 
-- **MUST** be marked `unverified` with the resolver named. There is no chain
-  proof. This is ordinary DNS with a different operator, and an implementation
-  that does not say so is misrepresenting its own security model.
-- **MUST** still query `_443._tcp.<host>` TLSA and pin the handshake to what
-  comes back, marked as the resolver's word. A DoH path that reads no TLSA
-  means an attacker who merely breaks the chain path — drop TCP/53 to the
-  authoritative server and the chain path throws — downgrades **every**
-  DANE-pinned site to plaintext. Pinning on a resolver's word is strictly
-  stronger than the plaintext it replaces. See D-10.
-- **MUST** report an outage of every endpoint as `unreachable`, never as
-  `unregistered`.
+Chapter 11 is where this specification's pieces meet: a **native application**
+— one that lives at a bare Handshake name, keeps state in that origin, holds a
+WebSocket to it, and signs its users in with the names they hold — needs
+Chapters 1, 2 and Part II to hold at once, and the chapter records what that
+takes and what it cost.
 
-An implementation **SHOULD NOT** let a DoH answer override the chain's
-authoritative `unregistered` (D-9 records that ours does, and that it should
-not).
-
-### 9.2 Oblivious DoH
-
-RFC 9230 is implemented: HPKE (X25519-HKDF-SHA256 / HKDF-SHA256 / AES-128-GCM,
-RFC 9180) with the §6.3 response key and nonce derived from the HPKE exporter
-secret and a target-chosen nonce, over HKDF (RFC 5869) on WebCrypto. The query
-is encrypted to a target and carried by an independent relay, so no single party
-sees both who is asking and what.
-
-**An implementation MUST NOT present this as a privacy guarantee at current
-deployment scale.** Two ODoH relays exist worldwide, and one of them is run by a
-target operator. RFC 9230's security argument rests entirely on the relay and
-the target not colluding, and at that scale the assumption does not hold. The
-code is worth having; the claim is not.
-
-An oblivious lookup **MUST** be reported distinctly from a plain DoH lookup in
-the trust steps — the relay and the target both named — because the difference
-is real even though the guarantee is not what the RFC describes.
-
-For the same honesty reason: a bridge that presents ODoH to a browser engine's
-own DNS stack (as `odoh-bridge.js` does, a loopback HTTPS endpoint on a
-per-launch secret path with a self-signed certificate) MUST bind to loopback
-only and MUST reject cross-site requests.
-
----
-
-## 10. Content pointers
-
-A Handshake name's best use is to name **content**, not a machine. A content
-pointer resolves to bytes that authenticate themselves against the pointer, so
-a lying zone or a lying resolver can only point at *different* content — it
-cannot tamper with the content a pointer names.
-
-Two carriers:
-
-- **DNS TXT**, at the name itself: `ipfs=<cid>`, `ipns=<key>`, `ar=<txid>`, and
-  the torrent/hypercore forms.
-- **EIP-1577 contenthash**, on the `_op` route: multicodec `ipfs-ns` 0xe3,
-  `ipns-ns` 0xe5, `swarm-ns` 0xe4, `arweave-ns` 0xb29910.
-
-Rules:
-
-- **A record's `<character-string>`s are ONE value, concatenated** (RFC 1035
-  §3.3.14). Separate records are separate values. A pointer longer than 255
-  bytes arrives split, and an implementation that spreads the strings instead
-  of joining them reads it as nothing. This rule MUST be applied identically on
-  every path — the DNS route, the DoH route and the on-chain route — or the
-  same record resolves differently depending on which path a user happens to be
-  on.
-- **A codec we recognise and cannot fetch MUST be refused by name**, never
-  silently discarded. "This name points at Swarm content, which this client
-  cannot fetch" is a true and useful sentence; falling through to an address is
-  not.
-- **Not all content pointers are equally verified.** IPFS bytes are checked
-  against the CID by the fetching node. Arweave bytes fetched from a gateway
-  are **not** checked against the transaction's `data_root` — the gateway is
-  trusted like any HTTPS host. An implementation SHOULD say which it did, and
-  SHOULD run the weaker one at reduced privilege.
-
-DNSLink (`_dnslink.<name> TXT dnslink=/ipfs/<cid>`) is the ecosystem's
-convention and SHOULD be read as a second pointer source. We write it and do
-not read it (D-5).
-
----
-
-## 11. Security considerations
-
-### 11.1 Fail closed, and say which failure
-
-Every unproven step is a refusal, not a downgrade. Specifically: a signature
-that does not verify, a denial that is not proven, a `TLSA` lookup that errors,
-a `DNSKEY` fetch that fails, an unsupported algorithm, a mixed NSEC/NSEC3
-answer, an opt-out gap offered as a denial of anything but a DS.
-
-Two failures that look alike and must be reported differently:
-
-- **"this zone is signed with an algorithm I cannot verify"** is not **"these
-  signatures do not check out"**. Telling a user that somebody is tampering
-  with a zone that merely chose RSASHA256 destroys the credibility of the
-  warning for the case that matters.
-- **"I could not ask"** is not **"there is no such name"** (§6.1).
-
-An error in the resolution code path is itself a security event, because the
-usual handler for a thrown error is a fallback to a weaker path. In this
-implementation an *undefined method* — a plain `TypeError` on the branch taken
-when a signed zone's "no TLSA" could not be proven — caused a fall through to
-DoH, which then served the site in plaintext. A signed zone with a broken denial
-was therefore **less** safe than an unsigned one. Fail-closed is a property of
-the whole composition, not of the validator alone.
-
-### 11.2 Every address is attacker-chosen
-
-An `A` record, an on-chain `SYNTH4` or `GLUE4`, a nameserver address, and an
-address from a registry contract are all chosen by whoever registered the name.
-Without a guard, `hns://evil.tld/` publishing `A 169.254.169.254` makes the
-client fetch cloud metadata from a privileged process, and page script reads the
-response.
-
-Every address, on every route, before any connection or query, **MUST** be
-rejected unless it is a public-internet address: reject `0.0.0.0/8`, `10/8`,
-`100.64/10`, `127/8`, `169.254/16`, `172.16/12`, `192.0.0/24`, `192.168/16`,
-`198.18/15`, `224/4`, `240/4` and the IPv6 equivalents. This includes addresses
-used as *nameservers* — a DNS query to `127.0.0.1:53` is server-side request
-forgery too.
-
-### 11.3 The downgrade ladder
-
-Partial validation is the failure mode this design is prone to, and it is worse
-than no validation at all — because the interface reports the zone as anchored
-while an on-path party uses the part that was not checked.
-
-Every rung below is a place where a signed zone can be walked down to a weaker
-answer if one record is validated and its neighbour is not. An implementation
-**MUST** close all of them, and a test suite **SHOULD** drive each one by
-actually removing or forging the record in question rather than by unit-testing
-the validator in isolation:
-
-1. **The address.** Validate the `A` RRset. An address read with DO=0 and taken
-   as served, beside the zone's own honest NSEC proving "no TLSA", is a complete
-   plaintext redirect to a forged address with the padlock reporting the zone as
-   anchored. The most protected configuration a zone can publish becomes the
-   easiest one to redirect.
-2. **The DS at a cut.** Prove a missing DS missing. A believed empty DS answer
-   lets an attacker delete the DS from a referral and demote a signed child to
-   unsigned — re-opening at the cut every hole closed at the leaf.
-3. **The pointer's absence.** Prove it. An unproven empty `TXT` lets an attacker
-   delete the `ipfs=` and walk the browser from content-addressed bytes down to
-   an address.
-4. **The alias.** Validate the `CNAME` RRset before following it. Otherwise the
-   same trick as (1) works one branch over: strip the signed `A`, inject a
-   `CNAME`, and let the zone's honest "no TLSA" complete the redirect.
-5. **The pin on the fallback path.** A DoH path that reads no TLSA means
-   breaking the chain path — one dropped TCP connection to the authoritative
-   server — downgrades every pinned site to plaintext (§9.1).
-6. **The failure cache.** Do not cache failures. A cached `unreachable` or
-   `dnssec-fail` pins a name as dead through exactly the retry the user is
-   already making, and turns one dropped query into a lasting outage (§6.8).
-
-The common shape is worth stating on its own, because it is what makes these
-easy to ship: **each rung is individually plausible as an optimisation.**
-Skipping DO=1 on an `A` query saves nothing anyone will notice; believing an
-empty DS answer looks like handling insecure delegations; not reading a TLSA on
-a fallback path looks like keeping the fallback cheap. The security property is
-not in any single check but in the rule that *every record a resolution rests on
-is validated or the resolution fails* (§11.1).
-
-### 11.4 What the trust panel must not do
-
-Under-claiming is as misleading as over-claiming. A signed zone whose "no TLSA"
-*was* proven must not render as "signatures not checked"; a DoH-carried pin must
-not claim anything about a chain that was never consulted. A panel nobody
-believes is a panel nobody reads.
-
-### 11.5 What a chain proof establishes
-
-*hsd, running on this machine, verified an Urkel tree inclusion proof for this
-name against a tree root committed in a block header on the most-work header
-chain it has seen.*
-
-That is strong and it is the reason for this design. It is not the same as
-running a full node: SPV inherits the assumption that the most-work chain is the
-valid chain, and the client process trusts the local node over loopback. A node
-that is still syncing returns null proofs and the client rides DoH until it
-reaches the tip, then flips to chain proof mid-session — so the guarantee a
-given page load received depends on the clock. See `DEVIATIONS.md` §2.6.
-
-### 11.6 Privacy
-
-- A chain lookup queries Handshake peers over the node's own TCP connections,
-  which do not ride an HTTP proxy. If a client is proxying traffic for IP
-  privacy it MUST NOT use the chain path, because doing so leaks both the real
-  address and the queried name; it should use the (weaker) DoH path, which can
-  be proxied. That trade — weaker trust, no leak — is the right one when the
-  user has chosen anonymity, and the interface must state which they got.
-- The `_op` route discloses the queried name to an Optimism RPC endpoint.
-- ODoH's guarantee is not what the RFC describes at current relay scale (§9.2).
-- Without ECH (D-3) the server name is in the ClientHello regardless, so an
-  oblivious DNS lookup does not by itself hide which Handshake site was visited.
+**Experimental** (Chapter 10, and the sections so marked inside Chapters 3 and
+7) means: shipped in the browser, reached only behind a record, a setting or a
+name shape that opts into it, not yet a proposed standard, and liable to change
+— and, for numeric Handshake TLDs, whether they are supported at all is
+undecided. The non-experimental chapters describe behaviour this
+implementation commits to interoperating on.

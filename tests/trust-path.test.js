@@ -224,13 +224,30 @@ test('an _op record is never reported as verified, pin or no pin', () => {
 test('an _op content pointer keeps CONTENT verified and the POINTER not', () => {
   const steps = hnsSteps('ark.persist', {
     trust: 'spv',
-    kind: 'arweave',
-    txid: 'MJ7GaCvE_nndW-WpgX1HutkjHpDyEp1RkAgHL_P4MOg',
+    kind: 'ipfs',
+    cid: 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
     op: { registry: '0x233b', rpc: 'mainnet.optimism.io' }
   })
   assert.equal(byLabel(steps, 'Content').state, 'verified')
   assert.equal(byLabel(steps, 'Name records').state, 'unverified')
   assert.equal(summarize(steps).state, 'partial')
+})
+
+test('an ar= pointer never reports its bytes as verified', () => {
+  // The ar:// handler fetches from a gateway and does not check the bytes
+  // against the transaction's data_root. The chain proves the POINTER; the
+  // panel must not let that proof spill over onto bytes nobody checked.
+  const steps = hnsSteps('ark.w3', {
+    trust: 'spv', kind: 'arweave', txid: 'MJ7GaCvE_nndW-WpgX1HutkjHpDyEp1RkAgHL_P4MOg'
+  })
+  const content = byLabel(steps, 'Content')
+  assert.equal(content.state, 'unverified')
+  assert.match(content.source, /gateway/)
+  assert.doesNotMatch(content.detail, /checked against the address/)
+  assert.equal(byLabel(steps, 'Handshake name').state, 'verified')
+  assert.equal(summarize(steps).state, 'partial')
+  const dohSteps = hnsSteps('ark.w3', { trust: 'doh', kind: 'arweave', txid: 'x' })
+  assert.equal(byLabel(dohSteps, 'Pointer').state, 'unverified')
 })
 
 // ---------------------------------------------------------------------------

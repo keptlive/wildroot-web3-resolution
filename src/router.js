@@ -36,11 +36,18 @@
  * router models exactly that boundary and nothing finer.
  */
 
+import { createHash } from 'node:crypto'
+import { CID } from 'multiformats/cid'
+
 import ICANN_TLDS from './icann-tlds.cjs'
+import reserved from './reserved-names.cjs'
 import { searchURL as makeSearchURL } from './search-url.js'
 import { encodeHnsHost } from './hns-url.cjs'
+import { CID_RE } from './pointers.js'
 
-export { ICANN_TLDS }
+const { NEVER_HNS_TLDS, isReservedHost } = reserved
+
+export { ICANN_TLDS, NEVER_HNS_TLDS, isReservedHost }
 
 // --- Namespaces -------------------------------------------------------------
 // A namespace is "a distinct address space with its own root of trust." Two
@@ -88,7 +95,9 @@ export const SCHEME_TABLE = Object.freeze([
   { scheme: 'ipfs', namespace: NAMESPACES.IPFS, status: 'live', verify: 'CID' },
   { scheme: 'ipns', namespace: NAMESPACES.IPFS, status: 'live', verify: 'IPNS record + CID' },
   { scheme: 'ipld', namespace: NAMESPACES.IPFS, status: 'live', verify: 'CID' },
-  { scheme: 'pubsub', namespace: NAMESPACES.IPFS, status: 'live', verify: 'CID' },
+  // A topic is a free-form string, not a content address: the only thing a
+  // message carries is the publishing peer's libp2p signature.
+  { scheme: 'pubsub', namespace: NAMESPACES.IPFS, status: 'live', verify: 'libp2p publisher signature — a topic is not a content address' },
   // Honest status: the handler validates the txid SHAPE and fetches from a
   // gateway, but the returned bytes are never checked against the txid's
   // data_root — the gateway is trusted. 'live' would claim verification the
@@ -97,12 +106,17 @@ export const SCHEME_TABLE = Object.freeze([
   // Resolves the name's EIP-1577 contenthash over a PUBLIC Ethereum RPC and
   // hands the ipfs/ar pointer to those handlers. 'partial', not 'live': the
   // content is CID-verified but the name->content binding is RPC-trusted (not
-  // chain-proven), so the padlock stays OPEN. Never falls back to .eth-as-HNS.
-  { scheme: 'ens', namespace: NAMESPACES.ENS, status: 'partial', verify: 'ENS contenthash via public Ethereum RPC (RPC-trusted, not chain-proven — lock open)' },
+  // chain-proven), so the verdict is TRUSTED (the neutral lock, as for an
+  // https:// page) and never the green trustless one. Never falls back to
+  // .eth-as-HNS.
+  { scheme: 'ens', namespace: NAMESPACES.ENS, status: 'partial', verify: 'ENS contenthash via public Ethereum RPC (RPC-trusted, not chain-proven — lock TRUSTED, never green)' },
   { scheme: 'web3', namespace: NAMESPACES.WEB3, status: 'partial', verify: 'ERC-4804 EVM read (BR-5)' },
   { scheme: 'nostr', namespace: NAMESPACES.NOSTR, status: 'partial', verify: 'schnorr signature + event id recomputed locally; relay completeness NOT proven' },
   { scheme: 'at', namespace: NAMESPACES.ATPROTO, status: 'planned', verify: 'DID document (BR-7)' },
-  { scheme: 'did', namespace: NAMESPACES.DID, status: 'partial', verify: 'DID document (did:plc/web)' },
+  // Fetched, not proven: the document's id is checked against the DID asked
+  // for and the host is guarded, but the did:plc operation log is not audited
+  // and did:web rests on WebPKI — the lock is TRUSTED, never green.
+  { scheme: 'did', namespace: NAMESPACES.DID, status: 'partial', verify: 'DID document fetched from plc.directory / the did:web host (id checked; not proven — lock TRUSTED)' },
   { scheme: 'activitypub', namespace: NAMESPACES.ACTIVITYPUB, status: 'planned', verify: 'WebFinger/actor signature (BR-7)' },
   // Reached ONLY through the device-local Tor that IP Protection turns on
   // (never a hosted relay). 'partial': it works and the onion key authenticates
@@ -112,8 +126,10 @@ export const SCHEME_TABLE = Object.freeze([
   { scheme: 'https', namespace: NAMESPACES.WEB, status: 'live', verify: 'WebPKI (address via the ODoH policy, BR-3)' },
   { scheme: 'http', namespace: NAMESPACES.WEB, status: 'live', verify: 'none (plaintext)' },
   { scheme: 'https+raw', namespace: NAMESPACES.WEB, status: 'live', verify: 'WebPKI' },
-  { scheme: 'gemini', namespace: NAMESPACES.GEMINI, status: 'live', verify: 'TOFU certificate' },
-  { scheme: 'hyper', namespace: NAMESPACES.HYPER, status: 'live', verify: 'hypercore key' },
+  // TLS with rejectUnauthorized:false and no certificate store: encrypted,
+  // and nothing else. Not TOFU — no fingerprint is remembered or compared.
+  { scheme: 'gemini', namespace: NAMESPACES.GEMINI, status: 'live', verify: 'none — TLS with no certificate verification (not TOFU: nothing is pinned)' },
+  { scheme: 'hyper', namespace: NAMESPACES.HYPER, status: 'live', verify: 'hypercore key (a DNSLink name→key binding is resolver-trusted)' },
   { scheme: 'ssb', namespace: NAMESPACES.SSB, status: 'live', verify: 'feed signature' },
   { scheme: 'bittorrent', namespace: NAMESPACES.BITTORRENT, status: 'live', verify: 'infohash' },
   { scheme: 'bt', namespace: NAMESPACES.BITTORRENT, status: 'live', verify: 'infohash' },
@@ -182,6 +198,9 @@ export function hasExplicitScheme (input) {
   // "host:8080" / "host:8080/path": a real registered scheme is never followed
   // by a bare port number. An UNKNOWN token followed by digits is host:port.
   if (/^\d+(\/|$|\?|#)/.test(rest) && !SCHEME_INDEX.has(scheme)) return false
+  // "fe80::1": a scheme is never followed by a second colon — that is an
+  // IPv6 literal whose first group happens to spell a scheme token.
+  if (rest.startsWith(':') && !SCHEME_INDEX.has(scheme)) return false
   return true
 }
 
@@ -195,30 +214,70 @@ export function schemeOf (input) {
 // v3 onion: exactly 56 base32 chars (a-z, 2-7) + ".onion". v2 (16 chars) is
 // dead and unsafe; we recognize the .onion suffix but only mark v3 valid.
 const ONION_V3 = /^[a-z2-7]{56}\.onion$/i
+const B32 = 'abcdefghijklmnopqrstuvwxyz234567' // RFC 4648 §6
 
 export function isOnionHost (host) {
   return /\.onion$/i.test(String(host || ''))
 }
+
+/**
+ * A well-formed v3 onion address — rend-spec-v3 §6:
+ *   base32(PUBKEY[32] ‖ CHECKSUM[2] ‖ VERSION[1]) + ".onion"
+ *   CHECKSUM = SHA3-256(".onion checksum" ‖ PUBKEY ‖ VERSION)[:2], VERSION = 3
+ * 56 base32 characters are exactly 35 bytes, so there is no padding to worry
+ * about. This is a SYNTAX check, not a security one: Tor derives the service
+ * lookup from the key bytes, so a corrupt address cannot reach a WRONG
+ * service — it just fails after a circuit is spent. Checking here lets a
+ * mistyped or truncated address fail instantly and locally. Routing does not
+ * consult it: an invalid .onion still belongs to the Tor namespace
+ * (classifyHost), because a typo leaks to a resolver as well as a real one.
+ */
 export function isValidV3Onion (host) {
-  return ONION_V3.test(String(host || ''))
+  const s = String(host || '').toLowerCase()
+  if (!ONION_V3.test(s)) return false
+  const raw = Buffer.alloc(35)
+  let acc = 0
+  let bits = 0
+  let at = 0
+  for (const c of s.slice(0, 56)) {
+    acc = (acc << 5) | B32.indexOf(c)
+    bits += 5
+    if (bits >= 8) {
+      bits -= 8
+      raw[at++] = (acc >> bits) & 0xff
+    }
+  }
+  if (raw[34] !== 3) return false
+  const want = createHash('sha3-256')
+    .update(Buffer.concat([Buffer.from('.onion checksum'), raw.subarray(0, 32), raw.subarray(34)]))
+    .digest()
+  return raw[32] === want[0] && raw[33] === want[1]
 }
 
 export function isEthName (host) {
   return /\.eth$/i.test(String(host || ''))
 }
 
+// An IPv4 dotted quad, or an IPv6 literal with or without its brackets.
 function isIpLiteral (host) {
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true
-  if (host.includes(':') && /^[0-9a-f:]+$/i.test(host)) return true
+  const bare = host.replace(/^\[|\]$/g, '')
+  if (bare.includes(':') && /^[0-9a-f:.]+$/i.test(bare)) return true
   return false
 }
 
 // Strip a scheme-less path/query/fragment, any :port and a trailing dot to
 // get the bare host. The trailing dot (the DNS root form, `vitalik.eth.`)
 // must go BEFORE the suffix checks or `.eth`/`.onion` silently miss.
+// A `:port` is stripped only from a host with exactly one colon and no
+// brackets: `::1` is an address, not a host with a port of 1.
 function bareHost (input) {
   let host = String(input || '').trim().split(/[/?#]/)[0]
-  host = host.replace(/:\d+$/, '')
+  if (!host.startsWith('[') && (host.match(/:/g) || []).length === 1) {
+    host = host.replace(/:\d+$/, '')
+  } else if (host.startsWith('[')) {
+    host = host.replace(/^(\[[^\]]*\]):\d+$/, '$1')
+  }
   host = host.replace(/\.$/, '')
   return host
 }
@@ -240,9 +299,9 @@ function asciiTld (host) {
  * and is the crux of L1/L2 for typed input — each host resolves to ONE
  * namespace, decided here and nowhere else.
  *
- * Returns one of: 'tor' | 'ens' | 'hns' | 'icann' | 'web'(IP literal) | null,
- * where null means "a single bare label" — the caller applies the nav-intent
- * rule to decide between HNS and search.
+ * Returns one of: 'tor' | 'ens' | 'hns' | 'icann' | 'web' (an IP literal, or
+ * a reserved name such as `nas.local`) | null, where null means "a single
+ * bare label" — the caller decides between HNS and search.
  *
  * `tlds` is an override for tests (defaults to the bundled IANA snapshot);
  * src/hns/hns-host.js consumes this function with the same override shape.
@@ -259,10 +318,18 @@ export function classifyHost (rawHost, tlds = ICANN_TLDS) {
   // .eth -> ENS. No fallback into HNS or ICANN if ENS has no record (L2).
   if (isEthName(host)) return NAMESPACES.ENS
 
+  // A name the network reserves (RFC 6761/6762/7686/8375 and the home-network
+  // labels, src/hns/reserved-names.cjs) is the user's own device, never a
+  // Handshake lookup. `.onion` is in that list too, which is why the Tor test
+  // above runs first.
+  if (isReservedHost(host)) return NAMESPACES.WEB
+
+  // An IP literal BEFORE the label count: an IPv6 literal has no dots and
+  // would otherwise fall to the bare-label rule and become a Handshake name.
+  if (isIpLiteral(host)) return NAMESPACES.WEB
+
   const labels = host.split('.').filter(Boolean)
   if (labels.length < 2) return null // single label: caller decides HNS vs search
-
-  if (isIpLiteral(host)) return NAMESPACES.WEB
 
   const tld = asciiTld(host)
   // ICANN has no all-numeric TLDs; a numeric final label (14898) is Handshake.
@@ -303,8 +370,37 @@ export function classify (input, opts = {}) {
       scheme,
       namespace: namespaceForScheme(scheme),
       explicit: true,
-      reason: 'explicit-scheme'
+      reason: 'explicit-scheme',
+      // Whether the table knows the scheme. `javascript:`, `data:` and
+      // `file:` come back here untouched with `namespace: null`; a caller
+      // that navigates must not treat every decision as a link target.
+      known: SCHEME_INDEX.has(scheme)
     }
+  }
+
+  // `@user@host` is the canonical Fediverse address and is NOT a host: the URL
+  // parser reads the second `@` as a userinfo separator and would navigate to
+  // the instance with a stray credential. It belongs to activitypub, whose
+  // handler refuses it visibly and names what is missing.
+  if (/^@[^@\s/]+@[^@\s/]+\.[^@\s/]+$/.test(raw)) {
+    return { url: `activitypub:${raw}`, scheme: 'activitypub', namespace: NAMESPACES.ACTIVITYPUB, explicit: false, reason: 'fedi-handle' }
+  }
+  // Any other `@` in a scheme-less input is not a name: no namespace here has
+  // one in an address, and the URL constructor would read what precedes it as
+  // userinfo and silently drop it (`@alice@host` -> `hns://host/`). A search.
+  if (raw.includes('@')) {
+    return { url: searchURL(raw), scheme: 'search', namespace: NAMESPACES.SEARCH, explicit: false, reason: 'search' }
+  }
+
+  // A pasted CID is the most natural thing anybody does with one, and it is
+  // self-describing. A CIDv0 (`Qm…`, base58, case-sensitive) cannot survive
+  // as a URL host — Chromium lowercases it — so it is written as its CIDv1
+  // base32 form, which names the same bytes. An IPNS key is deliberately NOT
+  // recognised here: `Qm…` is both a legacy IPNS key and a CIDv0, and
+  // guessing between them is exactly the sniffing the router exists to avoid.
+  if (!/[\s./:?#]/.test(raw) && CID_RE.test(raw)) {
+    const cid = bareCid(raw)
+    if (cid) return { url: `ipfs://${cid}/`, scheme: 'ipfs', namespace: NAMESPACES.IPFS, explicit: false, reason: 'bare-cid' }
   }
 
   // Scheme-less. IPFS/IPNS gateway-style paths.
@@ -338,7 +434,15 @@ export function classify (input, opts = {}) {
     return { url: `https://${raw}`, scheme: 'https', namespace: NAMESPACES.ICANN, explicit: false, reason: 'icann-tld' }
   }
   if (ns === NAMESPACES.WEB) {
-    return { url: `https://${raw}`, scheme: 'https', namespace: NAMESPACES.WEB, explicit: false, reason: 'ip-literal' }
+    // A reserved name is a device on the user's own network, which is reached
+    // the way `localhost` is (plain http, the platform resolver); an IP literal
+    // gets https like any other explicit host.
+    if (isReservedHost(host)) {
+      return { url: `http://${raw}`, scheme: 'http', namespace: NAMESPACES.WEB, explicit: false, reason: 'reserved-host' }
+    }
+    // An unbracketed IPv6 literal is not a URL host until it is bracketed.
+    const literal = host.includes(':') && !host.startsWith('[') ? raw.replace(host, `[${host}]`) : raw
+    return { url: `https://${literal}`, scheme: 'https', namespace: NAMESPACES.WEB, explicit: false, reason: 'ip-literal' }
   }
 
   // ns === null: A SINGLE BARE LABEL, AND IT IS A NAME.
@@ -369,6 +473,16 @@ export function classify (input, opts = {}) {
     return { url: makeHnsURL(raw), scheme: 'hns', namespace: NAMESPACES.HNS, explicit: false, reason: 'hns-bare-label' }
   }
   return { url: searchURL(raw), scheme: 'search', namespace: NAMESPACES.SEARCH, explicit: false, reason: 'search' }
+}
+
+/** A CID string in the form that survives as a URL host, or null. */
+function bareCid (raw) {
+  try {
+    const parsed = CID.parse(raw)
+    return parsed.version === 0 ? parsed.toV1().toString() : raw
+  } catch {
+    return null
+  }
 }
 
 // Unicode input (🤝) is punycoded here or the resolver gets a name the chain
@@ -453,11 +567,19 @@ export class ProtocolRouter {
    * @param {Request} request
    */
   async dispatch (request) {
+    const raw = String((request && request.url) || '')
     let scheme
     try {
-      scheme = new URL(request.url).protocol.replace(/:$/, '').toLowerCase()
+      scheme = new URL(raw).protocol.replace(/:$/, '').toLowerCase()
     } catch {
-      return routerError(400, 'router', 'The address is not a valid URL.', null)
+      // Not a URL the WHATWG parser accepts — but a NAMED scheme's failure is
+      // still that scheme's. `at://did:plc:abc/…` is the canonical AT-URI and
+      // is not a WHATWG URL (a host may not carry a colon that is not a
+      // port), so the scheme is read by prefix and the handler gets the
+      // request, tagged with its namespace. With no scheme at all it stays a
+      // bare 400.
+      scheme = schemeOf(raw)
+      if (!scheme) return routerError(400, 'router', 'The address is not a valid URL.', null)
     }
     const entry = this.handlers.get(scheme)
     if (!entry) {

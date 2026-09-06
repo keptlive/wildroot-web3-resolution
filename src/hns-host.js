@@ -20,16 +20,22 @@
 // numeric TLDs count (ICANN has none), IDN hosts are punycoded before the
 // lookup so real internationalized ccTLDs are not hijacked.
 
-import { classifyHost, NAMESPACES } from './router.js'
+import { classifyHost, NAMESPACES, isReservedHost, NEVER_HNS_TLDS } from './router.js'
 
 import icannTlds from './icann-tlds.cjs'
 
+// The reserved-name list lives in src/hns/reserved-names.cjs and is consulted
+// by the router's classifier; it is re-exported here for the callers that
+// have always read it from this module.
+export { isReservedHost, NEVER_HNS_TLDS }
+
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/
 
-// The scheme whose fail-closed handler owns each non-HNS, non-DNS namespace
-// (src/protocols/unimplemented-protocol.js). A malformed host under these
-// TLDs must stay in its namespace too — a typo'd onion in a DNS query leaks
-// exactly as effectively as a valid one.
+// The scheme whose handler owns each non-HNS, non-DNS namespace: ens:// for
+// *.eth (src/protocols/ens-protocol.js) and onion:// for *.onion
+// (src/protocols/onion-protocol.js). A malformed host under these TLDs must
+// stay in its namespace too — a typo'd onion in a DNS query leaks exactly as
+// effectively as a valid one.
 const NAMESPACE_SCHEMES = new Map([
   [NAMESPACES.ENS, 'ens'],
   [NAMESPACES.TOR, 'onion']
@@ -50,44 +56,6 @@ export function reservedNamespaceScheme (rawHost) {
  * @param {string?} rawHost hostname (no scheme, no port)
  * @param {Set<string>} [tlds] override for tests
  */
-/**
- * Names that are NOT Handshake, whatever the ICANN list says.
- *
- * RFC 6761 / RFC 8375 special-use names, plus the two labels every home
- * network actually uses. The classifier calls anything outside the bundled
- * ICANN snapshot a Handshake name, so `nas.local`, `printer.lan`,
- * `gitlab.internal` and `app.localhost` were all rewritten to hns:// — which
- * breaks reaching your own devices AND sends their names to a Handshake
- * resolver, where whoever registers the TLD `local` receives queries for your
- * internal machines and can answer them.
- *
- * `localhost` alone was already exempt; a subdomain of it was not, even
- * though RFC 6761 reserves the whole subtree to loopback.
- */
-const NEVER_HNS_TLDS = new Set([
-  'localhost', // RFC 6761 — the whole subtree is loopback
-  'local', // RFC 6762 — mDNS; every NAS, printer and Home Assistant
-  'internal', // RFC 8375 (home.arpa's informal twin), widely used internally
-  'home', // common home-router default
-  'lan', // common home-router default
-  'intranet',
-  'corp',
-  'private',
-  'invalid', // RFC 6761 — guaranteed not to resolve
-  'test', // RFC 6761 — reserved for testing
-  'example', // RFC 6761
-  'onion', // RFC 7686 — Tor, handled by the tor route, never Handshake
-  'arpa' // infrastructure; home.arpa lives here
-])
-
-/** Is this a name the network reserves, so never a Handshake name? */
-export function isReservedHost (rawHost) {
-  const host = String(rawHost || '').toLowerCase().replace(/\.$/, '')
-  if (!host) return false
-  const last = host.slice(host.lastIndexOf('.') + 1)
-  return NEVER_HNS_TLDS.has(host) || NEVER_HNS_TLDS.has(last)
-}
-
 export function isHnsHost (rawHost, tlds = icannTlds) {
   if (!rawHost) return false
   const host = String(rawHost).toLowerCase().replace(/\.$/, '')
@@ -106,8 +74,8 @@ export function isHnsHost (rawHost, tlds = icannTlds) {
 /**
  * If this is a main-frame-loadable http(s) URL on a Handshake host, the
  * hns:// URL it should load as; if it is on a namespace-reserved host
- * (*.eth, *.onion), the URL in THAT scheme, whose fail-closed handler
- * answers without touching the network — else null (load unchanged).
+ * (*.eth, *.onion), the URL in THAT scheme, whose handler resolves it in its
+ * own namespace or refuses it there — else null (load unchanged).
  * Everything but the scheme is preserved; the hns:// handler owns
  * https-vs-http, DANE and the trust state from there.
  * @param {string} urlString

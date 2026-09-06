@@ -41,9 +41,51 @@ function verdictFor (url) {
 test('content-addressed schemes are TRUSTLESS', () => {
   // The bytes are checked against the address they were asked for, so there is
   // nobody to believe.
-  for (const url of ['ipfs://bafyfoo/', 'ar://sometxid/', 'hyper://key/']) {
+  for (const url of ['ipfs://bafyfoo/', 'ipld://bafyfoo/x', 'hyper://key/',
+    'bittorrent://' + 'a'.repeat(40) + '/', 'bt://' + 'b'.repeat(64) + '/', 'ssb://%25abc/']) {
     assert.equal(verdictFor(url).state, 'verified', url)
   }
+})
+
+test('ar:// is TRUSTED, not trustless — the gateway is believed', () => {
+  // The transaction id names immutable bytes, but the ar:// handler does not
+  // check the bytes it was handed against the transaction: the gateway is
+  // trusted the way any HTTPS host is. The lock stays closed (HTTPS transport)
+  // and the verdict is partial, and the step says which hop is the unchecked one.
+  const v = verdictFor('ar://sometxid/')
+  assert.equal(v.state, 'partial')
+  assert.equal(v.secure, true)
+  const content = schemeSteps('ar://sometxid/').find((s) => s.label === 'Content')
+  assert.equal(content.state, 'unverified')
+  assert.match(content.detail, /not checked against the transaction/)
+})
+
+test('a hyper:// DNSLink name is TRUSTED; a hyper:// key is TRUSTLESS', () => {
+  assert.equal(verdictFor('hyper://' + 'k'.repeat(52) + '/').state, 'verified')
+  const v = verdictFor('hyper://blog.example.com/')
+  assert.equal(v.state, 'partial')
+  const name = schemeSteps('hyper://blog.example.com/').find((s) => s.label === 'Name records')
+  assert.equal(name.state, 'unverified')
+  assert.match(name.source, /DNSLink/)
+})
+
+test('nostr: proves authorship, never completeness — the lock is never green', () => {
+  const steps = schemeSteps('nostr://npub1abc')
+  assert.equal(steps.find((s) => s.label === 'Authorship').state, 'verified')
+  assert.equal(steps.find((s) => s.label === 'Completeness').state, 'unverified')
+  assert.equal(summarize(steps).state, 'partial')
+})
+
+test('gemini:// and did: and pubsub:// are never called verified', () => {
+  for (const url of ['gemini://x.test/', 'did:plc:abc', 'pubsub://topic/']) {
+    const steps = schemeSteps(url)
+    assert.ok(steps.length, url)
+    assert.ok(!steps.some((s) => s.state === 'verified'), `${url} claimed a verified step`)
+    assert.ok(!steps.some((s) => /no verification path/.test(s.detail || '')),
+      `${url} fell through to the default arm`)
+  }
+  const gemini = schemeSteps('gemini://x.test/')[0]
+  assert.match(gemini.source, /certificate not verified/)
 })
 
 test('an ordinary https:// page is TRUSTED, not trustless', () => {

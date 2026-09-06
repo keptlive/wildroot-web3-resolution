@@ -1,0 +1,777 @@
+# Chapter 2 — ICANN names
+
+**Version:** 0.1 (draft for public comment)
+**Status:** Describes the behaviour of the reference implementation in this
+repository and in `../../src/`, which ships in the Wildroot browser. Not
+endorsed by any standards body. Normative statements describe what an
+implementation must do *to interoperate with this one*; where a rule is
+inherited from an existing standard, that standard is cited and its rule
+governs.
+**Licence:** CC-BY-4.0 (see `../../LICENSE-SPEC`). The reference implementation
+is licensed separately.
+
+This chapter is part of the integrated specification whose spine is
+[`../../SPEC.md`](../../SPEC.md), where namespace selection — the rule that
+decides which chapter a given host belongs to — is specified. Every deviation
+from a cited standard, and every question we are unsure of, is in
+[`../../DEVIATIONS.md`](../../DEVIATIONS.md) under the prefix `IC`. Every
+standard cited is listed with its purpose in [`REFERENCES.md`](REFERENCES.md).
+**Those files are part of this specification, not appendices to it.**
+
+---
+
+## Contents
+
+1. [What this specifies, and why it exists](#1-what-this-specifies-and-why-it-exists) — including [**scope**](#11-scope)
+2. [The boundary: which names are ICANN's](#2-the-boundary-which-names-are-icanns)
+3. [Collisions: a label that is both](#3-collisions-a-label-that-is-both)
+4. [Special-use names](#4-special-use-names)
+5. [Transport: encrypted DNS for ICANN lookups](#5-transport-encrypted-dns-for-icann-lookups)
+6. [Trust states, and what the lock shows](#6-trust-states-and-what-the-lock-shows)
+7. [What an ICANN resolution does not get](#7-what-an-icann-resolution-does-not-get)
+8. [The one place we resolve an ICANN name ourselves](#8-the-one-place-we-resolve-an-icann-name-ourselves)
+9. [Security considerations](#9-security-considerations)
+
+Key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT** and **MAY** are
+used as in RFC 2119 / RFC 8174.
+
+Three path conventions are used. `../../src/…` is a module in this
+repository's shared `src/`. A bare `src/dns-policy.js` or
+`src/icann-tld-snapshot.js` is this chapter's own `namespaces/icann/src/`.
+Every other `src/…` is in the Wildroot browser tree, which is not part of this
+package; those are given with line numbers so a claim can be checked against
+the code that makes it.
+
+---
+
+## 1. What this specifies, and why it exists
+
+A browser that resolves Handshake names is still, overwhelmingly, a browser for
+ordinary domains. The Handshake chapters of this specification describe an
+elaborate machine — a chain proof, a DNSSEC validation anchored to an on-chain
+DS, a DANE pin — and none of it applies to `example.com`. What applies to
+`example.com` is: *decide it is not ours, hand it to the platform's resolver,
+and be honest about what that means.*
+
+Two things make that worth writing down rather than assuming.
+
+**First, the boundary is the security-critical part of an alt-root browser.**
+Everything a Handshake resolver can do wrong at the margin is less damaging
+than getting the boundary wrong at the centre. A delegated ICANN top-level
+domain classified as Handshake is a working site the browser declares does not
+exist. A Handshake name classified as ICANN is a lookup handed to a resolver
+that can never answer it — a failure *and* a disclosure. And a special-use name
+classified as Handshake (`nas.local`, `printer.lan`) is the name of a machine
+on the user's own network, sent to whoever registers the Handshake top-level
+name `local`, who may then answer for it. The boundary is one data file, one
+list of reserved labels, and about twenty lines of code, and this chapter is
+mostly about those.
+
+**Second, "hand it to the platform" is a policy, not an absence of one.** The
+platform resolver's default is the user's router, in the clear. This
+implementation configures encrypted DNS instead, and — by default — runs
+ordinary web lookups through an Oblivious DoH relay so that no single party
+sees both who is asking and what. That is a real mechanism with real failure
+modes, and the interface makes claims about it. §5 specifies the mechanism and
+§6 specifies exactly which claims are permitted.
+
+The honest summary of this whole chapter: **an ICANN resolution in this browser
+is ordinary DNS with the transport improved and the trust story stated.**
+Nothing about it is verified on the user's computer. §6.3 says so as a
+normative requirement on the interface, because the temptation to let an
+oblivious lookup read as a stronger guarantee than it is is exactly the
+temptation this project exists to resist.
+
+### 1.1 Scope
+
+**In scope:** how a host is decided to be an ICANN name; how that decision
+interacts with Handshake, with other alt-roots, and with special-use names; the
+DNS transport policy applied to ICANN lookups (mode, resolver pool, Oblivious
+DoH bridge, plaintext fallback, failing closed); and what an implementation may
+tell the user about the result.
+
+**Out of scope, explicitly:**
+
+| Out of scope | Why it is a different document |
+|---|---|
+| **Everything after the address** — the TLS handshake, WebPKI path building, HSTS, the HTTP fetch | This chapter ends where the spine ends: at an address and a trust state. The ordinary web's security model is specified by RFC 5280, RFC 8446 and RFC 9110, and we neither extend nor restrict it. |
+| **Handshake resolution** | [`../../SPEC.md`](../../SPEC.md). This chapter says only which names are *not* Handshake's. |
+| **The other alt-namespaces** — ENS, Tor, Nostr, AT Protocol | `namespaces/*/`. They are relevant here only because they are matched **before** the ICANN test (§2.2). |
+| **The engine's own resolver** — cache behaviour, happy-eyeballs, DoH probing and downgrade heuristics | We configure it; we do not implement it. Where its behaviour matters to a claim we make, §5.5 and `../../DEVIATIONS.md` §2 (what the engine does on each kind of DoH failure) say what we have and have not verified. |
+| **DNSSEC validation for ICANN names** | Not performed on this path at all (§7.2). |
+
+A consequence worth stating plainly: **there is no ICANN resolver in this
+package.** `namespaces/icann/src/` contains the boundary's data pipeline and
+the transport *policy*; the resolution itself is somebody else's, by design.
+
+---
+
+## 2. The boundary: which names are ICANN's
+
+### 2.1 The rule
+
+> **ICANN first.** A host with two or more labels whose final label, expressed
+> as an A-label and lowercased, is a delegated ICANN top-level domain **is** an
+> ICANN domain, and **MUST** be resolved through the ordinary DNS.
+
+This is rule 2 of the spine's namespace selection, and it is the whole rule. It
+is decided by data — membership of one set — and not by code. The set is
+`../../src/icann-tlds.cjs`; the classifier is `classifyHost()` in
+`../../src/router.js` (browser: `src/protocols/router.js:306-335`).
+
+An implementation **MUST NOT** apply any fallback across this boundary in
+either direction. An ICANN name that fails to resolve is an ICANN failure; it
+is not retried as a Handshake name. A Handshake name that fails is not retried
+as an ICANN name. This is law **L2** of the router chapter and it is enforced at
+the namespace boundary by the router's dispatcher, which returns a handler's
+failure tagged with that handler's own namespace (`X-Resolution-Namespace`) and
+never calls a second handler.
+
+### 2.2 Classification order
+
+`classifyHost(host)` decides in this order, and the first match is final:
+
+| # | Test | Result |
+|---|---|---|
+| 1 | host is empty, or contains whitespace | `null` (the caller treats it as a search query) |
+| 2 | final label is `onion` (RFC 7686) | `tor` — **never** a resolver, even when malformed |
+| 3 | final label is `eth` | `ens` — no fallback into ICANN or Handshake |
+| 4 | the host, or its final label, is a reserved name (§4) | `web`, reached over `http://` |
+| 5 | the host is an IPv4 or IPv6 literal, bracketed or not | `web`, reached over `https://` |
+| 6 | fewer than two labels | `null` (a bare label; see §2.5) |
+| 7 | final label is all ASCII digits | `hns` — ICANN delegates no all-numeric TLD |
+| 8 | final label ∈ the ICANN set | **`icann`** |
+| 9 | otherwise | `hns` |
+
+Rows 2 and 3 come before row 8 deliberately: a namespace with its own root of
+trust must be able to *fail* without its name ever reaching a DNS resolver. For
+`.onion` this is not politeness — the query itself is the deanonymising event.
+Row 2 also precedes row 4 although `onion` is in the reserved list, so that a
+`.onion` host is answered by the Tor namespace rather than by the platform.
+
+Rows 4 and 5 come before row 6, and an implementation **MUST** order them that
+way. Neither test can be expressed as a label count: a reserved name may have
+any number of labels (`localhost`, `app.localhost`), and an IPv6 literal has no
+dots at all, so `[::1]` would otherwise fall to the bare-label rule and start a
+name resolution for an address the user typed in full.
+
+### 2.3 Canonical form before comparison
+
+Before the final label is compared against the set, a host **MUST** be:
+
+- **lowercased** — RFC 4343: DNS owner names compare case-insensitively;
+- **stripped of a trailing root dot** — `example.com.` and `example.com` are
+  the same name, and must not land in different namespaces;
+- **stripped of any `:port`** and of any path, query or fragment. The port is
+  stripped only from a host with exactly one colon, or from a bracketed host,
+  so that `::1` stays an address rather than becoming a host with a port of `1`
+  (`bareHost()`, `src/protocols/router.js:271-282`);
+- **converted to A-labels** — RFC 5890/5891. In this implementation the
+  conversion is done by handing the host to the WHATWG URL host parser and
+  reading `hostname` back (`asciiTld()`, `src/protocols/router.js:284-293`),
+  which is UTS-46 as the URL Standard defines it rather than IDNA2008. The
+  bundled set holds IANA's published punycode, so `пример.рф` matches
+  `xn--p1ai` and an emoji label matches nothing and is Handshake's. The
+  divergence between UTS-46 and IDNA2008 is inherited from the spine's D-17 and
+  restated here as IC-12, because on this path it can move a name **across the
+  ICANN boundary**, which is a stronger consequence than it has on the
+  Handshake path.
+
+If the URL parser throws — which it does for a host whose last label is all
+digits, by the "ends in a number" rule (spine §5.1) — the raw final label is
+used instead, and row 7 catches it. The `http(s)`→`hns` rewrite has no such
+fallback: it returns `null` for a URL it cannot parse, so a literal
+`http://hello.14898/` link is left alone rather than rewritten. That URL is one
+the engine cannot construct either, so the rewrite is unreachable rather than
+skipped: IC-14.
+
+### 2.4 The vendored root-zone snapshot
+
+The set is a **build-time snapshot of the IANA root zone database**, generated
+from `https://data.iana.org/TLD/tlds-alpha-by-domain.txt` and committed to the
+repository. It holds **1,438 labels** and carries IANA's own provenance line in
+its header:
+
+```
+// IANA Version 2026090500, Last Updated Sat Sep  5 07:07:01 2026 UTC
+```
+
+Requirements on the snapshot:
+
+- It **MUST** carry the source's version and date, in the artefact itself. A
+  boundary whose age cannot be read off the file is a boundary nobody can
+  reason about.
+- It **MUST** hold A-labels, lowercased, one label per entry, exactly as IANA
+  publishes them. No second table for Unicode.
+- The generator **MUST** refuse to write a list of implausible size. Ours
+  refuses fewer than 1,000 entries, so a truncated fetch or an error page can
+  never overwrite the boundary.
+- It **MUST NOT** be fetched at runtime. A privacy browser does not phone home
+  at startup, and the classifier has to answer a keystroke without waiting for
+  the network. The cost of that choice is IC-1: the boundary is only as fresh
+  as the last release.
+
+`src/icann-tld-snapshot.js` is the parse-and-render half of that pipeline,
+extracted so the claim *"the committed file is exactly what the generator
+produces"* is checkable offline (`tests/icann-tld-snapshot.test.js`). Wildroot
+additionally runs a **live drift alarm** (`tests/hns/icann-tlds-live.test.js`)
+that compares the snapshot with IANA on every networked test run and reports
+drift in both directions. It is an alarm and never a build gate: a red build
+because IANA was unreachable teaches everyone to ignore the alarm.
+
+Both directions of drift are user-visible failures:
+
+- a **delegated TLD missing** from the set → a real domain is resolved as a
+  Handshake name, fails, and the user is told the site does not exist;
+- a TLD in the set that IANA has **removed** → a name that could be Handshake's
+  is sent to https:// and to an ICANN resolver, which both fails and discloses
+  the lookup.
+
+The second grows over time: ICANN's 2026 round drew roughly 1,600
+applications, and each delegation converts a string that resolves as a
+Handshake name today into an ICANN TLD.
+
+### 2.5 A single bare label is never ICANN
+
+A host with one label is not classified by row 8 at all — `classifyHost`
+returns `null` and the caller decides. In `classify()`, the ICANN set is
+consulted a second time and used **in reverse**: a bare `com`, `org` or `app`
+is a word somebody is part-way through typing and becomes a **search**; any
+other bare label (`hnshosting`, `14898`, `🤝`) is a Handshake name
+(`src/protocols/router.js:436-465`). An implementation **MUST NOT** turn a bare
+label into an ICANN lookup: there is no such name.
+
+The same reversal is what makes whitespace safe. `classifyHost` returns `null`
+for a host containing whitespace as well as for a bare label, so the bare-label
+rule excludes whitespace explicitly; without that, every multi-word search
+would become a Handshake lookup.
+
+### 2.6 The rule must be applied on every path
+
+An implementation **MUST** apply the same classification wherever a host is
+classified, and **MUST** hold each list it depends on in exactly one place. In
+this implementation there are four consumers of the classification and three of
+the reserved-name list, and they agree by construction:
+
+| Path | Function | Reads |
+|---|---|---|
+| typed input / omnibox decision | `classify()` → `classifyHost()` | the ICANN snapshot and the reserved list |
+| omnibox suggestion rows | `src/ui/omni-box.js` (CommonJS, cannot import the router) | the same two `.cjs` files |
+| `http(s)`→`hns` navigation rewrite | `rewriteToHns()` → `isHnsHost()` → `classifyHost()` | via the router |
+| subresource guard (`onBeforeRequest`) | `rewriteToHns()` | via the router |
+| session-wide certificate verification | `isHnsHost()` | via the router |
+| WebSocket PAC script (runs inside the engine) | `src/hns/ws-proxy-pac.js`, which embeds the lists | the same two `.cjs` files |
+
+The two lists are `../../src/icann-tlds.cjs` and `../../src/reserved-names.cjs`,
+each a CommonJS module so that the ES-module router, the CommonJS omnibox and
+the generated PAC text can all read the same bytes. A list kept in two places
+is a list that disagrees with itself, and on this boundary the disagreement is
+a disclosure.
+
+`rewriteToHns()` (`src/hns/hns-host.js:85-98`) returns `null` for every ICANN
+host, which is the mechanically checkable form of §7: an ICANN name never
+enters the Handshake pipeline, and so never meets DANE or the SSRF guard.
+
+---
+
+## 3. Collisions: a label that is both
+
+A label can exist in both roots. A string can be a delegated ICANN TLD and,
+simultaneously, a registered Handshake top-level name whose owner has published
+records for it.
+
+> **The ICANN answer wins.** Membership of the snapshot is decided first and
+> is final. There is no per-name preference, no negotiation, and no prompt.
+
+This is a deliberate deviation from Handshake's own model, in which ICANN
+labels are reserved and claimable by their ICANN holder with a DNSSEC proof,
+and a claimed one would make the chain authoritative. We route to ICANN anyway.
+The reason is not that Handshake's model is wrong; it is that this rule is what
+makes the browser safe to use as somebody's **only** browser. A user who cannot
+reach their bank because a chain name shadowed it has been harmed by our
+alt-root, and no amount of correctness in the alt-root repairs that. IC-2; the
+spine's D-16 states the same decision from the Handshake side.
+
+A reserved name (§4) outranks both roots. If one of those labels were ever
+delegated, this browser would still route it to the platform.
+
+**The escape hatch is the scheme, and only the scheme.** An explicit
+`hns://example.com/` is routed to the Handshake handler and resolved on the
+chain, because law **L1** says an explicit scheme selects the protocol and is
+never re-sniffed. Nothing in the Handshake handler refuses an ICANN label. So
+the collision policy is: *ICANN by default, Handshake on request, never
+silently.* An implementation **MUST NOT** make the reverse move — an
+unqualified name **MUST NOT** be resolved on the chain because ICANN failed.
+
+**Every other alt-root is Handshake's.** `.crypto`, `.sol`, `.bnb`, `.nft` and
+anything else that is neither delegated by IANA, nor reserved by §4, nor one of
+the two namespaces matched at rows 2–3 goes to whoever holds the Handshake
+top-level name of that string. `brad.crypto` resolves against the Handshake
+`crypto` owner's records, not against Unstoppable's registry. That is the
+consistent application of §2.1 rather than a separate policy, and other
+implementers may reasonably differ.
+
+---
+
+## 4. Special-use names
+
+A host whose final label is reserved by RFC 6761 (`localhost`, `invalid`,
+`test`, `example`), RFC 6762 (`local`), RFC 7686 (`onion`), or RFC 8375 and
+adjacent practice (`arpa`, `internal`, `home`, `lan`, `corp`, `intranet`,
+`private`) **MUST** be routed to the mechanism that owns it and **MUST NOT** be
+sent to a Handshake resolver.
+
+This matters more on the ICANN boundary than anywhere else, because **none of
+these labels is in the ICANN set**. Without an explicit carve-out, rule §2.1's
+"otherwise, Handshake" catches every one of them: `nas.local`, `printer.lan`,
+`gitlab.internal` and `app.localhost` all become Handshake lookups. That breaks
+reaching your own devices *and* sends their names to whoever registers the
+Handshake top-level name `local`, who can then answer for them.
+
+The list is `../../src/reserved-names.cjs` (browser:
+`src/hns/reserved-names.cjs`), consulted at row 4 of §2.2 and therefore by every
+path in §2.6's table. Three details worth copying:
+
+- **`localhost` is a subtree, not a label.** RFC 6761 §6.3 reserves
+  `localhost.` and *any name ending in `.localhost.`* to loopback, so
+  `app.localhost` is covered as well as `localhost`. `isReservedHost` compares
+  both the whole host and its final label, which gives that rule for every
+  entry.
+- **The result is `web` over `http://`, not a refusal.** A user who types
+  `nas.local` means their NAS, and the platform resolver is the mechanism that
+  owns the name — the same treatment bare `localhost` gets. Plain `http` rather
+  than `https`, because a device on a home network has no public certificate.
+- **The list is longer than the RFCs.** `home`, `lan`, `corp`, `intranet` and
+  `private` are not reserved by any RFC; they are what home routers and
+  corporate networks actually use. Including them is a deviation we would
+  defend (IC-5): the alternative is a class of names that resolve to a
+  stranger's records on a user's own LAN.
+
+---
+
+## 5. Transport: encrypted DNS for ICANN lookups
+
+Handshake names never use this path: they ride the resolver specified in the
+spine's §9. This section is about everything else.
+
+### 5.1 The default is not the platform default
+
+Left alone, every ICANN lookup goes to the local router in the clear. An
+implementation **SHOULD** configure encrypted DNS instead. Ours does, at
+startup, via the engine's own secure-DNS facility
+(`app.configureHostResolver({ secureDnsMode, secureDnsServers })`,
+`src/index.js:500`). The engine speaks **RFC 8484 wire-format DoH over HTTPS
+templates** and nothing else — no DoT (RFC 7858/8310), no DNS-over-QUIC, and no
+ODoH. That constraint is the reason §5.3 exists.
+
+The decision of *what* to tell it is made once, in one place
+(`planDnsTransport()`, `src/dns-policy.js`), and the result is **recorded**
+(`recordDnsPlan()`). §6 requires the interface to describe that record and
+nothing else.
+
+### 5.2 `dns.mode`
+
+Exactly three values (`src/config.js:348-357`):
+
+| `dns.mode` | Meaning | Plaintext possible? |
+|---|---|---|
+| `off` | no configuration is applied; the platform resolver's default is used | always |
+| `automatic` *(default)* | encrypted DNS to the configured servers, **falling back to unencrypted system DNS when none answer** | yes, on failure |
+| `secure` | encrypted DNS only; unencrypted DNS is refused | no |
+
+Normalisation is specified, and an implementation **SHOULD** copy it
+(`normalizeDnsMode()`, `src/dns-policy.js`):
+
+- **Case and surrounding whitespace are forgiven.** `'Off '` means `off`. A
+  configuration file is written by a person, and reading their `'Off'` as
+  `automatic` would turn encryption *on*, with a plaintext fallback, for
+  somebody who was trying to turn it off.
+- **A value that is not a mode is reported**, through a callback the caller
+  turns into a warning, and then becomes `automatic`. An absent or empty value
+  is the documented default and is *not* reported: a warning that fires for
+  every default configuration is a warning nobody reads.
+
+`dns.mode` is surfaced in the browser's settings page with all three values
+explained (`src/pages/settings.html:464-472`) and takes effect on restart.
+
+### 5.3 Oblivious DoH, through a loopback bridge
+
+The engine cannot speak RFC 9230. The implementation therefore **runs an RFC
+8484 DoH server on loopback** and performs the oblivious exchange behind it:
+
+```
+engine ──https──▶ loopback bridge ──HPKE──▶ relay ──▶ target ──▶ resolver
+        (127.0.0.1)   (in-process)      (independent)   (ours)
+```
+
+Normative requirements on such a bridge:
+
+- It **MUST** bind to loopback only.
+- Its endpoint path **MUST** be an unguessable per-launch secret, and it
+  **MUST** refuse any request carrying `Origin` or `Sec-Fetch-Site`. Both are
+  needed: a page on any origin can reach a loopback listener, and although it
+  cannot read the answer, *writing* into the bridge's "recently answered" list
+  is by itself enough to make the interface report a name as oblivious that
+  went out in the clear (§6.2). Ours does both
+  (`../../src/odoh-bridge.js:65`, `:119`).
+- On failure it **MUST** answer SERVFAIL rather than resolving by some other
+  route. What happens next is the engine's secure-DNS mode to decide, which
+  keeps that decision in one visible place instead of hidden inside the
+  component whose whole purpose is privacy.
+- Its TLS certificate **MUST** be generated in memory per launch and **MUST
+  NOT** be written to disk. The engine is made to trust it by pinning its
+  SubjectPublicKeyInfo hash — the RFC 7469 pin construction, base64 of
+  SHA-256 over the SPKI — and that pin makes the engine accept that public key
+  **for any host**. A key with that power in a profile directory is a standing
+  MITM key for the whole browser. Ours is a fresh P-256 self-signed
+  certificate naming only `localhost` and `127.0.0.1`
+  (`../../src/self-cert.js`).
+- The certificate **MUST NOT** be minted for a bridge that is not going to
+  run. §9.3.
+
+The ODoH exchange itself is the one specified in the spine's §9.2 and
+implemented in `../../src/odoh.js`: RFC 9230 message format, RFC 9180 HPKE
+(X25519-HKDF-SHA256 / HKDF-SHA256 / AES-128-GCM), RFC 5869 HKDF for the §6.3
+response key and nonce. Relays are tried in order; a 401 from the target means
+the cached configuration is stale and it is refetched once.
+
+The target's ODoHConfig is fetched **directly from the target**, over ordinary
+HTTPS, at `/.well-known/odohconfigs`, and cached for one hour. Fetching it
+through the relay would add nothing: the configuration is public and
+authenticated by the target's own TLS, and a relay that tampered with it would
+simply break every subsequent decryption. Two honest notes: the direct fetch
+means the target learns the client's IP address once per hour, unlinked to any
+query; and we believe `/.well-known/odohconfigs` is deployed convention rather
+than an IANA-registered well-known URI (IC-8, and `../../DEVIATIONS.md` §2 on
+whether that URI is registered — we would like to be corrected).
+
+### 5.4 The plan: what replaces what, and what fails closed
+
+The transport decision is a pure function of the configuration and of whether
+the bridge started. It returns six facts, and an implementation following this
+chapter **MUST** decide each of them consciously:
+
+| Field | Meaning |
+|---|---|
+| `mode` | the normalised `dns.mode` |
+| `servers` | the RFC 8484 templates the engine is given |
+| `oblivious` | the bridge is carrying the engine's lookups |
+| `configure` | the host-resolver call is made at all; when false the engine keeps its default, which is system DNS |
+| `failClosed` | `secure` was asked for and there is no server, so nothing resolves |
+| `plaintextFallback` | an ICANN lookup can still leave this machine in the clear |
+
+Two of those need stating in prose.
+
+> **When the bridge starts, its loopback template replaces the configured
+> resolver pool. It does not join it.** (IC-7.)
+
+Consequences:
+
+- If the bridge **fails to start**, the pool remains and lookups are encrypted
+  but not oblivious. The implementation logs exactly that, and the interface
+  reports it (§6.2).
+- If the bridge **starts and then a lookup fails** — every relay down, the
+  target unreachable — the bridge answers SERVFAIL and the engine applies its
+  mode. In `automatic` that means **unencrypted system DNS**, not the
+  configured DoH pool, because the bridge replaced it. Turning obliviousness
+  on therefore changes the floor beneath a failure from *encrypted* to
+  *plaintext*.
+- In `secure` mode there is no floor: a relay outage is a total ICANN outage.
+  That is the honest trade rather than a defect — the alternative is resolving
+  in the clear after the user asked us not to.
+
+> **`secure` with no server to point at fails closed.** The engine is
+> configured for secure mode with an **empty** server list, so nothing
+> resolves, rather than left on its default, which resolves in the clear.
+
+A setting that says "never plaintext" must not silently mean nothing. A
+profile that asks for `secure` with an empty `dns.servers`, or whose bridge
+failed to start with `dns.servers` unset, therefore breaks loudly — every
+ordinary web address fails, the implementation logs why, and the interface
+reports the refusal as a *failed* step rather than as system DNS (§6.2). An
+implementation **MUST NOT** treat that configuration as a no-op.
+
+Nothing is configured in two other cases, and neither is a contradiction:
+`mode: 'off'`, which asks for exactly that, and `automatic` with no resolver to
+point at, which asks to resolve the way the platform would. Both report
+`plaintextFallback`, and the interface says so.
+
+### 5.5 Captive portals
+
+`automatic` exists for captive portals and hotel Wi-Fi, which intercept DNS and
+would otherwise make the network unusable. This is a genuine
+availability-versus-privacy trade and it is resolved in favour of availability
+by default (IC-6). An implementation **MUST** state which mode was in force and
+**MUST NOT** describe `automatic` as private without the qualification: an
+attacker who can make the configured resolvers unreachable can force every
+lookup into the clear, and in the bridged case (§5.4) that is one relay outage
+away.
+
+We have **not** independently measured what the engine does on each failure
+kind — a transport failure, a SERVFAIL, a timeout — and `../../DEVIATIONS.md`
+§2 records that as an open question rather than asserting a behaviour we have
+not tested. IC-D1 is blocked on the same measurement.
+
+### 5.6 The bootstrap lookups are not protected
+
+The bridge, and the ODoH transport under it, must themselves resolve the relay
+and target hostnames (`odoh-relay.numa.rs`, `odoh.hns.one`) and open ordinary
+HTTPS connections to them. Those lookups are made by the runtime's own resolver
+— the OS resolver — not by the engine's configured secure DNS and not by the
+bridge. The same is true of the DoH pool's own hostnames in the non-bridged
+case.
+
+So the first lookups of a session, and every configuration refresh, disclose
+*which privacy infrastructure this browser uses* to the local network in the
+clear. They do not disclose which sites the user visits. An implementation
+**MUST NOT** present the oblivious path as leaking nothing to the local
+network. IC-9.
+
+---
+
+## 6. Trust states, and what the lock shows
+
+### 6.1 The steps
+
+An ICANN page produces exactly two steps, in the four-state vocabulary of the
+spine's §4 (`icannNameStep()` and `schemeSteps()`,
+`../../src/trust-path.js:255-490`):
+
+| Step | State | What it says |
+|---|---|---|
+| **Domain name** | `unverified`, or `failed` when the lookup was refused | how the address was looked up, and by whom |
+| **Connection** | `unverified` for `https:`, `none` for `http:` | a certificate authority vouched, or nothing did |
+
+**No step on this path is ever `verified`, and an implementation MUST NOT make
+one so.** Nothing here is checked on the user's computer: not the address, not
+the binding of the name to it, and not the certificate — a CA is believed, and
+so is every other CA the platform trusts.
+
+### 6.2 What the Domain name step may say
+
+The step is computed from two inputs and nothing else: **the recorded plan**
+(§5.4) and whether the live bridge answered *this host*. It **MUST NOT** be
+computed from the static configuration, which the bridge may have replaced.
+Five mutually exclusive forms, in the order they are tested:
+
+1. **Oblivious** — *"Oblivious DoH — relay `<relay>` → target `<target>`"*, when
+   the bridge answered this name. The relay and the target **MUST** both be
+   named. It **MUST** still say the answer is the resolver's word.
+2. **Oblivious bridge configured, this name not answered by it** — the bridge
+   is the only resolver the engine was given and has no record of this host, so
+   the honest statement is that we cannot tell how it was resolved. The wording
+   depends on the mode, because the possibilities do:
+   - `automatic`: *"Resolver not determined — the oblivious bridge did not
+     answer this name"*, and the detail says the engine falls back to
+     unencrypted system DNS when the bridge fails, so **this lookup may have
+     gone out in the clear**;
+   - `secure`: *"Oblivious bridge only — this name was not answered by it"*,
+     and the detail says unencrypted DNS is refused, so the answer most likely
+     came from the engine's cache. It **MUST NOT** suggest plaintext, which
+     that mode does not permit.
+3. **Refused** — *"Secure DNS with no server — lookups refused"*, state
+   `failed`, when the plan failed closed (§5.4). Reporting this as system DNS
+   would describe the exact thing that did not happen.
+4. **Plaintext** — *"System DNS, unencrypted"*, with the consequence in plain
+   words: your router, your ISP and anyone on the path saw the name. This is
+   also what is said when the caller has no plan to describe.
+5. **Encrypted, not oblivious** — *"Encrypted DNS to `<resolver>` (+n more) —
+   NOT oblivious"*. The phrase "NOT oblivious" is load-bearing and is pinned by
+   a test in the Wildroot tree that scans every scheme's steps: any step whose
+   text contains "oblivious" must also disclaim it unless it is form 1. The
+   detail text states the mode's fallback behaviour explicitly.
+
+The governing rule:
+
+> **Obliviousness is claimed for a name the bridge actually answered, never
+> because the feature is switched on.**
+
+`icannBridgeState()` (`src/dns-policy.js`) returns a claim only when the bridge
+is running **and** `servedRecently(host)` is true, and returns `null` rather
+than throwing for any object that misbehaves. In `automatic` mode the engine may
+resolve any given name by other means at any moment; an interface that reported
+the setting rather than the event would be making exactly the class of claim
+this project exists to stop making.
+
+`servedRecently` matches an exact name or a *sub*domain of a name the bridge
+answered, within a ten-minute window. The direction matters: matching the other
+way round would let one lookup for `victim-chosen.example.com` vouch for
+`example.com`, and even for `com`. We are not confident the ten minutes or the
+subdomain rule are right — `../../DEVIATIONS.md` §2 on that window.
+
+### 6.3 Aggregating to a lock
+
+An ICANN page is **TRUSTED**, never **TRUSTLESS**, in the three-state scheme of
+the spine's §4.1. An implementation **MUST NOT** let an oblivious lookup
+upgrade the verdict: obliviousness is a privacy property and the lock is an
+integrity claim. A refused lookup (form 3) is a `failed` step, and the page
+aggregates to `failed`.
+
+`summarize()` returns `partial` for both `https:` and `http:` here, because it
+treats `none` and `unverified` alike as "weak". The spine's §4.1 says a
+plaintext connection aggregates to **OPEN**, and the address bar derives that
+separately (`src/index.js:1512-1513`) — but the security panel, which calls
+`summarize()` directly (`src/window.js:2766`), does not. IC-10. An
+implementation following this specification **MUST** implement the plaintext
+rule in the aggregation itself.
+
+---
+
+## 7. What an ICANN resolution does not get
+
+Stated as requirements because each is a claim an implementer might otherwise
+assume in our favour.
+
+### 7.1 No DANE
+
+The browser installs one session-wide certificate verification hook, and its
+**first line defers to the platform's WebPKI for every host that is not a
+Handshake host** (`src/index.js:1330-1331`). No TLSA record is queried for an
+ICANN name and no pin is applied. `../../src/dane.js` is never reached on this
+path.
+
+This is deliberate. DANE-for-HTTPS in the ICANN world requires validated
+DNSSEC, which §7.2 says we do not have here; a pin taken on a resolver's word
+against a name a CA already vouches for adds an availability failure mode and
+no security. IC-3, and `../../DEVIATIONS.md` §2 records that we are not certain
+it is more than an excuse.
+
+### 7.2 No DNSSEC
+
+Nothing on this path validates a signature. The engine's resolver does not, and
+neither do we. An ICANN answer is *the resolver's word*, which is precisely
+what the Domain name step says. The spine's entire DNSSEC apparatus is anchored
+to an on-chain DS and has no counterpart here — the ICANN root's trust anchor
+is not configured anywhere in this browser. IC-4.
+
+### 7.3 No SSRF guard
+
+`../../src/safe-address.js` — which refuses loopback, RFC 1918 private,
+link-local (including `169.254.169.254`), CGNAT, benchmarking, multicast and
+reserved addresses — is applied on the Handshake path, on the HIP-5 `_op` path,
+and in the WebSocket proxy. It is **not** applied to ICANN names, and cannot
+be: the address never passes through our code. `http://localtest.me/` resolving
+to `127.0.0.1` behaves exactly as it does in any other browser, subject to the
+engine's own private-network protections and nothing of ours. IC-13.
+
+The mechanically checkable form of §7.1 and §7.3 together is that
+`rewriteToHns()` returns `null` for every ICANN host: an ICANN name never
+enters the pipeline where either mechanism lives. That is asserted in
+`tests/icann-boundary.test.js`.
+
+### 7.4 No SVCB/HTTPS use, no DDR
+
+The SVCB/HTTPS parser described in the spine's D-3 is not used here either, and
+RFC 9462 Discovery of Designated Resolvers is not implemented: the resolver
+list is configuration, never discovered. IC-11.
+
+---
+
+## 8. The one place we resolve an ICANN name ourselves
+
+There is exactly one exception to "we do not resolve ICANN names", and it is
+inside a **Handshake** resolution. When a Handshake zone delegates to a
+nameserver whose own name is an ICANN domain, or a CNAME inside a Handshake
+zone points at an ICANN host, the resolver needs that host's address and gets
+it from the runtime's OS resolver — `dns.lookup()` at
+`src/hns/resolver.js:360`, `:408` and `:903`.
+
+Four properties of that path, all of which an implementation should know:
+
+- It is the **least** protected DNS this browser does. `dns.lookup()` is
+  `getaddrinfo`: it does not use the engine's configured secure DNS, it does
+  not use the ODoH bridge, and it is not covered by any of §5. The ICANN name
+  goes out in the clear.
+- It is also the one DNS answer in this browser that is **not** checked against
+  the question that was asked. Every message the Handshake resolver parses
+  itself is — `assertAnswersTo(parsed, name, type)` is applied on the TCP path
+  and on every DoH and ODoH answer (`../../src/dns-query.js:342-349`,
+  `../../src/doh.js:69-71`), which matters most over DoH, where RFC 8484 §4.1
+  fixes the message id at zero and the question section is the only thing left
+  to match on. `dns.lookup()` returns an address rather than a message, so
+  there is nothing to check: the platform resolver is trusted to have asked
+  what we asked it to ask.
+- Its answer is **unvalidated**, and the resolution says so: an address
+  obtained this way is the OS resolver's word, and a CNAME to an ICANN host
+  makes the Handshake answer unauthenticated from that point.
+- Its answer **is** SSRF-guarded (`_nameserverFor`, `src/hns/resolver.js:325`,
+  and the CNAME path at `:909`), because that address is attacker-chosen in
+  exactly the way §7.3's is not.
+
+This is a Handshake-side property with an ICANN-side consequence, which is why
+it is recorded in both chapters. IC-9 covers it together with the bootstrap
+lookups.
+
+---
+
+## 9. Security considerations
+
+### 9.1 The boundary is the attack surface
+
+Every interesting attack in this chapter is a misclassification.
+
+- **A stale snapshot is a live vulnerability**, in the direction that grows.
+  As ICANN delegates new TLDs, strings that were Handshake's become ICANN's; a
+  browser running an old snapshot keeps sending those names to a Handshake
+  resolver, and whoever registered the corresponding Handshake top-level name
+  answers for a domain they do not own. The mitigation is the drift alarm
+  (§2.4), and it is only as good as the release cadence.
+- **A special-use name sent to an alt-root is a LAN disclosure**, and the
+  disclosure is the attack: `nas.local` handed to the holder of the Handshake
+  name `local` tells them a machine exists and lets them answer for it. §4.
+- **A namespace matched after ICANN would be a namespace that can leak.** This
+  is why `.onion` and `.eth` are matched first and unconditionally, malformed
+  or not.
+- **A list held twice is a list that disagrees**, and the path that has the
+  older copy is the path that leaks. §2.6.
+
+### 9.2 Fail-open is the default, and it is a choice
+
+`automatic` mode, the plaintext fallback, and the bridge's SERVFAIL-then-defer
+policy all resolve availability-versus-privacy in favour of availability. An
+attacker who can make the configured resolvers unreachable can therefore force
+every ICANN lookup into the clear, and — because the bridge replaces the pool
+rather than joining it (§5.4) — needs only to reach the relays to do it.
+
+This is not hidden: `secure` mode exists, it refuses plaintext even when that
+means resolving nothing at all, it is documented in the settings page in the
+user's own words, and the interface reports the path each page actually took.
+But the default is fail-open and an implementation copying this design should
+copy that sentence too.
+
+### 9.3 The any-host trust anchor
+
+Pinning the bridge's SPKI into the engine makes the engine accept that public
+key for **every** host, not only for `127.0.0.1`. That is why the key is
+generated in memory per launch and never written to disk: there is nothing to
+steal after the process exits, and the anchor dies with it.
+
+The certificate has to be minted *before* the engine is ready, because the
+command-line switch that carries the pin is read once at startup, while the
+bridge itself can only be started later. Those are two moments, and they
+**MUST** ask one question. `wantsObliviousBridge(config)` is that question, and
+both call sites call it (`src/index.js:259-260`, `:461`): a key the engine
+trusts for every host is never minted for a bridge that will not run. A bridge
+whose certificate does not match the pin the engine was given is treated as
+fatal to the bridge rather than silently falling back to an untrusted endpoint,
+which would fail every lookup instead.
+
+### 9.4 Privacy
+
+- **Without the bridge**, the configured resolver sees the user's address and
+  every name they visit, together. That is stated in the Domain name step in
+  those words.
+- **With the bridge**, no single party sees both — subject to the same
+  caveat the spine's §9.2 makes and this chapter inherits: **two ODoH relays
+  exist worldwide and one is run by a target operator**, so RFC 9230's
+  non-collusion assumption does not hold at that scale. The code is worth
+  having; the claim is not. An implementation **MUST NOT** present ODoH as a
+  privacy guarantee at current deployment scale.
+- **The relay hop costs latency** — around 200 ms warm, more on a cold
+  configuration fetch — on every cache miss, for every site. That is a trade a
+  user should get to make, which is why it is a configuration key. It is
+  editable only in the configuration file (IC-15).
+- **The bootstrap lookups leak which privacy infrastructure is in use** (§5.6).
+- **Without ECH** (spine D-3) the server name is in the ClientHello regardless,
+  so an oblivious DNS lookup does not by itself hide which site was visited
+  from an on-path observer.

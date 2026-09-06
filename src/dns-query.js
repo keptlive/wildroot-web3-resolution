@@ -114,8 +114,13 @@ export function parseAnswers (buf) {
   const nscount = buf.readUInt16BE(8)
   const arcount = buf.readUInt16BE(10)
   let offset = 12
+  // The question section is KEPT, not skipped: a reply is only a reply to
+  // the question that was asked, and the caller checks (assertAnswersTo).
+  const questions = []
   for (let i = 0; i < qdcount; i++) {
-    offset = readName(buf, offset).next + 4
+    const { name, next } = readName(buf, offset)
+    questions.push({ name: name.toLowerCase().replace(/\.$/, ''), type: buf.readUInt16BE(next), klass: buf.readUInt16BE(next + 2) })
+    offset = next + 4
   }
 
   /**
@@ -320,7 +325,27 @@ export function parseAnswers (buf) {
   const answers = readSection(ancount)
   const authority = readSection(nscount)
   const additional = readSection(arcount)
-  return { id, rcode, truncated, authenticated, answers, authority, additional }
+  return { id, rcode, truncated, authenticated, questions, answers, authority, additional }
+}
+
+/**
+ * A reply is a reply to the question that was asked. The message id is
+ * 16 bits and, over DoH, fixed at zero — so the question section is the only
+ * thing that binds an answer to a query, and a resolver or an on-path party
+ * that returns the answer for a different name or type is caught here, not
+ * believed. Owner names compare case-insensitively (RFC 4343).
+ * @param {{questions?: Array<{name:string,type:number}>}} parsed
+ * @param {string} name the name queried
+ * @param {number} type the RR type queried
+ * @returns the same parsed reply, for chaining
+ */
+export function assertAnswersTo (parsed, name, type) {
+  const want = String(name || '').toLowerCase().replace(/\.$/, '')
+  const q = parsed && parsed.questions && parsed.questions[0]
+  if (!q || q.name !== want || q.type !== type) {
+    throw new Error(`DNS reply answers a different question: asked ${want}/${type}, got ${q ? `${q.name}/${q.type}` : 'no question section'}`)
+  }
+  return parsed
 }
 
 /**
@@ -353,7 +378,7 @@ export function query (server, port, name, type, { timeout = 5000, dnssec = fals
         try {
           const parsed = parseAnswers(buf.subarray(2, expected + 2))
           if (parsed.id !== id) throw new Error('DNS reply id mismatch')
-          resolve(parsed)
+          resolve(assertAnswersTo(parsed, name, type))
         } catch (err) {
           reject(err)
         }

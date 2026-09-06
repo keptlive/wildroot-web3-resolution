@@ -85,6 +85,19 @@ export function txtStringsFrom (answers, txtType = 16) {
 /** The public address shapes. Reused, never re-inlined — see the header. */
 export const CID_RE = /^(Qm[1-9A-HJ-NP-Za-km-z]{44}|b[a-z2-7]{58,110})$/
 export const ARTX_RE = /^[A-Za-z0-9_-]{43}$/
+
+/**
+ * Is this the ONE spelling of an Arweave transaction id? 43 base64url
+ * characters carry 258 bits for a 32-byte id, so the final character's two
+ * low bits must be zero (RFC 4648 §3.5) — otherwise sixteen distinct strings
+ * name every transaction, and a pointer would not round-trip to one spelling.
+ * @param {string} id
+ */
+export function isCanonicalTxid (id) {
+  if (!ARTX_RE.test(String(id || ''))) return false
+  const bytes = Buffer.from(id, 'base64url')
+  return bytes.length === 32 && bytes.toString('base64url') === id
+}
 /**
  * An IPNS name: the base36 libp2p-key CIDv1 `ipfs name publish` returns
  * (`k51…` — base36, NOT base32, which is why the leading `k` is followed by
@@ -177,7 +190,7 @@ export function parsePointer (value) {
 
   if (tag === 'ipfs') return CID_RE.test(id) ? { kind: 'ipfs', cid: id } : null
   if (tag === 'ipns') return IPNS_RE.test(id) ? { kind: 'ipns', key: id } : null
-  if (tag === 'ar') return ARTX_RE.test(id) ? { kind: 'arweave', txid: id } : null
+  if (tag === 'ar') return isCanonicalTxid(id) ? { kind: 'arweave', txid: id } : null
   if (tag === 'hyper') {
     return HYPER_KEY_RE.test(id) ? { kind: 'hyper', key: id.toLowerCase() } : null
   }
