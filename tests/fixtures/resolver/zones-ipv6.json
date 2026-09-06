@@ -1,0 +1,23 @@
+{
+  "wrsix": {
+    "soa": {
+      "mname": "ns1.hns.one.",
+      "rname": "hostmaster.hns.one.",
+      "serial": 1,
+      "refresh": 7200,
+      "retry": 3600,
+      "expire": 1209600,
+      "minimum": 300
+    },
+    "ns": [
+      "ns1.hns.one."
+    ],
+    "records": [
+      {
+        "name": "only",
+        "type": "AAAA",
+        "value": "2001:db8::60"
+      }
+    ]
+  }
+}

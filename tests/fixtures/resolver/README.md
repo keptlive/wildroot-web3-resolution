@@ -37,6 +37,8 @@ host of a suitable shape. Two things were wrong with that:
 | `plain.wrfixture` | `A` only | **NODATA** at `_443._tcp.plain.wrfixture` — NOERROR-and-empty, never NXDOMAIN |
 | anything else | — | **NXDOMAIN**, which the NODATA rule must not weaken |
 | `pointer.wrfixture` | `TXT ipfs=…` | the pointer path, signed |
+| `six.wrfixture` | `AAAA` + `_443._tcp` `TLSA` | an IPv6-only site (RFC 3596): the AAAA RRset validates to the on-chain DS like an A, its pin is read, a tampered AAAA fails closed (`ipv6.test.js`) |
+| `dual.wrfixture` | `A` + `AAAA`, no TLSA | the family rule: IPv4 is used when the name has one; an attacker who drops the A can only steer to the zone's own signed AAAA |
 | `tenant.wrfixture` | `TXT ipfs=…`, in `zones-tenant.json` **only** | the DO-bit regression pin: a tenant-published label must be IN the signed zone, or every validating resolver is told it does not exist |
 
 `plain` is listed before `site` on purpose — the NODATA subject must be the

@@ -42,7 +42,7 @@ a departure that no longer exists is not described.
   - RT-D5 Make the IDNA pass fail closed
 - [Chapter 1 — Handshake](#chapter-1-handshake) — [chapter file](namespaces/handshake/DEVIATIONS.md)
   - HS-1 TTLs are ignored; a flat 60-second positive cache
-  - HS-2 No IPv6: AAAA, GLUE6 and SYNTH6 are not resolved
+  - HS-2 IPv6: a dual-stack name is reached over IPv4 (resolved 2026-09-06)
   - HS-3 SVCB / HTTPS records are parsed but never queried, and ECH is not usable
   - HS-5 One DANE profile; an unusable TLSA RRset is refused rather than ignored
   - HS-6 The TLSA owner is always _443._tcp; a port in the URL is ignored
@@ -932,23 +932,39 @@ cached (SPEC §6.8). It is a small change and there is no argument against it.
 
 ---
 
-#### HS-2. No IPv6: AAAA, GLUE6 and SYNTH6 are not resolved
+#### HS-2. IPv6: a dual-stack name is reached over IPv4 (resolved 2026-09-06)
 
-**What.** Only `A`, `GLUE4` and `SYNTH4` are read. `AAAA` is in the type table
-and is never queried. `../../src/resolver.js`.
+**What.** Until 2026-09-06 only `A`, `GLUE4` and `SYNTH4` were read and an
+IPv6-only Handshake site did not resolve at all. `AAAA` is now asked beside
+`A` at the zone, `GLUE6`/`SYNTH6` are read beside `GLUE4`/`SYNTH4`, and the
+SPV reader decodes the `_<base32hex>._synth.` referral hsd's root server
+renders a SYNTH record as (before this, no SYNTH apex resolved from an SPV
+node: the `_synth` name was kept as a nameserver and asked, on port 53, for
+its own address). §6.5f, §6.4, §6.2; `../../src/resolver.js`,
+`../../src/spv.js`; `../../tests/ipv6.test.js`.
 
-**The standard says.** RFC 3596 defines AAAA as the address record for IPv6,
-and a resolver that reads only A cannot reach an IPv6-only host.
+**What remains a deviation.** The family rule is *IPv4 when the name has one*,
+not RFC 6724 / RFC 8305 (Happy Eyeballs) address selection. A dual-stack site
+is always dialled over IPv4, even from a network that has only IPv6; a
+nameserver with only a `GLUE6` is chosen in NS order, not skipped for a
+sibling with both when the client has no IPv6 route.
 
-**Why.** No reason worth defending. It is not done.
+**The standard says.** RFC 6724 orders candidate addresses by policy and
+RFC 8305 races the families; both prefer IPv6 where it is reachable.
 
-**Consequence.** An IPv6-only Handshake site is unreachable. The SSRF guard
-(`../../src/safe-address.js`) already understands IPv6 ranges, so the gap is
-entirely in the resolver.
+**Why.** One address, chosen once, is what the whole path is built on — the
+SSRF guard, the DANE dial, the SOCKS tunnel and the trust panel all name one
+address. IPv4 reaches a site from every network today; a race would add a
+second connection attempt to the most-measured path for a case with no known
+Handshake site in it.
 
-**Status.** OPEN. Query `AAAA` beside `A`, read `GLUE6`/`SYNTH6` where `GLUE4`
-and `SYNTH4` are read, and put every address through the same guard. Nothing
-about the validation or pinning rules changes.
+**Consequence.** An IPv6-only *client* network cannot reach a dual-stack
+Handshake site (it can reach an IPv6-only one). Rare, and reported honestly
+as a connection failure rather than as a broken name.
+
+**Status.** DELIBERATE for now. Revisit when an IPv6-only client network is a
+case anyone has hit: the change is contained in `preferV4` and the one
+nameserver-selection loop.
 
 ---
 

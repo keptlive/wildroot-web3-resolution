@@ -21,6 +21,7 @@
  * Handshake DoH servers (hnsdoh.com included) reject it.
  */
 
+import { isIP } from 'node:net'
 import { timers } from './resolution-timing.js'
 import { buildQuery, parseAnswers, assertAnswersTo, TYPES } from './dns-query.js'
 import { originFrom, pointerFrom, txtStringsFrom, dnslinkPointerFrom, mergePointers, DNSLINK_PREFIX } from './pointers.js'
@@ -250,17 +251,23 @@ export class DoHResolver {
   }
 
   /**
-   * The IPv4 address of an ICANN host, over this resolver's DoH/ODoH transport.
-   * The chain resolver uses it for the nameserver names and CNAME targets that
-   * are ICANN hosts, so that hop never goes out in the clear.
+   * The address of an ICANN host, over this resolver's DoH/ODoH transport:
+   * its A, else its AAAA (asked only when there is no A — the common case
+   * costs one lookup). The chain resolver uses it for the nameserver names
+   * and CNAME targets that are ICANN hosts, so that hop never goes out in
+   * the clear.
    * @param {string} host
    * @returns {Promise<string>} throws when there is no address
    */
   async addressOf (host) {
-    const a = await this._query(String(host || '').toLowerCase().replace(/\.$/, ''), 'A')
+    const name = String(host || '').toLowerCase().replace(/\.$/, '')
+    const a = await this._query(name, 'A')
     const rec = (a.answers || []).find((r) => r.type === TYPES.A && r.address)
-    if (!rec) throw new Error(`no address for ${host}`)
-    return rec.address
+    if (rec) return rec.address
+    const aaaa = await this._query(name, 'AAAA')
+    const six = (aaaa.answers || []).find((r) => r.type === TYPES.AAAA && r.address)
+    if (!six) throw new Error(`no address for ${host}`)
+    return six.address
   }
 
   /** Same shape as HNSResolver.resolve, but via DoH (no proof). */
@@ -283,7 +290,7 @@ export class DoHResolver {
 
   async _resolveTimed (host) {
     host = String(host || '').toLowerCase().replace(/\.$/, '')
-    if (!host || IPV4_RE.test(host)) throw new Error(`not a name: ${host}`)
+    if (!host || isIP(host)) throw new Error(`not a name: ${host}`)
 
     // TXT first: a content pointer wins. The convention, the address shapes
     // and the precedence between kinds are shared with the SPV path
@@ -348,9 +355,21 @@ export class DoHResolver {
       // oblivious transport is the only one, this is the common failure.
       return { kind: 'unreachable', reason: (aErr && aErr.message) || 'no DoH endpoint answered' }
     }
-    const addr = ((a && a.answers) || []).find(
+    let addr = ((a && a.answers) || []).find(
       (r) => r.type === TYPES.A && IPV4_RE.test(String(r.address)))
-    if (!addr) return { kind: 'unregistered' }
+    if (!addr) {
+      // No A: the name may be IPv6-only (RFC 3596). Asked only now, so a
+      // dual-stack name costs one lookup, as the chain path prefers IPv4.
+      let aaaa = null
+      try {
+        aaaa = await this._query(host, 'AAAA')
+      } catch (err) {
+        return { kind: 'unreachable', reason: (err && err.message) || 'no DoH endpoint answered' }
+      }
+      addr = ((aaaa && aaaa.answers) || []).find((r) => r.type === TYPES.AAAA && r.address)
+      if (!addr) return { kind: 'unregistered' }
+      a = aaaa
+    }
 
     // THE PIN, ON THE RESOLVER'S WORD. This path cannot PROVE a TLSA — there
     // is no chain anchor and no DNSSEC validation here — but it can still

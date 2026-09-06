@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.0
+
+- **IPv6 for Handshake names** (RFC 3596; Handshake chapter §6.5f, §6.4,
+  §6.2) — `AAAA` is asked beside `A` at the zone in the same round trip, and
+  whichever RRset is used validates to the on-chain DS by the same rule as
+  the `A`; `GLUE6` and `SYNTH6` are read beside `GLUE4` and `SYNTH4`; the
+  ICANN-host lookup over DoH, the DANE-pinned dial and the SOCKS5 dial to Tor
+  (`IPv6Traffic`) take either family; every address passes the same guard.
+  One family rule, `preferV4`: the IPv4 when a name has one, the IPv6 when
+  that is all it has — recorded as HS-2 with what it leaves out (RFC 6724 /
+  RFC 8305 selection). An attacker who forges an empty `A` can only steer a
+  client to the zone's own signed `AAAA`; a tampered `AAAA` fails closed; an
+  address family that could not be asked is `unreachable`, never
+  `unregistered` (`tests/ipv6.test.js`, against the frozen zone regenerated
+  with an AAAA-only pinned host and a dual-stack host).
+- **The SPV reader decodes `_synth`** (`src/spv.js`) — hsd's root server
+  renders a `SYNTH4`/`SYNTH6` record as a referral to
+  `_<base32hex(address)>._synth.` with the address as that name's glue; the
+  reader kept that name AS a nameserver and looked for the apex address in
+  the answer section, where the root server never puts it, so no SYNTH apex
+  resolved from an SPV node. The label (or its glue) is now the address.
+
 ## 0.4.0
 
 The public specification of Wildroot's web3 name resolution: every namespace

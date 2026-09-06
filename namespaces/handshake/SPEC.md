@@ -332,7 +332,8 @@ Before any server is contacted:
   reporting this as a validation failure would tell the user somebody is
   tampering with a zone that has merely chosen an algorithm we do not
   implement.
-- **`SYNTH4` apex.** If `host === tld`, the resource has a `SYNTH4` address and
+- **`SYNTH4`/`SYNTH6` apex.** If `host === tld`, the resource has a `SYNTH4`
+  (else `SYNTH6`) address and
   no `NS` record, the address is a chain-attested address for the name itself.
   It MUST pass the address guard of §11.2. Plaintext to it is permitted:
   consensus attests the address, which is a stronger source than an off-chain
@@ -368,9 +369,12 @@ through its remaining ordinary `NS` records.
 From the chain resource's `NS` records, in order, find an address for each
 until one yields a usable server:
 
-1. `GLUE4` in the chain resource matching that nameserver host;
+1. `GLUE4`, else `GLUE6`, in the chain resource matching that nameserver host
+   (the family rule of §6.5f: IPv4 when the host has one, IPv6 when that is
+   all it has);
 2. otherwise **the chain**: take the nameserver host's own final label, fetch
-   *its* chain resource, and read its glue or `SYNTH4`, or make one query to
+   *its* chain resource, and read its glue or `SYNTH4`/`SYNTH6`, or make one
+   query (`A` and `AAAA` together) to
    its own nameservers. This step is bounded to **one level** — a nameserver
    whose address needs a nameserver whose address needs a nameserver is a loop
    waiting to happen, and no legitimate zone requires it. It is also not an
@@ -471,9 +475,18 @@ absence would add a rung to the downgrade ladder of §11.3 instead of closing a
 hole. A `TXT` that exists and is not a pointer (SPF, a verification token) is an
 ordinary non-answer and needs no proof.
 
-**f. Address.** Query `A` for `host` with DO=1 (only `A`: `HS-2` records that
-`AAAA` is never queried). On a signed zone the `A` RRset
-MUST validate to the anchor, wildcard proof included. (This is not optional
+**f. Address.** Query `A` and `AAAA` for `host` together, with DO=1 (RFC
+3596). Use the `A` when there is one and the `AAAA` when that is all the name
+has — the one family rule, applied here, to chain glue (§6.4), to the apex
+(§6.2) and to the ICANN-host lookup (§6.11): IPv4 reaches a site from every
+network, and IPv6 is the route for a name that has nothing else. Whichever
+RRset is used MUST, on a signed zone, validate to the anchor, wildcard proof
+included; the other is not consulted. The fall-through from an empty `A` to
+the `AAAA` needs no denial proof: an attacker who forges an empty `A` answer
+can only steer the client to the zone's own signed `AAAA`, and suppressing
+both is the denial of service an on-path attacker always had. An address
+family that could not be ASKED beside one that answered empty is
+`unreachable`, not `unregistered`. (This is not optional
 hardening. An unvalidated address beside the zone's own honest proof of "no
 TLSA" is a complete plaintext downgrade to a forged address, with the trust
 panel reporting the zone as anchored — so the most protected configuration a
@@ -1179,7 +1192,8 @@ whole composition, not of the validator alone.
 
 ### 11.2 Every address is attacker-chosen
 
-An `A` record, an on-chain `SYNTH4` or `GLUE4`, a nameserver address, and an
+An `A` or `AAAA` record, an on-chain `SYNTH4`/`SYNTH6` or `GLUE4`/`GLUE6`, a
+nameserver address, and an
 address from a registry contract are all chosen by whoever registered the name.
 Without a guard, `hns://evil.tld/` publishing `A 169.254.169.254` makes the
 client fetch cloud metadata from a privileged process, and page script reads the

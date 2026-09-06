@@ -1,24 +1,24 @@
 {
   "algorithm": 13,
   "delegations": [],
-  "dnskey": "AQEDDQQqtvnBQXWbu1ClqRDOgU2BB+M5Fnor+KZXGj6o8zXHm8/VItjK+lpNGnYZgWIpAQHtEwZ9nEt8ZtzbhLMBSog=",
-  "expiration": 2418339192,
-  "inception": 1787615592,
-  "key_tag": 65231,
+  "dnskey": "AQEDDWcK/sSigVdYgdzPfJtvn8ewKRuZP3yFp242827fBCuLLqBL6W7e6HN5PPoHQIl8sLRHA2guOkjeu6wjMnjbMyQ=",
+  "expiration": 2419445986,
+  "inception": 1788722386,
+  "key_tag": 43364,
   "rrsets": {
     "_443._tcp.site.wrfixture": {
       "NSEC": {
         "rdata": [
-          "BnRlbmFudAl3cmZpeHR1cmUAAAcAAAAAAAMI"
+          "A3NpeAl3cmZpeHR1cmUAAAcAAAAAAAMI"
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 4,
           "original_ttl": 300,
-          "signature": "DoSj88ts4HdC07rY93q7tC3bZgAIVMtazQ2Cn82sSG8RblxI1CTDGTJG5Wlv9XKFZvL1xrBcyCbU66IBfRWqaA==",
+          "signature": "UDUPSz0YNNK6WtHXkN8jf271MF5Crk4NuK5UdSqJED96x6g3ZpO7w3bn1OP0yLONSmyAjm6DPg7XUAwp9Bay0g==",
           "signer": "wrfixture.",
           "type_covered": "NSEC"
         },
@@ -30,14 +30,103 @@
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 4,
           "original_ttl": 300,
-          "signature": "h9/S3rhajWn6c48u/fBHaZhnRsLVO3SlaOal7QNNXr7U0fXEiueKtyeiehItlCL01jfYoTtDb97PJMxuv9jb3g==",
+          "signature": "uYAczzFF8NOGe9GZYKsBSobT6xuGGt1sCGso2ORFFmrf3A5di/WlilpAZFLw4T4Ga67CXLvL90HNT61zgUCN0A==",
           "signer": "wrfixture.",
           "type_covered": "TLSA"
+        },
+        "ttl": 300
+      }
+    },
+    "_443._tcp.six.wrfixture": {
+      "NSEC": {
+        "rdata": [
+          "BnRlbmFudAl3cmZpeHR1cmUAAAcAAAAAAAMI"
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
+          "labels": 4,
+          "original_ttl": 300,
+          "signature": "rlKalEzPTiYH79EgivlRx1snclgszuFH7e3f+Q7OyNHsiNWAJUkUXr3IldHcNkLiwo4HR5n7ogYqgmn9DAhkEw==",
+          "signer": "wrfixture.",
+          "type_covered": "NSEC"
+        },
+        "ttl": 300
+      },
+      "TLSA": {
+        "rdata": [
+          "AwEBASNFZ4mrze8BI0VniavN7wEjRWeJq83vASNFZ4mrze8="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
+          "labels": 4,
+          "original_ttl": 300,
+          "signature": "1KCn+V58HfKekbnzB4VKHkrEf6GuXr7y02aEFCEf4NbYcA/YayBfzN2Sq1o+nf8zaoeavcGJwS51O1OXvtVkWg==",
+          "signer": "wrfixture.",
+          "type_covered": "TLSA"
+        },
+        "ttl": 300
+      }
+    },
+    "dual.wrfixture": {
+      "A": {
+        "rdata": [
+          "ywBxHg=="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "P9LVXFU1nOuLVhRRnZRfIgFP1M8O6nKKK8Uod/iwnbXsE3nJnAEmVUy3M5YND/65fE/Odp8junxa+7xCXGjeWQ==",
+          "signer": "wrfixture.",
+          "type_covered": "A"
+        },
+        "ttl": 300
+      },
+      "AAAA": {
+        "rdata": [
+          "IAENuAAAAAAAAAAAAAAAMA=="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "tvIQo+/AZxWcHbSQ26MhcD3jcjv3EhT1bN9RLDQPE9U0eqC+UyUISaVn3vwvDR2GwJc1bvzWvJGE5KUPEiXKBw==",
+          "signer": "wrfixture.",
+          "type_covered": "AAAA"
+        },
+        "ttl": 300
+      },
+      "NSEC": {
+        "rdata": [
+          "BXBsYWluCXdyZml4dHVyZQAABkAAAAgAAw=="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "zA7HaM+WMpPzOCwtKUAj1UCQikpbnozvK0vldNnEnJVS+DQuWB4igYf40rgIBTAqU+ulnXEAPp8PZO/M3UVQCA==",
+          "signer": "wrfixture.",
+          "type_covered": "NSEC"
         },
         "ttl": 300
       }
@@ -49,12 +138,12 @@
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 2,
           "original_ttl": 300,
-          "signature": "dmIJbTfRaQu3OiJQI5/ezEOOUcPeaD02DkWJfz+EIiFM9/qLob3AmvBc95hDQuQk1B2jryHHDV2gLzsW3Mf34Q==",
+          "signature": "ktcruJLRap8nvXwBPfWBOJKY7vYx0EZVEYZAe7/AAOAFN02S7gm1VBnM1URdF2uycg2I9rb5LMtq1Km7rYY/lg==",
           "signer": "wrfixture.",
           "type_covered": "A"
         },
@@ -66,12 +155,12 @@
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 2,
           "original_ttl": 300,
-          "signature": "sQ6/wGmPQj0pVpQy3gWRjI6zRVj5QVbSVuAs44dPrkeBmAtsAw+6q3JTzvwwkp+DdMiiKXLblohBNVEyQzvlRQ==",
+          "signature": "K3zovg1y1IPzoGBjTqEmImmOkWk/hrNFltgR8Nw86fzv8QI8AJIz51lykR1rEV60Bxlixuq6k28vPUHLbe0y1Q==",
           "signer": "wrfixture.",
           "type_covered": "NSEC"
         },
@@ -85,12 +174,12 @@
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 2,
           "original_ttl": 300,
-          "signature": "rtn0jl+z3BgKSW4CmmaeyX1ACB9wYwtgg1sWBD187RS/kt9Ek6/jP1jk91/CqKVBPRtS+p3V47v8/qpkBT0ccg==",
+          "signature": "a1XUoYKITeGwCU2Mt1f//dspqrc6nAnTm1wvKR7EYAgvH6ICUXBn8SOpZidJThlDe+IeiXTV55nJhzDVXaSieA==",
           "signer": "wrfixture.",
           "type_covered": "NSEC"
         },
@@ -102,12 +191,12 @@
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 2,
           "original_ttl": 300,
-          "signature": "hUTcotHU8vsrTed4MVezDJizfk84ocNyqIJr4bPwtuC1i2uel5xEPiOmjLsQv8nyqsK82ceazbSWhjpQT3aHzg==",
+          "signature": "YEYXKRkMErhpFaGJei4ivGiBiqGLFAC6Npy1ws+gqORo2+cgAlQKBioTqR/gYz3bpNErWvjSnIi0zeRLu/YKgg==",
           "signer": "wrfixture.",
           "type_covered": "TXT"
         },
@@ -121,12 +210,12 @@
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 2,
           "original_ttl": 300,
-          "signature": "cbggkdgUy6Kxq2z+mhAbPPmAZV5mrNFi1iAQht/g2vkCfFqm4JOIzTpf3TPnUV/RCLbA5U3Ql+0w0weokxxSjA==",
+          "signature": "tDKVBuXAvOs1xHVtHKUPq4CVRi1AlQ30fRcG15LU6p2kfxm/+Ol4rSGmlDOK69dB8CIL900J18QR7H+CmB3TgQ==",
           "signer": "wrfixture.",
           "type_covered": "A"
         },
@@ -138,12 +227,48 @@
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 2,
           "original_ttl": 300,
-          "signature": "zjI4mB1iPkofYJS2E8yNMkmHubuDATqgVMFxRDWfIvrVpb5bH41S2NK4xZWaLOGxsX7wOtjamC0aTKSs0B7AIQ==",
+          "signature": "U/lMkJ2T+zyjBd7QtDHoLIHXrE0fBw5COpp+4u6Jr57C7pH/la8XGQ9t3uiSyIY6g1pQlGBkuhYrJqbE+o27Yw==",
+          "signer": "wrfixture.",
+          "type_covered": "NSEC"
+        },
+        "ttl": 300
+      }
+    },
+    "six.wrfixture": {
+      "AAAA": {
+        "rdata": [
+          "IAENuAAAAAAAAAAAAAAABg=="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "hxGaVokD50E/cLj6IvWl3EwU42cnR3uxJOjqJXdWBXFGUB55UVjzcwUcJ4blUS2SxKo7H0aJjzE3quqe6RMpDw==",
+          "signer": "wrfixture.",
+          "type_covered": "AAAA"
+        },
+        "ttl": 300
+      },
+      "NSEC": {
+        "rdata": [
+          "BF80NDMEX3RjcANzaXgJd3JmaXh0dXJlAAAGAAAACAAD"
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "t88dQ1+MDaQy0mo/RS/o2jmERn3yaAmJH4mAgRpCeELUiXuc6b6DPpPXL/38Yz9x5II3uHbhAfABPxHekaZLxA==",
           "signer": "wrfixture.",
           "type_covered": "NSEC"
         },
@@ -157,12 +282,12 @@
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 2,
           "original_ttl": 300,
-          "signature": "bO3NcrC4dzzohMacdrbhB41aHjMvlS9t+lvuFUiRELq9mtOxG7brJW3kLkNpDehPxdpq9R3a4zt23INzvQKJKw==",
+          "signature": "4Ye4sjQPenkzHLCI/1ljwSfX0ZQC4aXbmTH5mGPVlKJM4gGk1WP/E05QuI0dIACUKNyPODogj0YYKbkLzF3Qng==",
           "signer": "wrfixture.",
           "type_covered": "NSEC"
         },
@@ -174,12 +299,12 @@
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 2,
           "original_ttl": 300,
-          "signature": "8yW5d6D4/x9Wm+WOfHykbyCAsvpCzK29+0ej0Y/fbiO/Ro+ZtWtUd5w6HYimbU3SzZVWzJF9cx8wJNRSDpI6jg==",
+          "signature": "iy/FuUZtRGaR+FUZLMFtvoJBRtnAzeGJf3FUwty0W2DOg73+0QXdZzXvHRBAlT5YylW+qFHa3XwVfVoJ20VbHQ==",
           "signer": "wrfixture.",
           "type_covered": "TXT"
         },
@@ -189,16 +314,16 @@
     "wrfixture": {
       "DNSKEY": {
         "rdata": [
-          "AQEDDQQqtvnBQXWbu1ClqRDOgU2BB+M5Fnor+KZXGj6o8zXHm8/VItjK+lpNGnYZgWIpAQHtEwZ9nEt8ZtzbhLMBSog="
+          "AQEDDWcK/sSigVdYgdzPfJtvn8ewKRuZP3yFp242827fBCuLLqBL6W7e6HN5PPoHQIl8sLRHA2guOkjeu6wjMnjbMyQ="
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 1,
           "original_ttl": 300,
-          "signature": "elvf27ST+vt1YZE3jxig8GN4HD9aq/KDwN/p5h1Kbm8f82IO32aYru9IIBafdklG+pEbVx8wdMYyMxuhAPBc5A==",
+          "signature": "ypecv1SwCfhZqEOFh/FHhMCt+GFbzqsHfVZLJ5ZfSGQ470T8A9jmJTQV06tkKNsDTlEBUvKv08VhVDwb3FhCNw==",
           "signer": "wrfixture.",
           "type_covered": "DNSKEY"
         },
@@ -210,12 +335,12 @@
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 1,
           "original_ttl": 300,
-          "signature": "FC7LULf10zIiqyAFt7oi1gKessJpu4eNgL/gRg/Uqky7aWPH/bsLvvuFK1XUSZGPZnAWg5BOgIDXOH87e34LiQ==",
+          "signature": "YtCLRxknmuRErMhJvm0E4r6T5aJJsdXDpFgrhncTur1j+iKqh+wgAtBC4dzA539MlaoVnNWHFbToXdyUpjAHmQ==",
           "signer": "wrfixture.",
           "type_covered": "NS"
         },
@@ -223,16 +348,16 @@
       },
       "NSEC": {
         "rdata": [
-          "BXBsYWluCXdyZml4dHVyZQAAByIAAAAAA4A="
+          "BGR1YWwJd3JmaXh0dXJlAAAHIgAAAAADgA=="
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 1,
           "original_ttl": 300,
-          "signature": "nt69TysbMxcfDdbuzwLxguAiKvpx94dPPWdysBb0i9dv+N6Fertl9KR2daRQDtVgCm3LyfiRimmDjA6viKOM0Q==",
+          "signature": "LVoPJgDL+N15utSdhmMv/KCcK1qh7LmA/tEipiD1GIj24Ao8L/8GD3pTdB9FAnwScTC4rNXAcBIPtjDrFzs2Sg==",
           "signer": "wrfixture.",
           "type_covered": "NSEC"
         },
@@ -244,12 +369,12 @@
         ],
         "rrsig": {
           "algorithm": 13,
-          "expiration": 2418339192,
-          "inception": 1787615592,
-          "key_tag": 65231,
+          "expiration": 2419445986,
+          "inception": 1788722386,
+          "key_tag": 43364,
           "labels": 1,
           "original_ttl": 300,
-          "signature": "hEcENWdkJZQ0h8/7V7ixPwFZmlSfoTvN5ZHIkSddgn1sIcMTyvNF5lIiX63xwl11TBI4qtXEKC28vMHpRpgI1A==",
+          "signature": "1kWPtnfigQyy10J86OCcb0QSQyFzVu5RBXXJfmh0WqT2QOE3KF4gdlU4P5z1DGQWIK1jxXVXBR/eMaL2NWWQmA==",
           "signer": "wrfixture.",
           "type_covered": "SOA"
         },
@@ -257,7 +382,7 @@
       }
     }
   },
-  "signed_at": 1787619192,
-  "source_hash": "db39b1cf20dcb050",
+  "signed_at": 1788725986,
+  "source_hash": "81886b97af2416a3",
   "zone": "wrfixture"
 }

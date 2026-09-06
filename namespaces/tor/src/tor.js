@@ -197,7 +197,9 @@ export class TorNode extends EventEmitter {
     // No ControlPort: readiness comes from the log line, not a control API, so
     // there is no local control socket to authenticate or leak.
     const torrc = [
-      `SocksPort 127.0.0.1:${port}`,
+      // IPv6Traffic: a Handshake site that has only an AAAA is dialled by
+      // that address (ATYP 0x04); without the flag Tor refuses the request.
+      `SocksPort 127.0.0.1:${port} IPv6Traffic`,
       `DataDirectory ${dataSub}`,
       'ClientOnly 1',
       'AvoidDiskWrites 1',

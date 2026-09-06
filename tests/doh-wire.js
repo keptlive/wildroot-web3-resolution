@@ -20,6 +20,16 @@ function readQname (buf, off) {
 
 function rdataFor (type, data) {
   if (type === TYPES.A) return Buffer.from(data.split('.').map(Number))
+  if (type === TYPES.AAAA) {
+    // Eight hex groups, `::` allowed once.
+    const [head, tail = ''] = String(data).split('::')
+    const h = head ? head.split(':') : []
+    const t = tail ? tail.split(':') : []
+    const groups = [...h, ...new Array(8 - h.length - t.length).fill('0'), ...t]
+    const out = Buffer.alloc(16)
+    groups.forEach((g, i) => out.writeUInt16BE(parseInt(g, 16), i * 2))
+    return out
+  }
   if (type === TYPES.TXT) {
     const s = Buffer.from(String(data))
     return Buffer.concat([Buffer.from([s.length]), s])

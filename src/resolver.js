@@ -4,14 +4,14 @@
  *   hello.14898
  *     │  SPV getnameresource("14898")     <- Urkel proof, verified locally
  *     │    ├─ TXT ipfs=<cid> (apex, no NS) -> render from IPFS directly
- *     │    ├─ SYNTH4/GLUE4               -> IP straight from the chain
+ *     │    ├─ SYNTH4/SYNTH6, GLUE4/GLUE6  -> IP straight from the chain
  *     │    ├─ NS 0x<addr>._op            -> HIP-5: read the records from that
  *     │    │                                Optimism registry (hip5-op.js),
  *     │    │                                falling through to the NS below
  *     │    │                                when it holds nothing
  *     │    └─ NS ns1.hns.one             -> resolve NS host, then:
  *     │         TXT hello.14898           -> ipfs=<cid>? render from IPFS
- *     │         A / TLSA                  -> connect + DANE-pin the cert
+ *     │         A or AAAA / TLSA          -> connect + DANE-pin the cert
  *
  * The authoritative hop is the one part not covered by a chain proof (the
  * zone could lie about its own contents), but it cannot lie about *which*
@@ -22,6 +22,7 @@
 
 import { timers } from './resolution-timing.js'
 import dns from 'node:dns/promises'
+import { isIP } from 'node:net'
 import { query, TYPES } from './dns-query.js'
 import { isPublicAddress } from './safe-address.js'
 import { provesDenial, provesInsecureDelegation } from './denial.js'
@@ -59,8 +60,6 @@ function validateChain (opts) {
  * coming in.
  */
 const SYNCING = 'the Handshake chain is still catching up'
-
-const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/
 
 /**
  * A failed validateChain result -> the resolution that describes it.
@@ -223,7 +222,8 @@ export class HNSResolver {
     // target) is turned into an address. The library default is the OS
     // resolver, in the clear; the browser hands in its DoH/ODoH client so the
     // one plaintext lookup this path used to make is gone on every mode.
-    this.lookup = lookup || (async (host) => (await dns.lookup(host, { family: 4 })).address)
+    this.lookup = lookup || (async (host) =>
+      preferV4((await dns.lookup(host, { all: true })).map((r) => r.address)))
     // Which `_op` fallbacks have already been explained. A page pulls dozens
     // of subresources from one name, and the reason is the same every time.
     this.opFallbacksLogged = new Set()
@@ -273,7 +273,7 @@ export class HNSResolver {
   /** @returns {{kind:'ipfs',cid:string}|{kind:'site',address:string,tlsa:Array}|{kind:'unregistered'}} */
   async resolve (host) {
     host = String(host || '').toLowerCase().replace(/\.$/, '')
-    if (!host || IPV4_RE.test(host)) throw new Error(`not a name: ${host}`)
+    if (!host || isIP(host)) throw new Error(`not a name: ${host}`)
 
     const cached = this.cache.get(host)
     if (cached && cached.at + this.cacheTtl > Date.now()) {
@@ -339,8 +339,9 @@ export class HNSResolver {
   }
 
   /**
-   * An IPv4 for a nameserver host: glue we were handed, then the CHAIN, then
-   * the OS resolver.
+   * An address for a nameserver host: glue we were handed, then the CHAIN,
+   * then the OS resolver. IPv4 when the host has one, IPv6 when that is all
+   * it has (`glueAddress`, `preferV4`).
    *
    * The chain step is not an optimisation, it is the difference between
    * resolving a name and not. `pinner.hns` is delegated to `ns1.lumeweb` — a
@@ -355,14 +356,12 @@ export class HNSResolver {
    * falls through to ICANN.
    *
    * @param {string} nsHost
-   * @param {Array} glueRecords GLUE4 records to consult first
+   * @param {Array} glueRecords GLUE4/GLUE6 records to consult first
    * @returns {Promise<string|null>}
    */
   async _addressForNsHost (nsHost, glueRecords) {
-    const glue = (glueRecords || []).find(
-      (r) => r.type === 'GLUE4' && r.ns &&
-        r.ns.replace(/\.$/, '') === nsHost)
-    if (glue) return glue.address
+    const glue = glueAddress(glueRecords, nsHost)
+    if (glue) return glue
 
     const chained = await this._chainAddress(nsHost)
     if (chained) return chained
@@ -374,8 +373,8 @@ export class HNSResolver {
    * A nameserver host resolved through Handshake, or null if its TLD is not
    * a registered Handshake name (so ICANN owns the question).
    *
-   * Deliberately ONE level deep: chain glue, a SYNTH4 apex, or one query to
-   * the TLD's own nameservers. A nameserver whose address needs a nameserver
+   * Deliberately ONE level deep: chain glue, a SYNTH4/SYNTH6 apex, or one
+   * query to the TLD's own nameservers. A nameserver whose address needs a nameserver
    * whose address needs a nameserver is a loop waiting to happen, and there
    * is no legitimate zone that requires it.
    *
@@ -394,25 +393,19 @@ export class HNSResolver {
     if (!resource || !Array.isArray(resource.records)) return null
     const records = resource.records
 
-    const glue = records.find(
-      (r) => r.type === 'GLUE4' && r.ns &&
-        r.ns.replace(/\.$/, '') === nsHost)
-    if (glue) return glue.address
+    const glue = glueAddress(records, nsHost)
+    if (glue) return glue
 
     if (nsHost === tld) {
-      const synth = records.find((r) => r.type === 'SYNTH4')
+      const synth = synthRecord(records)
       if (synth) return synth.address
     }
 
     for (const ns of dnsNameservers(records)) {
       const target = ns.ns.replace(/\.$/, '')
       if (target === nsHost) continue // its own address is what we are asking for
-      let address = null
-      const g = records.find(
-        (r) => r.type === 'GLUE4' && r.ns && r.ns.replace(/\.$/, '') === target)
-      if (g) {
-        address = g.address
-      } else {
+      let address = glueAddress(records, target)
+      if (!address) {
         try {
           address = await this.lookup(target)
         } catch {
@@ -421,13 +414,37 @@ export class HNSResolver {
       }
       if (!isPublicAddress(address)) continue
       try {
-        const a = await query(address, 53, nsHost, TYPES.A, { timeout: this.timeout, dial: this.dial })
-        const rec = a.answers.find((r) => r.type === TYPES.A && r.address)
-        if (rec) return rec.address
+        const found = await this._addressAt(address, 53, nsHost)
+        if (found) return found
       } catch {
         continue
       }
     }
+    return null
+  }
+
+  /**
+   * The address a server gives for `name`: its A, else its AAAA. Both are
+   * asked at once — one round trip either way — and neither is validated,
+   * which is why this only ever answers for a NAMESERVER host (whose zone is
+   * then verified on its own terms), never for a site.
+   * @param {string} server
+   * @param {number} port
+   * @param {string} name
+   * @returns {Promise<string|null>}
+   */
+  async _addressAt (server, port, name) {
+    const opts = { timeout: this.timeout, dial: this.dial }
+    const [a, aaaa] = await Promise.allSettled([
+      query(server, port, name, TYPES.A, opts),
+      query(server, port, name, TYPES.AAAA, opts)
+    ])
+    const of = (settled, type) => settled.status === 'fulfilled'
+      ? settled.value.answers.filter((r) => r.type === type && r.address).map((r) => r.address)
+      : []
+    const found = preferV4([...of(a, TYPES.A), ...of(aaaa, TYPES.AAAA)])
+    if (found) return found
+    if (a.status === 'rejected' && aaaa.status === 'rejected') throw a.reason
     return null
   }
 
@@ -619,7 +636,7 @@ export class HNSResolver {
       }
     }
 
-    const synth = records.find((r) => r.type === 'SYNTH4')
+    const synth = synthRecord(records)
     const hasNs = records.some((r) => r.type === 'NS')
     let server = this.authoritative
     // THE TLD'S OWN ADDRESS IS THE TLD'S OWN, and only when there is nothing
@@ -639,11 +656,11 @@ export class HNSResolver {
       if (!isPublicAddress(synth.address)) {
         return { kind: 'blocked', address: synth.address }
       }
-      // SYNTH4 has no zone server to ask for a TLSA record, but the IP came
+      // A SYNTH record has no zone server to ask for a TLSA, but the IP came
       // straight from the SPV-proven on-chain resource — consensus itself
       // attests it, which is a stronger source than an off-chain A record.
-      // Allow plaintext to it rather than leaving the whole SYNTH4 name
-      // class unreachable.
+      // Allow plaintext to it rather than leaving the whole SYNTH name class
+      // unreachable. SYNTH6 is the same statement about an IPv6 address.
       return { kind: 'site', address: synth.address, tlsa: [], allowInsecure: true }
     }
 
@@ -891,11 +908,38 @@ export class HNSResolver {
       }
     }
 
-    const a = await query(server.server, server.port, host, TYPES.A,
+    // A and AAAA, asked together (one round trip, the same as A alone was),
+    // and the IPv4 is used when the name has one: it reaches the site from
+    // every network, and IPv6 is the route for a name that has ONLY an
+    // IPv6 (RFC 3596). Whichever RRset is used is validated below to the same
+    // anchor by the same rule; the other is not consulted. On a signed zone
+    // the fall-through from "no A" to the AAAA needs no denial proof: an
+    // attacker who forges an empty A answer can only steer the browser to the
+    // zone's OWN signed AAAA, and suppressing both is the denial of service
+    // an on-path attacker always had.
+    const askAddress = (type) => query(server.server, server.port, host, type,
       { ...opts, dnssec: dnssecZone })
-    const aRecords = answersAbout(a.answers, host, TYPES.CNAME)
-      .filter((r) => r.type === TYPES.A && r.address && r.rdataRaw)
-    let address = (aRecords[0] || {}).address
+    const [aSettled, aaaaSettled] = await Promise.allSettled([
+      askAddress(TYPES.A), askAddress(TYPES.AAAA)])
+    const a = aSettled.status === 'fulfilled' ? aSettled.value : null
+    const aaaa = aaaaSettled.status === 'fulfilled' ? aaaaSettled.value : null
+    if (!a && !aaaa) throw aSettled.reason
+    const addressesIn = (reply, type) => reply
+      ? answersAbout(reply.answers, host, TYPES.CNAME)
+        .filter((r) => r.type === type && r.address && r.rdataRaw)
+      : []
+    let reply = a || aaaa
+    let addressType = TYPES.A
+    let addressRecords = addressesIn(a, TYPES.A)
+    if (!addressRecords.length) {
+      const six = addressesIn(aaaa, TYPES.AAAA)
+      if (six.length) {
+        reply = aaaa
+        addressType = TYPES.AAAA
+        addressRecords = six
+      }
+    }
+    let address = (addressRecords[0] || {}).address
     let aValidated = false
     if (address && dnssecZone) {
       // THE ADDRESS IS A SIGNED RECORD TOO. Until 2026-09-05 only the TLSA and
@@ -904,20 +948,20 @@ export class HNSResolver {
       // downgrade: forge the A, let the zone's own honest NSEC prove there is
       // no pin, and the browser connects in the clear to the forged address
       // with the padlock reporting the zone as anchored.
-      const rrsig = a.answers.find(
-        (r) => r.type === TYPES.RRSIG && r.typeCovered === TYPES.A)
+      const rrsig = reply.answers.find(
+        (r) => r.type === TYPES.RRSIG && r.typeCovered === addressType)
       let result = null
       try {
         const { dnskeys, dnskeyRRSIG } = await fetchDnskeys()
         const denial = rrsig && await this._wildcardProof(
-          rrsig, host, a.authority, ctx, { dsRecords, fetchDnskeys })
+          rrsig, host, reply.authority, ctx, { dsRecords, fetchDnskeys })
         result = rrsig && validateChain({
           dsRecords,
           dnskeys,
           dnskeyRRSIG,
           leafOwner: rrsig.name ? String(rrsig.name).toLowerCase().replace(/\.$/, '') : host,
-          leafType: TYPES.A,
-          leafRdatas: aRecords
+          leafType: addressType,
+          leafRdatas: addressRecords
             .filter((r) => norm(r.name) === norm(rrsig.name))
             .map((r) => r.rdataRaw),
           leafRRSIG: rrsig,
@@ -927,7 +971,8 @@ export class HNSResolver {
         result = null
       }
       if (!result || !result.ok) {
-        return dnssecFailure(result, 'A RRSIG could not be validated', { address })
+        const label = addressType === TYPES.A ? 'A' : 'AAAA'
+        return dnssecFailure(result, `${label} RRSIG could not be validated`, { address })
       }
       aValidated = true
     }
@@ -945,16 +990,16 @@ export class HNSResolver {
       // one fails closed. A validated CNAME also proves no A exists at the
       // name (RFC 1034 §3.6.2: a CNAME stands alone), so no separate denial
       // proof is needed.
-      const cname = a.answers.find((r) => r.type === TYPES.CNAME && r.target)
+      const cname = reply.answers.find((r) => r.type === TYPES.CNAME && r.target)
       if (cname) {
         if (dnssecZone) {
-          const rrsig = a.answers.find(
+          const rrsig = reply.answers.find(
             (r) => r.type === TYPES.RRSIG && r.typeCovered === TYPES.CNAME)
           let result = null
           try {
             const { dnskeys, dnskeyRRSIG } = await fetchDnskeys()
             const denial = rrsig && await this._wildcardProof(
-              rrsig, host, a.authority, ctx, { dsRecords, fetchDnskeys })
+              rrsig, host, reply.authority, ctx, { dsRecords, fetchDnskeys })
             result = rrsig && validateChain({
               dsRecords,
               dnskeys,
@@ -978,6 +1023,10 @@ export class HNSResolver {
         } catch { /* fall through to unregistered */ }
       }
     }
+    // One family answered empty and the other could not be ASKED: that is
+    // not "no such name". Say what actually happened, as the caller does for
+    // a zone that gave no answer at all.
+    if (!address && (!a || !aaaa)) throw (aSettled.reason || aaaaSettled.reason)
     if (!address) return { kind: 'unregistered' }
     if (!isPublicAddress(address)) {
       return { kind: 'blocked', address }
@@ -1322,8 +1371,12 @@ export class HNSResolver {
     // OS resolver — `_addressForNsHost`, so a nameserver that is itself a
     // Handshake name resolves at all.
     const glue = (response.additional || [])
-      .filter((r) => r.type === TYPES.A && r.address)
-      .map((r) => ({ type: 'GLUE4', ns: `${String(r.name).replace(/\.$/, '')}.`, address: r.address }))
+      .filter((r) => (r.type === TYPES.A || r.type === TYPES.AAAA) && r.address)
+      .map((r) => ({
+        type: r.type === TYPES.A ? 'GLUE4' : 'GLUE6',
+        ns: `${String(r.name).replace(/\.$/, '')}.`,
+        address: r.address
+      }))
     let lastErr = null
     for (const target of referral.targets) {
       let address = null
@@ -1351,6 +1404,45 @@ export class HNSResolver {
       }
     }
   }
+}
+
+/**
+ * The first IPv4 among `addresses`, else the first IPv6, else null. The one
+ * rule for choosing between families, so a dual-stack host is reached the
+ * same way from every path: IPv4 works from every network, and IPv6 is the
+ * route for a host that has nothing else.
+ * @param {string[]} addresses
+ * @returns {string|null}
+ */
+export function preferV4 (addresses) {
+  const list = (addresses || []).filter((x) => typeof x === 'string' && x)
+  return list.find((x) => !x.includes(':')) || list.find((x) => x.includes(':')) || null
+}
+
+/**
+ * The address a chain resource's glue gives for `nsHost`: its GLUE4, else its
+ * GLUE6 (`preferV4`). hsd writes the nameserver name with a trailing dot.
+ * @param {Array} records
+ * @param {string} nsHost
+ * @returns {string|null}
+ */
+function glueAddress (records, nsHost) {
+  const of = (type) => (records || [])
+    .filter((r) => r.type === type && r.ns && r.address &&
+      String(r.ns).replace(/\.$/, '') === nsHost)
+    .map((r) => r.address)
+  return preferV4([...of('GLUE4'), ...of('GLUE6')])
+}
+
+/**
+ * The apex address record of a chain resource: SYNTH4 when there is one,
+ * else SYNTH6 — the chain-attested address of the top-level name itself.
+ * @param {Array} records
+ * @returns {{type: string, address: string}|null}
+ */
+function synthRecord (records) {
+  return (records || []).find((r) => r.type === 'SYNTH4' && r.address) ||
+    (records || []).find((r) => r.type === 'SYNTH6' && r.address) || null
 }
 
 /**

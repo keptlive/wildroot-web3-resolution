@@ -32,6 +32,26 @@
         "name": "pointer",
         "type": "TXT",
         "value": "ipfs=bafkreigph5cub32tn4ph2au3izioyxnr37lvthzdug4xlmhlbnxj7h3mqu"
+      },
+      {
+        "name": "six",
+        "type": "AAAA",
+        "value": "2001:db8::6"
+      },
+      {
+        "name": "_443._tcp.six",
+        "type": "TLSA",
+        "value": "3 1 1 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      {
+        "name": "dual",
+        "type": "A",
+        "value": "203.0.113.30"
+      },
+      {
+        "name": "dual",
+        "type": "AAAA",
+        "value": "2001:db8::30"
       }
     ]
   }

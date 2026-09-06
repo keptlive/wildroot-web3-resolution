@@ -197,7 +197,8 @@ test('the generated torrc is client-only, loopback-only, and has NO ControlPort'
   const { readFileSync } = await import('node:fs')
   assert.deepEqual(args.slice(0, 1), ['-f'])
   const torrc = readFileSync(args[1], 'utf8')
-  assert.match(torrc, /^SocksPort 127\.0\.0\.1:40994$/m, 'the SOCKS port is bound to loopback only')
+  assert.match(torrc, /^SocksPort 127\.0\.0\.1:40994 IPv6Traffic$/m,
+    'the SOCKS port is bound to loopback only; IPv6Traffic so an AAAA-only site can be dialled by address')
   assert.match(torrc, /^ClientOnly 1$/m)
   assert.match(torrc, /^Log notice stdout$/m)
   // Readiness is read from the log, so there is no local control socket to

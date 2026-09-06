@@ -21,7 +21,7 @@ import { verifyDane } from './dane.js'
 
 /**
  * @param {object} args
- * @param {string} args.address the resolved, public-checked IPv4 address
+ * @param {string} args.address the resolved, public-checked address (IPv4 or IPv6)
  * @param {string} args.host the Handshake name (SNI, and the pin's owner)
  * @param {Array} args.tlsa the zone's TLSA records
  * @param {((host: string, port: number) => Promise<import('node:net').Socket>)|null} [args.dial]

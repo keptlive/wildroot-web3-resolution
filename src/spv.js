@@ -505,8 +505,8 @@ export class SPVNode {
     if (!port) return asked ? null : { unreachable: true }
     const { query, TYPES } = await import('./dns-query.js')
     const name = `${tld}.`
-    const [ns, ds, txt, a] = await Promise.all(
-      [TYPES.NS, TYPES.DS, TYPES.TXT, TYPES.A].map((t) =>
+    const [ns, ds, txt] = await Promise.all(
+      [TYPES.NS, TYPES.DS, TYPES.TXT].map((t) =>
         query('127.0.0.1', port, name, t, { timeout: 5000, dnssec: true })
           .catch(() => null)))
     const records = []
@@ -515,15 +515,43 @@ export class SPVNode {
       const k = JSON.stringify([rec.type, rec.ns, rec.address, rec.txt, rec.digest])
       if (!seen.has(k)) { seen.add(k); records.push(rec) }
     }
-    for (const r of [...((ns && ns.authority) || []), ...((ns && ns.answers) || [])]) {
-      if (r.type === TYPES.NS && r.target) push({ type: 'NS', ns: `${r.target.replace(/\.$/, '')}.` })
-    }
-    for (const src of [ns, ds, txt, a]) {
+    // Glue by nameserver name, from every reply's ADDITIONAL section: A as
+    // GLUE4, AAAA as GLUE6 — the root server sends both for a dual-stack
+    // nameserver (`woodburn` carries both for each of its two).
+    const glue = new Map()
+    for (const src of [ns, ds, txt]) {
       for (const r of (src && src.additional) || []) {
-        if (r.type === TYPES.A && r.address) {
-          push({ type: 'GLUE4', ns: `${String(r.name).replace(/\.$/, '')}.`, address: r.address })
+        if ((r.type === TYPES.A || r.type === TYPES.AAAA) && r.address) {
+          const owner = `${String(r.name).replace(/\.$/, '').toLowerCase()}.`
+          if (!glue.has(owner)) glue.set(owner, [])
+          glue.get(owner).push({ type: r.type === TYPES.A ? 'GLUE4' : 'GLUE6', ns: owner, address: r.address })
         }
       }
+    }
+    for (const r of [...((ns && ns.authority) || []), ...((ns && ns.answers) || [])]) {
+      if (r.type !== TYPES.NS || !r.target) continue
+      const target = `${r.target.replace(/\.$/, '').toLowerCase()}.`
+      // A SYNTH4/SYNTH6 record has no nameserver: the root server renders it
+      // as a referral to `_<base32hex of the address>._synth.` with the
+      // address as that name's glue (hsd lib/dns/resource.js). Until
+      // 2026-09-06 this reader kept the `_synth` name AS a nameserver and
+      // looked for the apex address in the ANSWER section, where the root
+      // server never puts it — so a SYNTH apex was asked, on port 53, for its
+      // own name, and the whole record class was unreachable from an SPV
+      // node. The label itself carries the address; the glue is the same
+      // bytes and is preferred when present.
+      const synth = synthFromNs(target)
+      if (synth) {
+        const g = (glue.get(target) || []).find((x) => x.type === (synth.type === 'SYNTH4' ? 'GLUE4' : 'GLUE6'))
+        push({ type: synth.type, address: g ? g.address : synth.address })
+        continue
+      }
+      push({ type: 'NS', ns: target })
+    }
+    for (const list of glue.values()) {
+      for (const g of list) if (!synthFromNs(g.ns)) push(g)
+    }
+    for (const src of [ns, ds, txt]) {
       for (const r of [...((src && src.authority) || []), ...((src && src.answers) || [])]) {
         if (r.type === TYPES.DS && r.digest) {
           push({ type: 'DS', keyTag: r.keyTag, algorithm: r.algorithm, digestType: r.digestType, digest: r.digest })
@@ -533,15 +561,10 @@ export class SPVNode {
     for (const r of (txt && txt.answers) || []) {
       if (r.type === TYPES.TXT && r.txt) push({ type: 'TXT', txt: r.txt })
     }
-    for (const r of (a && a.answers) || []) {
-      // On-chain resources have no plain A at a TLD apex; the root server
-      // synthesizes one from a SYNTH4/GLUE4-at-apex record.
-      if (r.type === TYPES.A && r.address) push({ type: 'SYNTH4', address: r.address })
-    }
     if (!records.length) {
       // Nothing came back. If EVERY query failed we never actually asked, and
       // saying "unregistered" would be a guess dressed as a fact.
-      if (!asked && !ns && !ds && !txt && !a) return { unreachable: true }
+      if (!asked && !ns && !ds && !txt) return { unreachable: true }
       // NXDOMAIN (or nothing anywhere) — the name has no records / no state.
       return null
     }
@@ -649,4 +672,45 @@ export class SPVNode {
     }
     await this.stopChild()
   }
+}
+
+const BASE32HEX = '0123456789abcdefghijklmnopqrstuv'
+
+/**
+ * The address a Handshake `_synth` nameserver name encodes, or null when the
+ * name is not one. hsd renders a SYNTH4/SYNTH6 record (an address for the
+ * top-level name itself, no nameserver) as the nameserver
+ * `_<base32hex(address), no padding>._synth.` — 4 bytes → 7 characters for
+ * IPv4, 16 bytes → 26 for IPv6 (hsd lib/dns/resource.js, RFC 4648 §7).
+ * IPv6 is rendered as eight uncompressed hex groups, the form dns-query.js
+ * gives an AAAA.
+ *
+ * @param {string} nsName a nameserver name, with or without the trailing dot
+ * @returns {{type: 'SYNTH4'|'SYNTH6', address: string}|null}
+ */
+export function synthFromNs (nsName) {
+  const m = /^_([0-9a-v]+)\._synth\.?$/i.exec(String(nsName || '').toLowerCase())
+  if (!m) return null
+  const label = m[1]
+  const bytes = []
+  let bits = 0
+  let acc = 0
+  for (const ch of label) {
+    acc = (acc << 5) | BASE32HEX.indexOf(ch)
+    bits += 5
+    if (bits >= 8) {
+      bits -= 8
+      bytes.push((acc >> bits) & 0xff)
+      acc &= (1 << bits) - 1
+    }
+  }
+  if (label.length === 7 && bytes.length === 4) {
+    return { type: 'SYNTH4', address: bytes.join('.') }
+  }
+  if (label.length === 26 && bytes.length === 16) {
+    const groups = []
+    for (let i = 0; i < 16; i += 2) groups.push(((bytes[i] << 8) | bytes[i + 1]).toString(16))
+    return { type: 'SYNTH6', address: groups.join(':') }
+  }
+  return null
 }
