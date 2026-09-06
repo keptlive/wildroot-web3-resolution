@@ -1,0 +1,9 @@
+{"open.wrparent": {"soa": {"mname":"ns1.hns.one.","rname":"hostmaster.hns.one.","serial":1,"refresh":7200,"retry":3600,"expire":1209600,"minimum":300}, "ns": ["ns1.open.wrparent."], "records": [
+  {"name": "www", "type": "A", "value": "203.0.113.60"}
+]},
+"secure.wrparent": {"soa": {"mname":"ns1.hns.one.","rname":"hostmaster.hns.one.","serial":1,"refresh":7200,"retry":3600,"expire":1209600,"minimum":300}, "ns": ["ns1.secure.wrparent."], "records": [
+  {"name": "www", "type": "A", "value": "203.0.113.30"},
+  {"name": "_443._tcp.www", "type": "TLSA", "value": "3 1 1 abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"},
+  {"name": "plain", "type": "A", "value": "203.0.113.31"},
+  {"name": "pointer", "type": "TXT", "value": "ipfs=bafkreigph5cub32tn4ph2au3izioyxnr37lvthzdug4xlmhlbnxj7h3mqu"}
+]}}

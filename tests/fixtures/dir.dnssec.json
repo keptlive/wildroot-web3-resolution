@@ -1,0 +1,315 @@
+{
+  "algorithm": 13,
+  "delegations": [],
+  "dnskey": "AQEDDYHgKKxJecF5DUdG+PEJ0U+uATOWcDyQoKbeDLrD/pQfvLVrLxgXc5N5j4Fm94iyvMiY77ZB03GwL5mvpFceFfk=",
+  "expiration": 1790170076,
+  "inception": 1787574476,
+  "key_tag": 53062,
+  "rrsets": {
+    "_443._tcp.apitest.dir": {
+      "NSEC": {
+        "rdata": [
+          "BGRlbW8DZGlyAAAHAAAAAAADCA=="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 4,
+          "original_ttl": 300,
+          "signature": "iyHHIrMrYgKzuBvByAEbWF6Pgrhpwh75yg/1l48UjlI2TG/T4Abv9ynNtBDA2RUX+ZrLQtZNA1yGC2jxn7w/ew==",
+          "signer": "dir.",
+          "type_covered": "NSEC"
+        },
+        "ttl": 300
+      },
+      "TLSA": {
+        "rdata": [
+          "AwEBryUaJzNdqMpvQcWjug1iTa3GK16sdUGWaNHEH5WGPp4="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 4,
+          "original_ttl": 300,
+          "signature": "3tF2PPLpzJq77Q3MF7vmvthrD4q/f/T17VMsOfwCeEn77T1IYbGUfPQMfDhDAv3f19oJ8m6e0HkOcdx91Rv/zQ==",
+          "signer": "dir.",
+          "type_covered": "TLSA"
+        },
+        "ttl": 300
+      }
+    },
+    "_443._tcp.dir": {
+      "NSEC": {
+        "rdata": [
+          "B2FwaXRlc3QDZGlyAAAHAAAAAAADCA=="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 3,
+          "original_ttl": 300,
+          "signature": "AdeLVLgOi7yXan036JhAflIdNAUxafyNV1bok9pDZRhPSMMFdSlFl11/gxv0poOGXNiNhAL2TenwKaNLjedUJw==",
+          "signer": "dir.",
+          "type_covered": "NSEC"
+        },
+        "ttl": 300
+      },
+      "TLSA": {
+        "rdata": [
+          "AwEBryUaJzNdqMpvQcWjug1iTa3GK16sdUGWaNHEH5WGPp4="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 3,
+          "original_ttl": 300,
+          "signature": "e2rbggdvVVhHbo56kEdAyP4xAuXVZwbrKp6SQC6dH+1/ijAZC3umG2hgAYAKrtfaE0xQ0KWoInrDDSBKoS7/GA==",
+          "signer": "dir.",
+          "type_covered": "TLSA"
+        },
+        "ttl": 300
+      }
+    },
+    "apitest.dir": {
+      "A": {
+        "rdata": [
+          "xix0yA=="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "4Y0V6RHt6NstchSHigkZOqIzCml6e5aaTCvLX2nsYpjru8p/YBQfrVnLXV3ZAPWtVaaPq/AjSswrGD9YCg+WlQ==",
+          "signer": "dir.",
+          "type_covered": "A"
+        },
+        "ttl": 300
+      },
+      "NSEC": {
+        "rdata": [
+          "BF80NDMEX3RjcAdhcGl0ZXN0A2RpcgAABkAAgAAAAw=="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "IEkwx8ovve9RLDtc+BFZMmvD/TYUVKVTz+g5WuilfVTTQt0GB8NgImU1rY5wiFTxGOZvshSVHzSh4k3fM+20vg==",
+          "signer": "dir.",
+          "type_covered": "NSEC"
+        },
+        "ttl": 300
+      },
+      "TXT": {
+        "rdata": [
+          "QGlwZnM9YmFma3JlaWNzYnpzZDY2aTU3ZXk1cXhveGdkMzZmZHAzajJ5aHByYXgzeGR6ZnprdnJtbWd2ZGRndHk="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "cCp3igKdI2QPzZLNxOzaSgnJ3yuuztH7FgTuVCwbfeZ9mhbopSu3fOQOHMK2OXsaHw7S4bbAEbpMLmXr1sZZug==",
+          "signer": "dir.",
+          "type_covered": "TXT"
+        },
+        "ttl": 300
+      }
+    },
+    "demo.dir": {
+      "NSEC": {
+        "rdata": [
+          "A3d3dwNkaXIAAAYAAIAAAAM="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "FGAClv3mRw838DfnBrXZU7DGUIibL0cQrppr0v6oCTA447WxlONMdC0l7A1RnRsgN+S/sOR+3FISj+WDIV5D8A==",
+          "signer": "dir.",
+          "type_covered": "NSEC"
+        },
+        "ttl": 300
+      },
+      "TXT": {
+        "rdata": [
+          "LmFyPWZMMUhWTVU1WlNIcE5zdk51ZzRzWHp4TE0tVmpPeDh4Yy05T09xdlR0OFE="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "73PDnJaW1Ucb6u1SMIXq30Z0oVEA0quaHeVDDWL55RkDssJagwvW4HVV+dgQhOndpGddJI84suJ7gHp5feb3KA==",
+          "signer": "dir.",
+          "type_covered": "TXT"
+        },
+        "ttl": 300
+      }
+    },
+    "dir": {
+      "DNSKEY": {
+        "rdata": [
+          "AQEDDYHgKKxJecF5DUdG+PEJ0U+uATOWcDyQoKbeDLrD/pQfvLVrLxgXc5N5j4Fm94iyvMiY77ZB03GwL5mvpFceFfk="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 1,
+          "original_ttl": 300,
+          "signature": "E5rFczSFBVO7EchesNIeq93VEHbSxBFOQowTChAvfzcg7T0Q/bEv5YPjeHCmvYTeLXlt6++1Rd3/gxjigaJj1Q==",
+          "signer": "dir.",
+          "type_covered": "DNSKEY"
+        },
+        "ttl": 300
+      },
+      "MX": {
+        "rdata": [
+          "AAoEbWFpbANobnMDb25lAA=="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 1,
+          "original_ttl": 300,
+          "signature": "xeq1c31O8UWtYWVntqx0bS8sVAdewP5WtQu72NOnN2JfCMN0wu+z2kS8AskOIT6s+TPQqgQS1VBuc8wPalKUCw==",
+          "signer": "dir.",
+          "type_covered": "MX"
+        },
+        "ttl": 300
+      },
+      "NS": {
+        "rdata": [
+          "A25zMQNobnMDb25lAA==",
+          "A25zMgNobnMDb25lAA=="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 1,
+          "original_ttl": 300,
+          "signature": "inCrz/amKLXhjOH//h60LPg+4xvVBytC2D69GsxAQdPbeXYmOPnbzo8W6SPM5OEsh86jQL1GDYL9n06b6B4BvQ==",
+          "signer": "dir.",
+          "type_covered": "NS"
+        },
+        "ttl": 300
+      },
+      "NSEC": {
+        "rdata": [
+          "BF80NDMEX3RjcANkaXIAAAciAYAAAAOA"
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 1,
+          "original_ttl": 300,
+          "signature": "BZJA81Uz7YbZhQLcbnoaiHPRzI+Dhp1QgYkfyJAbFfCyuFajAthZx/Elb3niBNLrVVrDheolviT3pSa/S3clhQ==",
+          "signer": "dir.",
+          "type_covered": "NSEC"
+        },
+        "ttl": 300
+      },
+      "SOA": {
+        "rdata": [
+          "A25zMQNobnMDb25lAApob3N0bWFzdGVyA25zMQNobnMDb25lAAAAAAUAABwgAAAOEAASdQAAAAEs"
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 1,
+          "original_ttl": 300,
+          "signature": "G2ZaQ2Ob4aVIWlVOiX/8dRtzJ26lf1RV6uCsj/T/43Xj/mGYF0IlxlOKMkpYkFJ0t6OnGXPzIoK8aCe81moBCg==",
+          "signer": "dir.",
+          "type_covered": "SOA"
+        },
+        "ttl": 300
+      },
+      "TXT": {
+        "rdata": [
+          "EWhvc3RlZCBieSBobnMub25l"
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 1,
+          "original_ttl": 300,
+          "signature": "CnOyUti1LKlWHlwFtluAa74lzM+pi2tgXHXlj3veIialTp/5PYPXuYYgl8j18+2dQS21N3fL1L6dBFthq65Yig==",
+          "signer": "dir.",
+          "type_covered": "TXT"
+        },
+        "ttl": 300
+      }
+    },
+    "www.dir": {
+      "CNAME": {
+        "rdata": [
+          "A2RpcgA="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "ZIBMKsqK1wIl667G/p/embRLJS2UZjggXzLrFua0FbQtN5rXNdwlHgvVjKtt9rAbnDXeVuIJuRrEAwMAcIImrQ==",
+          "signer": "dir.",
+          "type_covered": "CNAME"
+        },
+        "ttl": 300
+      },
+      "NSEC": {
+        "rdata": [
+          "A2RpcgAABgQAAAAAAw=="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 1790170076,
+          "inception": 1787574476,
+          "key_tag": 53062,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "pe94y9ptKOrv+HkP8OceyM6aZOX+3vIVJ2KKAzqJjUhtmH+SJBQm74QODeoJF/bcbt5JWE1LPElUZIDFe6M1zQ==",
+          "signer": "dir.",
+          "type_covered": "NSEC"
+        },
+        "ttl": 300
+      }
+    }
+  },
+  "signed_at": 1787578076,
+  "source_hash": "9adbdf88b484f62c",
+  "zone": "dir"
+}

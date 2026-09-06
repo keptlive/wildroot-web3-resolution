@@ -1,0 +1,8 @@
+{"wrparent": {"soa": {"mname":"ns1.hns.one.","rname":"hostmaster.hns.one.","serial":1,"refresh":7200,"retry":3600,"expire":1209600,"minimum":300}, "ns": ["ns1.hns.one."], "records": [
+  {"name": "plain", "type": "A", "value": "203.0.113.50"},
+  {"name": "open", "type": "NS", "value": "ns1.open.wrparent."},
+  {"name": "ns1.open", "type": "A", "value": "203.0.113.40"},
+  {"name": "secure", "type": "NS", "value": "ns1.secure.wrparent."},
+  {"name": "ns1.secure", "type": "A", "value": "203.0.113.41"},
+  {"name": "secure", "type": "DS", "value": "16926 13 2 0d64f6c937fb788b6044b18fb95661881380a4037e0329d6c7a023dd647424aa"}
+]}}

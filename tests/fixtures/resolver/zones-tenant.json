@@ -1,0 +1,7 @@
+{
+  "wrfixture": {
+    "records": [
+      { "name": "tenant", "type": "TXT", "value": "ipfs=bafkreif7htmm5xdcnjbzpzczmirvvvhcbxwrjhkbxxrfhpq7dvbwshv3ba" }
+    ]
+  }
+}

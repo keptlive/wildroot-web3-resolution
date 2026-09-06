@@ -1,0 +1,227 @@
+{
+  "algorithm": 13,
+  "delegations": [],
+  "dnskey": "AQEDDRd6MAZkiWqqV9iRvrcWeH8eyEd/kIGf8KNAG/BC7k8mHRyVChsjdexQKTOvlWPBIGqmPxwyXS3BBkuaaoGX3G4=",
+  "expiration": 2419350256,
+  "inception": 1788626656,
+  "key_tag": 16926,
+  "rrsets": {
+    "_443._tcp.www.secure.wrparent": {
+      "NSEC": {
+        "rdata": [
+          "BnNlY3VyZQh3cnBhcmVudAAABwAAAAAAAwg="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419350256,
+          "inception": 1788626656,
+          "key_tag": 16926,
+          "labels": 5,
+          "original_ttl": 300,
+          "signature": "Mp1RQqw2ZJ8CCm7i2O+vO9KU3yIB6+6uVh0Dn0mtQbPxlk9/8eKA04XhnzkYU28cVfV1Lp/mia8aAk16506g7A==",
+          "signer": "secure.wrparent.",
+          "type_covered": "NSEC"
+        },
+        "ttl": 300
+      },
+      "TLSA": {
+        "rdata": [
+          "AwEBq83vq83vq83vq83vq83vq83vq83vq83vq83vq83vq80="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419350256,
+          "inception": 1788626656,
+          "key_tag": 16926,
+          "labels": 5,
+          "original_ttl": 300,
+          "signature": "650UxyC2GWDXtkpwtowlTedSZpRxsq2Y0+OWG8oE+M64yk/ChoLUBbjBrNHkzmwBibrALJY6QO2zu0F3R9NmIA==",
+          "signer": "secure.wrparent.",
+          "type_covered": "TLSA"
+        },
+        "ttl": 300
+      }
+    },
+    "plain.secure.wrparent": {
+      "A": {
+        "rdata": [
+          "ywBxHw=="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419350256,
+          "inception": 1788626656,
+          "key_tag": 16926,
+          "labels": 3,
+          "original_ttl": 300,
+          "signature": "rH+o7FR02mmB7uTRRfzoFW0aLliQD1kPgtjpxQCC74Mo0ljnUN8BcPm1tiEnf2MLJ67SiM2arL07zJkE6E0pyQ==",
+          "signer": "secure.wrparent.",
+          "type_covered": "A"
+        },
+        "ttl": 300
+      },
+      "NSEC": {
+        "rdata": [
+          "B3BvaW50ZXIGc2VjdXJlCHdycGFyZW50AAAGQAAAAAAD"
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419350256,
+          "inception": 1788626656,
+          "key_tag": 16926,
+          "labels": 3,
+          "original_ttl": 300,
+          "signature": "gFGy4s5iLvhn0VWm7Hz2sook91T+WZdHP1bfu5hJKeY6QWSBQBLLftS+msAv3OA/v3Rn8R4VnrhG1iDQ2ifDVQ==",
+          "signer": "secure.wrparent.",
+          "type_covered": "NSEC"
+        },
+        "ttl": 300
+      }
+    },
+    "pointer.secure.wrparent": {
+      "NSEC": {
+        "rdata": [
+          "A3d3dwZzZWN1cmUId3JwYXJlbnQAAAYAAIAAAAM="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419350256,
+          "inception": 1788626656,
+          "key_tag": 16926,
+          "labels": 3,
+          "original_ttl": 300,
+          "signature": "Jaay5E1RDohyYwlAeSDirhEplvit8Gw11MbYh5XTGu86n4N4hJTOj6xO9DCTxaXJ4IPxVDXqDAVsGASfz15Ysg==",
+          "signer": "secure.wrparent.",
+          "type_covered": "NSEC"
+        },
+        "ttl": 300
+      },
+      "TXT": {
+        "rdata": [
+          "QGlwZnM9YmFma3JlaWdwaDVjdWIzMnRuNHBoMmF1M2l6aW95eG5yMzdsdnRoemR1ZzR4bG1obGJueGo3aDNtcXU="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419350256,
+          "inception": 1788626656,
+          "key_tag": 16926,
+          "labels": 3,
+          "original_ttl": 300,
+          "signature": "fGSJSk68vMzkONQ6YAGTrRtE1t7aBnCEwVbCPR5Gm3an1yGDSlEmJosOioD+I0ovc5PUqG6ZIqUnE29djZcl3Q==",
+          "signer": "secure.wrparent.",
+          "type_covered": "TXT"
+        },
+        "ttl": 300
+      }
+    },
+    "secure.wrparent": {
+      "DNSKEY": {
+        "rdata": [
+          "AQEDDRd6MAZkiWqqV9iRvrcWeH8eyEd/kIGf8KNAG/BC7k8mHRyVChsjdexQKTOvlWPBIGqmPxwyXS3BBkuaaoGX3G4="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419350256,
+          "inception": 1788626656,
+          "key_tag": 16926,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "sU3ArdL97Ex8o+8UpS22IUu2eXzbtaquqr8kOthXQSDM3LeOoJ7wjCavbnC7DkqPwzRm/6MIXQB4kpJdl5XYhw==",
+          "signer": "secure.wrparent.",
+          "type_covered": "DNSKEY"
+        },
+        "ttl": 300
+      },
+      "NS": {
+        "rdata": [
+          "A25zMQZzZWN1cmUId3JwYXJlbnQA"
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419350256,
+          "inception": 1788626656,
+          "key_tag": 16926,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "XUMqKvTB7bFV7hjESlMZPdVbBmQpZz9hzqE2E9FNvtBhmJxNvttB008nEepGIZLnuWtfjSaiZPMit/itBGskFQ==",
+          "signer": "secure.wrparent.",
+          "type_covered": "NS"
+        },
+        "ttl": 300
+      },
+      "NSEC": {
+        "rdata": [
+          "BXBsYWluBnNlY3VyZQh3cnBhcmVudAAAByIAAAAAA4A="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419350256,
+          "inception": 1788626656,
+          "key_tag": 16926,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "ZOPF6WfDrwDtW2DXUF/nSvekNx5g/DpYmPADGIx+DJ+7K8VwsKAk4ihOxP9CXoex8aufkHV+ROoqjn7Newh1jA==",
+          "signer": "secure.wrparent.",
+          "type_covered": "NSEC"
+        },
+        "ttl": 300
+      },
+      "SOA": {
+        "rdata": [
+          "A25zMQNobnMDb25lAApob3N0bWFzdGVyA2hucwNvbmUAAAAAAQAAHCAAAA4QABJ1AAAAASw="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419350256,
+          "inception": 1788626656,
+          "key_tag": 16926,
+          "labels": 2,
+          "original_ttl": 300,
+          "signature": "w6DfIoRm0KtZcXDEOvC7VXEU4/soWdw0NbYcbORVG/FmmUQtp4MiN9Ln7fmxeUjlGcQBVIv/2mMgdDa2c+hzHA==",
+          "signer": "secure.wrparent.",
+          "type_covered": "SOA"
+        },
+        "ttl": 300
+      }
+    },
+    "www.secure.wrparent": {
+      "A": {
+        "rdata": [
+          "ywBxHg=="
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419350256,
+          "inception": 1788626656,
+          "key_tag": 16926,
+          "labels": 3,
+          "original_ttl": 300,
+          "signature": "P7hSApL5s7Y01zyjrKQeVNF9gXHbQeJUAxiko5QTX1l1po0jqoglPRf7j13OaeKHCYoaTt8l9iE3xAeIr5GTqw==",
+          "signer": "secure.wrparent.",
+          "type_covered": "A"
+        },
+        "ttl": 300
+      },
+      "NSEC": {
+        "rdata": [
+          "BF80NDMEX3RjcAN3d3cGc2VjdXJlCHdycGFyZW50AAAGQAAAAAAD"
+        ],
+        "rrsig": {
+          "algorithm": 13,
+          "expiration": 2419350256,
+          "inception": 1788626656,
+          "key_tag": 16926,
+          "labels": 3,
+          "original_ttl": 300,
+          "signature": "+rPz/g5uX9itM3ojfpYrQ99nIhB2bsSVUALEJsKKHkmvuQZzjJ9AW9yTsX+IqfY1S9szYmKib1V8+Ktt8abkww==",
+          "signer": "secure.wrparent.",
+          "type_covered": "NSEC"
+        },
+        "ttl": 300
+      }
+    }
+  },
+  "signed_at": 1788630256,
+  "source_hash": "e5a356cd93478512",
+  "zone": "secure.wrparent"
+}

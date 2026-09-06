@@ -1,0 +1,47 @@
+{
+  "name": "wildroot-web3-resolution",
+  "version": "0.1.0",
+  "description": "Handshake name resolution: chain proof via an SPV node, DNSSEC anchored to the on-chain DS, DANE pinning, HIP-5 _op, DoH/ODoH transport. The reference implementation behind the Wildroot browser, with its written standard.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "author": "Matt <bpmatt@gmail.com>",
+  "main": "src/resolver.js",
+  "exports": {
+    ".": "./src/resolver.js",
+    "./resolver": "./src/resolver.js",
+    "./doh": "./src/doh.js",
+    "./dnssec": "./src/dnssec.js",
+    "./dns-query": "./src/dns-query.js",
+    "./denial": "./src/denial.js",
+    "./dane": "./src/dane.js",
+    "./trust-path": "./src/trust-path.js",
+    "./hip5-op": "./src/hip5-op.js",
+    "./hns-url": "./src/hns-url.cjs",
+    "./hns-host": "./src/hns-host.js",
+    "./odoh": "./src/odoh.js",
+    "./spv": "./src/spv.js",
+    "./pointers": "./src/pointers.js",
+    "./safe-address": "./src/safe-address.js"
+  },
+  "files": ["src", "SPEC.md", "REFERENCES.md", "DEVIATIONS.md", "LICENSE", "LICENSE-SPEC"],
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "lint": "standard",
+    "check": "node scripts/syntax-check.mjs"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.3.0",
+    "multiformats": "^9.9.0"
+  },
+  "optionalDependencies": {
+    "hsd": "^8.0.0"
+  },
+  "devDependencies": {
+    "standard": "^17.1.2"
+  },
+  "engines": { "node": ">=20" },
+  "standard": {
+    "ignore": ["tests/fixtures/"]
+  },
+  "keywords": ["handshake", "hns", "dnssec", "dane", "doh", "odoh", "hip-5", "name-resolution", "spv"]
+}

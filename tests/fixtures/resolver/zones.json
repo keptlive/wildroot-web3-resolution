@@ -1,0 +1,38 @@
+{
+  "wrfixture": {
+    "soa": {
+      "mname": "ns1.hns.one.",
+      "rname": "hostmaster.hns.one.",
+      "serial": 1,
+      "refresh": 7200,
+      "retry": 3600,
+      "expire": 1209600,
+      "minimum": 300
+    },
+    "ns": [
+      "ns1.hns.one."
+    ],
+    "records": [
+      {
+        "name": "plain",
+        "type": "A",
+        "value": "203.0.113.10"
+      },
+      {
+        "name": "site",
+        "type": "A",
+        "value": "203.0.113.20"
+      },
+      {
+        "name": "_443._tcp.site",
+        "type": "TLSA",
+        "value": "3 1 1 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      {
+        "name": "pointer",
+        "type": "TXT",
+        "value": "ipfs=bafkreigph5cub32tn4ph2au3izioyxnr37lvthzdug4xlmhlbnxj7h3mqu"
+      }
+    ]
+  }
+}

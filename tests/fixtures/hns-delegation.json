@@ -1,0 +1,75 @@
+{
+  "//": "Captured 2026-09-04 from ns1.namebase.io (45.33.73.140), the authoritative server for the Handshake TLD hns. Real third-party DNSSEC: hns signs the DS it publishes for its delegated sub-zone pinner.hns.",
+  "chainDs": [
+    {
+      "keyTag": 6070,
+      "algorithm": 13,
+      "digestType": 2,
+      "digest": "7934d11150de3b4d9d8d2cff090fb09dba5f079ff44c5db4f6c99308373cdd46"
+    }
+  ],
+  "parentZone": "hns",
+  "childOwner": "pinner.hns",
+  "dnskeyAnswers": [
+    {
+      "name": "hns",
+      "type": 46,
+      "ttl": 3600,
+      "typeCovered": 48,
+      "algorithm": 13,
+      "labels": 1,
+      "originalTtl": 3600,
+      "expiration": 1789689600,
+      "inception": 1787875200,
+      "keyTag": 6070,
+      "signer": "hns",
+      "signature": {
+        "b64": "dWvFuW3I3EyfQad247WDsvZIukw+gEEzczkluUxKvagGHx0HiVc/zClVNRJ5rfQ07bmdZJUHjOBb17msmCUfog=="
+      }
+    },
+    {
+      "name": "hns",
+      "type": 48,
+      "ttl": 3600,
+      "flags": 257,
+      "protocol": 3,
+      "algorithm": 13,
+      "rawPubKey": {
+        "b64": "8USM2cK4Op4pf2T5DjqSGJbejyavzr/OPWoa/9Uz9X9yWnoz+eUEg6b+Me7ivtQW50UiBpnFuC8S+Pb3TpSCKA=="
+      },
+      "rdataRaw": {
+        "b64": "AQEDDfFEjNnCuDqeKX9k+Q46khiW3o8mr86/zj1qGv/VM/V/clp6M/nlBIOm/jHu4r7UFudFIgaZxbgvEvj2906Ugig="
+      }
+    }
+  ],
+  "dsAnswers": [
+    {
+      "name": "pinner.hns",
+      "type": 43,
+      "ttl": 3600,
+      "keyTag": 23803,
+      "algorithm": 13,
+      "digestType": 2,
+      "digest": "8e24d7ca8940204076b44585941f83757bf16db07b55d338540e6b935f3968f6",
+      "rdataRaw": {
+        "b64": "XPsNAo4k18qJQCBAdrRFhZQfg3V78W2we1XTOFQOa5NfOWj2"
+      }
+    },
+    {
+      "name": "pinner.hns",
+      "type": 46,
+      "ttl": 3600,
+      "typeCovered": 43,
+      "algorithm": 13,
+      "labels": 2,
+      "originalTtl": 3600,
+      "expiration": 1789689600,
+      "inception": 1787875200,
+      "keyTag": 6070,
+      "signer": "hns",
+      "signature": {
+        "b64": "Cok97xgWvjPVQfki9JWAunEWLETM3SVKtZXbn1pULrZteU11eaMSU4uBKf1dj58E1Bb/WCaMt9H67MMYj25U9w=="
+      }
+    }
+  ]
+}
