@@ -184,18 +184,14 @@ test('a refused lookup fails the whole page, and the aggregate says so', () => {
   assert.match(summary, /Domain name failed/)
 })
 
-test('DIVERGENCE IC-10: summarize() gives http and https the same verdict', () => {
-  // The top-level SPEC §4.1 says a plaintext connection aggregates to OPEN.
-  // `summarize` does not implement that: `none` and `unverified` are both
-  // "weak", so `http://` and `https://` both come back `partial` with the same
-  // sentence. The address bar derives the open lock separately (`secure` is
-  // false when the Connection step is `none`, src/index.js:1512-1513); the
-  // security panel, which calls `summarize` directly (src/window.js:2766),
-  // does not — it lists the plaintext step but heads the page with the same
-  // verdict an HTTPS page gets. ../../DEVIATIONS.md IC-10.
+test('a plaintext connection aggregates to OPEN — a verdict of its own, not the https one', () => {
+  // The spine's §4.1: a plaintext connection is the third lock state. It is
+  // in the model (summarize) so the address bar and the security panel cannot
+  // disagree about it.
   const https = summarize(schemeSteps('https://example.com', plan(DEFAULT_DNS)))
   const http = summarize(schemeSteps('http://example.com', plan(DEFAULT_DNS)))
-  assert.deepEqual(http, https)
-  // The information is present — just not in the aggregate.
+  assert.equal(https.state, 'partial')
+  assert.equal(http.state, 'open')
+  assert.match(http.summary, /not encrypted/)
   assert.equal(byLabel(schemeSteps('http://example.com', plan(DEFAULT_DNS)), 'Connection').state, 'none')
 })

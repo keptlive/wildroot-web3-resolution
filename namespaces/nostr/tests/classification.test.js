@@ -49,24 +49,20 @@ test('L2: a nostr identifier that cannot resolve does not become a DNS lookup', 
   assert.notEqual(out.namespace, NAMESPACES.ICANN)
 })
 
-test('DOCUMENTED GAP (NO-1): a BARE NIP-19 identifier is not classified as Nostr', () => {
-  // `nip19.js` accepts a bare `npub1…` (`parseNostrURI` strips an optional
-  // `nostr:`), and every other self-describing address form in this browser
-  // is recognised bare: a `.eth` name goes to ENS, a 56-character v3 address
-  // goes to Tor, a `/ipfs/<cid>` path goes to IPFS. A pasted npub does not.
-  //
-  // It is a single label with no dot, so `classifyHost` returns null and the
-  // bare-label rule sends it to Handshake as the name `npub1sn0w…`, which is
-  // a chain lookup for a name nobody owns. See DEVIATIONS.md NO-1 and NO-D2.
-  //
-  // This test asserts what the code does today. The day the classifier row
-  // lands it fails, which is the point: a gap nobody's test would notice is a
-  // gap that gets quietly reintroduced.
-  assert.equal(classifyHost(NPUB), null, 'one label, so the caller decides')
+test('a BARE NIP-19 identifier is a Nostr address — decoded before it is claimed, an nsec included', () => {
+  // A pasted npub is self-describing: the human-readable part is the type and
+  // the checksum makes a false positive a one-in-a-billion event, so the
+  // classifier decodes it before claiming it. An nsec is routed too, on
+  // purpose: the handler answers with the PRIVATE KEY page, where the
+  // bare-label rule would have sent the secret to a resolver as a name.
+  assert.equal(classifyHost(NPUB), null, 'one label: the host classifier defers to classify()')
   const out = classify(NPUB)
-  assert.equal(out.namespace, NAMESPACES.HNS,
-    'TODAY: a pasted npub is looked up on the Handshake chain')
-  assert.equal(out.reason, 'hns-bare-label')
+  assert.equal(out.namespace, NAMESPACES.NOSTR)
+  assert.equal(out.reason, 'nip19-identifier')
+  assert.equal(out.url, `nostr:${NPUB}`)
+  // A Handshake name that merely starts with npub is still a name.
+  assert.equal(classify('npub1shop').namespace, NAMESPACES.HNS)
+  assert.equal(classify('npub1' + 'q'.repeat(58)).namespace, NAMESPACES.HNS)
 })
 
 test('DOCUMENTED GAP (NO-1): a NIP-05 address is not classified as Nostr either', () => {

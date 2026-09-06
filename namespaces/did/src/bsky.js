@@ -19,6 +19,7 @@
 // can route back to its origin protocol instead of being faked locally.
 
 import { makeXrpc, PUBLIC_APPVIEW, isExpiredToken } from './xrpc.js'
+import { didWebUrl, isSafeDidWebHost } from './did-protocol.js'
 
 export { PUBLIC_APPVIEW, isExpiredToken }
 
@@ -194,25 +195,42 @@ export function makeBsky ({ fetchFn = globalThis.fetch, xrpc = null, now = Date.
      * Where this account's PDS lives, from its DID document. Falls back to
      * bsky.social — wrong for self-hosters, correct for almost everyone, and
      * createSession against the wrong host fails loudly rather than silently.
+     * A fallback is LEGIBLE: `assumed: true` and a `reason`, so a caller
+     * answering "where does this account live" does not present a guess as a
+     * resolution. The did:web URL is the ONE reader the browser has
+     * (src/protocols/did-protocol.js), host-guarded like it, and the document
+     * must be about the DID asked for.
      */
     async resolvePds (didOrHandle) {
+      let did = null
       try {
-        const did = String(didOrHandle).startsWith('did:')
+        did = String(didOrHandle).startsWith('did:')
           ? didOrHandle
           : await this.resolveHandle(didOrHandle)
-        const doc = did.startsWith('did:plc:')
-          ? await fetchJson(`${PLC_DIRECTORY}/${did}`)
-          : did.startsWith('did:web:')
-            ? await fetchJson(`https://${did.slice('did:web:'.length)}/.well-known/did.json`)
-            : null
-        const service = doc && (doc.service || []).find(
-          (s) => String(s.id || '').endsWith('#atproto_pds'))
+        let url = null
+        if (did.startsWith('did:plc:')) {
+          url = `${PLC_DIRECTORY}/${did}`
+        } else if (did.startsWith('did:web:')) {
+          url = didWebUrl(did.slice('did:web:'.length))
+          if (!isSafeDidWebHost(new URL(url).host)) {
+            return { did, pds: DEFAULT_PDS, assumed: true, reason: 'did:web host is not a public web host' }
+          }
+        } else {
+          return { did, pds: DEFAULT_PDS, assumed: true, reason: `unsupported DID method in ${did}` }
+        }
+        const doc = await fetchJson(url)
+        if (!doc || doc.id !== did) {
+          return { did, pds: DEFAULT_PDS, assumed: true, reason: 'the DID document is not about this DID' }
+        }
+        const service = (doc.service || []).find(
+          (s) => String(s.id || '').endsWith('#atproto_pds') &&
+            (!s.type || s.type === 'AtprotoPersonalDataServer'))
         if (service && /^https:\/\//.test(service.serviceEndpoint)) {
           return { did, pds: service.serviceEndpoint }
         }
-        return { did, pds: DEFAULT_PDS }
-      } catch {
-        return { did: null, pds: DEFAULT_PDS }
+        return { did, pds: DEFAULT_PDS, assumed: true, reason: 'the DID document names no https PDS' }
+      } catch (err) {
+        return { did, pds: DEFAULT_PDS, assumed: true, reason: (err && err.message) || 'the DID document could not be fetched' }
       }
     },
 

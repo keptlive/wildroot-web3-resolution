@@ -122,65 +122,67 @@ test('did:web resolves at https://<method-specific-id>/.well-known/did.json', as
   assert.equal(fetchFn.calls[0].url, 'https://alice.hns.one/.well-known/did.json')
 })
 
-test('DI-6: this did:web reader diverges from src/did-protocol.js on ports and paths', async () => {
-  // Two did:web resolvers in one tree. src/did-protocol.js implements the
-  // method specification's read algorithm and is checked against its
-  // published examples; this one splices the method-specific id into the URL
-  // verbatim: %3A is never decoded (so a port form requests a host literally
-  // named "example.com%3A3000") and a path form's ':' separators are never
-  // turned into '/'. The DIVERGENCE is the defect — one shared builder, not
-  // two patches.
+test('ONE did:web reader: resolvePds builds the URL the method specification describes, host-guarded', async () => {
   const fetchFn = fakeFetch([['https://', { json: {} }]])
   const bsky = makeBsky({ fetchFn })
   await bsky.resolvePds('did:web:example.com%3A3000')
-  assert.equal(fetchFn.calls[0].url, 'https://example.com%3A3000/.well-known/did.json')
+  assert.equal(fetchFn.calls[0].url, 'https://example.com:3000/.well-known/did.json')
   await bsky.resolvePds('did:web:example.com:user:alice')
-  assert.equal(fetchFn.calls[1].url, 'https://example.com:user:alice/.well-known/did.json')
+  assert.equal(fetchFn.calls[1].url, 'https://example.com/user/alice/did.json')
+  // A private host is never fetched; the fallback says why.
+  const local = await bsky.resolvePds('did:web:localhost')
+  assert.equal(local.assumed, true)
+  assert.match(local.reason, /not a public web host/)
+  assert.equal(fetchFn.calls.length, 2)
 })
 
-// -------------------------------------------------- what is not checked
+// -------------------------------------------------- what is checked
 
-test('DI-7: the service TYPE is not checked, only that the id ends in #atproto_pds', async () => {
+test('the service TYPE is checked as well as the id', async () => {
   // The AT Protocol DID-document requirements name BOTH: id `#atproto_pds`
-  // and type `AtprotoPersonalDataServer`.
+  // and type `AtprotoPersonalDataServer`. A service with another type is not
+  // the PDS, and the fallback is marked as such.
   const fetchFn = fakeFetch([['plc.directory', {
     json: { id: 'did:plc:self', service: [{ id: 'https://x#atproto_pds', type: 'NotAPds', serviceEndpoint: 'https://anything.example' }] }
   }]])
-  const bsky = makeBsky({ fetchFn })
-  assert.deepEqual(await bsky.resolvePds('did:plc:self'),
-    { did: 'did:plc:self', pds: 'https://anything.example' })
+  const out = await makeBsky({ fetchFn }).resolvePds('did:plc:self')
+  assert.equal(out.pds, DEFAULT_PDS)
+  assert.equal(out.assumed, true)
 })
 
-test('DI-8: this reader does not check the document\'s id against the DID asked for', async () => {
-  // src/did-protocol.js refuses a mismatch with a 502; resolvePds does not
-  // make the comparison at all, so a directory answering with somebody
-  // else's document hands back that document's PDS under the asked-for DID.
+test('the document must be about the DID asked for — somebody else\'s document is not a resolution', async () => {
   const fetchFn = fakeFetch([['plc.directory/did:plc:self', {
     json: { id: 'did:plc:somebodyelse', service: PLC_DOC.service }
   }]])
-  const bsky = makeBsky({ fetchFn })
-  const out = await bsky.resolvePds('did:plc:self')
+  const out = await makeBsky({ fetchFn }).resolvePds('did:plc:self')
   assert.equal(out.did, 'did:plc:self')
-  assert.equal(out.pds, 'https://pds.selfhost.example')
+  assert.equal(out.pds, DEFAULT_PDS)
+  assert.equal(out.assumed, true)
+  assert.match(out.reason, /not about this DID/)
 })
 
-test('a non-https serviceEndpoint is refused — and falls back rather than failing', async () => {
+test('a non-https serviceEndpoint is refused — and the fallback is legible', async () => {
   const fetchFn = fakeFetch([['plc.directory', {
-    json: { id: 'did:plc:self', service: [{ id: '#atproto_pds', serviceEndpoint: 'http://plaintext.example' }] }
+    json: { id: 'did:plc:self', service: [{ id: '#atproto_pds', type: 'AtprotoPersonalDataServer', serviceEndpoint: 'http://plaintext.example' }] }
   }]])
-  assert.deepEqual(await makeBsky({ fetchFn }).resolvePds('did:plc:self'),
-    { did: 'did:plc:self', pds: DEFAULT_PDS })
+  const out = await makeBsky({ fetchFn }).resolvePds('did:plc:self')
+  assert.equal(out.pds, DEFAULT_PDS)
+  assert.equal(out.assumed, true)
+  assert.match(out.reason, /no https PDS/)
 })
 
-test('DI-9: an unresolvable DID document silently substitutes bsky.social', async () => {
-  // The AT Protocol DID-resolution spec makes an unresolvable DID a FAILURE.
-  // Here it becomes "assume the default PDS", which is right for almost
-  // everyone and wrong for exactly the self-hosters this browser is for.
+test('an unresolvable DID document falls back to bsky.social AND SAYS SO', async () => {
+  // The AT Protocol DID-resolution spec makes an unresolvable DID a failure.
+  // The fallback is kept for the login path (right for almost everyone) but a
+  // caller answering "where does this account live" can see it is a guess.
   const offline = makeBsky({ fetchFn: fakeFetch([]) })
-  assert.deepEqual(await offline.resolvePds('anyone.example'),
-    { did: null, pds: DEFAULT_PDS })
+  const out = await offline.resolvePds('anyone.example')
+  assert.equal(out.pds, DEFAULT_PDS)
+  assert.equal(out.assumed, true)
+  assert.ok(out.reason)
 
-  const unknownMethod = makeBsky({ fetchFn: fakeFetch([]) })
-  assert.deepEqual(await unknownMethod.resolvePds('did:key:z6Mk'),
-    { did: 'did:key:z6Mk', pds: DEFAULT_PDS })
+  const unknownMethod = await makeBsky({ fetchFn: fakeFetch([]) }).resolvePds('did:key:z6Mk')
+  assert.equal(unknownMethod.did, 'did:key:z6Mk')
+  assert.equal(unknownMethod.assumed, true)
+  assert.match(unknownMethod.reason, /unsupported DID method/)
 })

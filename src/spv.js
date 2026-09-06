@@ -164,7 +164,12 @@ export class SPVNode {
    * @param {number} [opts.pollMs] how often a spawned node is probed while it
    *   comes up (tests shorten it; the 30-probe budget is unchanged)
    */
-  constructor ({ url, apiKey, prefix, bin, ports, pollMs = 1000 } = {}) {
+  constructor ({ url, apiKey, prefix, bin, ports, pollMs = 1000, proxy = null } = {}) {
+    // `host:port` of a SOCKS5 proxy hsd's peer connections go through (hsd's
+    // own --proxy). Set when IP Protection is on, so the node's proof fetches
+    // — which name the user's peers exactly which name is being asked about —
+    // leave through Tor. Null = direct.
+    this.proxy = proxy || null
     this.url = url || process.env.HNSONE_SPV_URL || null
     this.apiKey = apiKey || process.env.HNSONE_SPV_KEY || null
     // Remember what was EXPLICITLY configured: supervision must never
@@ -396,6 +401,7 @@ export class SPVNode {
     // and resolution rides DoH until isSynced() flips. Detected once here so
     // machines WITH the native binding keep their persistent chain.
     if (!nativeLevelAvailable()) args.push('--memory')
+    if (this.proxy) args.push(`--proxy=${this.proxy}`)
     // Spawn the bundled hsd script with the current runtime (Electron runs it
     // as node via ELECTRON_RUN_AS_NODE). No shell, absolute paths, args as an
     // array — so a Windows profile path with spaces is passed intact. Detached
@@ -411,6 +417,7 @@ export class SPVNode {
     // exited, and an exit reported without it ("hsd exited 1") cost a day of
     // guessing. Its tail rides on the error; stdout (hsd's info log, which
     // also goes to debug.log in the prefix) stays ignored.
+    this._proxyOfChild = this.proxy
     this.child = spawn(process.execPath, [hsdBin, ...args], spawnGroupOpts({
       stdio: ['ignore', 'ignore', 'pipe'],
       env: { ...process.env, HSD_API_KEY: key, ELECTRON_RUN_AS_NODE: '1', NODE_BACKEND: 'js' }
@@ -575,6 +582,33 @@ export class SPVNode {
 
   async info () {
     return this._rpc('getblockchaininfo', [])
+  }
+
+  /**
+   * Route the node's peer traffic through a SOCKS5 proxy (`host:port`), or
+   * directly (null). A node we spawned is restarted with the new setting; an
+   * adopted or configured node is left alone and `proxy` records the wish, so
+   * the caller can see that the running node does NOT honour it. hsd reads
+   * --proxy once at start, so a change is a respawn — headers re-sync from
+   * the persisted chain (or from scratch in --memory mode), and resolution
+   * rides DoH meanwhile exactly as it does at launch.
+   * @param {string|null} proxy
+   * @returns {Promise<boolean>} whether the running node now uses `proxy`
+   */
+  async setProxy (proxy) {
+    const next = proxy || null
+    this.proxy = next
+    if (this._nodeIsProxied(next)) return true
+    if (this._configuredUrl || !this.child) return false
+    await this.stopChild()
+    this.url = null
+    this.apiKey = null
+    await this._spawn()
+    return true
+  }
+
+  _nodeIsProxied (proxy) {
+    return !!this.child && this._proxyOfChild === proxy
   }
 
   /** Kill only our own child/orphan process (recovery path). */

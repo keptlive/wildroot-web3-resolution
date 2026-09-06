@@ -351,50 +351,70 @@ export function assertAnswersTo (parsed, name, type) {
 /**
  * Ask one server one question over TCP. Resolves to parsed answers;
  * rejects on transport failure, timeout, or a mismatched reply id.
+ *
+ * `dial(host, port)` is the socket factory: the default is a direct
+ * `net.connect`; with IP Protection on the resolver passes a SOCKS5 dialer
+ * to the device-local Tor (src/hns/socks-dial.js), so the authoritative hop
+ * keeps its chain proof and its DNSSEC validation and hides only the asker.
  */
-export function query (server, port, name, type, { timeout = 5000, dnssec = false } = {}) {
+export function query (server, port, name, type, { timeout = 5000, dnssec = false, dial = null } = {}) {
   return new Promise((resolve, reject) => {
     const id = Math.floor(Math.random() * 0xffff)
     const msg = buildQuery(name, type, id, { dnssec })
     const framed = Buffer.concat([Buffer.alloc(2), msg])
     framed.writeUInt16BE(msg.length, 0)
 
-    const socket = net.connect({ host: server, port })
     const chunks = []
     let expected = null
+    let socket = null
     const timer = setTimeout(() => {
-      socket.destroy()
+      if (socket) socket.destroy()
       reject(new Error(`DNS timeout asking ${server} for ${name}`))
     }, timeout)
 
-    socket.on('connect', () => socket.write(framed))
-    socket.on('data', (chunk) => {
-      chunks.push(chunk)
-      const buf = Buffer.concat(chunks)
-      if (expected === null && buf.length >= 2) expected = buf.readUInt16BE(0)
-      if (expected !== null && buf.length >= expected + 2) {
+    const attach = (s) => {
+      socket = s
+      wire(s)
+    }
+    if (dial) {
+      dial(server, port).then((s) => { attach(s); s.write(framed) }, (err) => {
         clearTimeout(timer)
-        socket.destroy()
-        try {
-          const parsed = parseAnswers(buf.subarray(2, expected + 2))
-          if (parsed.id !== id) throw new Error('DNS reply id mismatch')
-          resolve(assertAnswersTo(parsed, name, type))
-        } catch (err) {
-          reject(err)
+        reject(err)
+      })
+    } else {
+      attach(net.connect({ host: server, port }))
+      socket.on('connect', () => socket.write(framed))
+    }
+
+    function wire (socket) {
+      socket.on('data', (chunk) => {
+        chunks.push(chunk)
+        const buf = Buffer.concat(chunks)
+        if (expected === null && buf.length >= 2) expected = buf.readUInt16BE(0)
+        if (expected !== null && buf.length >= expected + 2) {
+          clearTimeout(timer)
+          socket.destroy()
+          try {
+            const parsed = parseAnswers(buf.subarray(2, expected + 2))
+            if (parsed.id !== id) throw new Error('DNS reply id mismatch')
+            resolve(assertAnswersTo(parsed, name, type))
+          } catch (err) {
+            reject(err)
+          }
         }
-      }
-    })
-    socket.on('error', (err) => {
-      clearTimeout(timer)
-      reject(err)
-    })
-    // A server that accepts the connection and hangs up without a complete
-    // reply used to cost the FULL timeout — the promise only settled on data
-    // or on the timer. Settle it when the socket goes away instead; a reply
-    // that already arrived has resolved above and this is a no-op.
-    socket.on('close', () => {
-      clearTimeout(timer)
-      reject(new Error(`DNS connection to ${server} closed before a reply for ${name}`))
-    })
+      })
+      socket.on('error', (err) => {
+        clearTimeout(timer)
+        reject(err)
+      })
+      // A server that accepts the connection and hangs up without a complete
+      // reply used to cost the FULL timeout — the promise only settled on data
+      // or on the timer. Settle it when the socket goes away instead; a reply
+      // that already arrived has resolved above and this is a no-op.
+      socket.on('close', () => {
+        clearTimeout(timer)
+        reject(new Error(`DNS connection to ${server} closed before a reply for ${name}`))
+      })
+    }
   })
 }

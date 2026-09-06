@@ -33,8 +33,7 @@ import { schemeSteps, summarize, hnsSteps } from '../src/trust-path.js'
 function verdictFor (url) {
   const steps = schemeSteps(url)
   const { state } = summarize(steps)
-  const connection = steps.find((s) => s.label === 'Connection')
-  const secure = state !== 'failed' && !(connection && connection.state === 'none')
+  const secure = state !== 'failed' && state !== 'open'
   return { state, secure }
 }
 
@@ -96,8 +95,9 @@ test('an ordinary https:// page is TRUSTED, not trustless', () => {
   assert.equal(v.secure, true, 'it is still encrypted — the lock stays closed')
 })
 
-test('plain http:// keeps an OPEN lock, whatever colour the verdict implies', () => {
+test('plain http:// is OPEN — a verdict of its own, in the model, not only in a renderer', () => {
   const v = verdictFor('http://example.com/')
+  assert.equal(v.state, 'open')
   assert.equal(v.secure, false)
 })
 
@@ -117,12 +117,12 @@ test('a Handshake name with a chain proof and a DANE pin is TRUSTLESS', () => {
   assert.equal(summarize(steps).state, 'verified')
 })
 
-test('...and the same name over DoH, or without a pin, is TRUSTED', () => {
+test('...and the same name over DoH is TRUSTED; without a pin, over plain HTTP, it is OPEN', () => {
   assert.equal(summarize(hnsSteps('site.w3',
     { trust: 'doh', kind: 'ipfs', cid: 'bafy' }, {})).state, 'partial')
   assert.equal(summarize(hnsSteps('site.w3',
     { trust: 'spv', kind: 'site', ns: 'ns1', tlsa: [], allowInsecure: true },
-    { transport: 'http' })).state, 'partial')
+    { transport: 'http' })).state, 'open')
 })
 
 test('a chain-proven content pointer is TRUSTLESS even with no TLS at all', () => {

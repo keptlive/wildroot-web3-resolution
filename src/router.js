@@ -39,15 +39,21 @@
 import { createHash } from 'node:crypto'
 import { CID } from 'multiformats/cid'
 
-import ICANN_TLDS from './icann-tlds.cjs'
-import reserved from './reserved-names.cjs'
+import classifier from './classify-host.cjs'
 import { searchURL as makeSearchURL } from './search-url.js'
 import { encodeHnsHost } from './hns-url.cjs'
 import { CID_RE } from './pointers.js'
+import { decodeNip19 } from '../namespaces/nostr/src/nip19.js'
 
-const { NEVER_HNS_TLDS, isReservedHost } = reserved
+// THE HOST CLASSIFIER LIVES IN src/hns/classify-host.cjs — one implementation
+// the omnibox (CommonJS) shares with this module. Everything host-shaped is
+// re-exported from here so existing importers keep their names.
+const {
+  ICANN_TLDS, NEVER_HNS_TLDS, ONION_V3,
+  isReservedHost, isOnionHost, isEthName, bareHost, asciiTld, classifyHost
+} = classifier
 
-export { ICANN_TLDS, NEVER_HNS_TLDS, isReservedHost }
+export { ICANN_TLDS, NEVER_HNS_TLDS, isReservedHost, isOnionHost, isEthName, classifyHost }
 
 // --- Namespaces -------------------------------------------------------------
 // A namespace is "a distinct address space with its own root of trust." Two
@@ -84,6 +90,12 @@ export const NAMESPACES = Object.freeze({
 //   planned - greenfield; a stub should register so dispatch fails CLOSED
 //             inside the right namespace instead of leaking to another (L2).
 // `verify` names the native layer that authenticates the canonical object (L3).
+// `trust` is the verdict a page in that scheme can at best reach — trustless
+// (every step verified here), trusted (something taken on somebody's word),
+// open (no transport protection), refused (a fail-closed stub), builtin (the
+// browser's own pages) — and tests/hns/lock-semantics.test.js holds
+// src/hns/trust-path.js to it, so the table cannot claim what the panel
+// does not deliver.
 // The router does not perform verification — it names it so no scheme is wired
 // in without a verification story: register() REFUSES a scheme with no row
 // (CODE-AUDIT 3.10 found two registered with none). `navigable: false` marks
@@ -91,75 +103,75 @@ export const NAMESPACES = Object.freeze({
 // never a link target — so the will-navigate allowlist (src/window.js) must
 // NOT carry it; tests/hns/nav-scheme-coverage.test.js pins both directions.
 export const SCHEME_TABLE = Object.freeze([
-  { scheme: 'hns', namespace: NAMESPACES.HNS, status: 'live', verify: 'SPV chain proof + DANE (TLSA 3 1 1) or content CID' },
-  { scheme: 'ipfs', namespace: NAMESPACES.IPFS, status: 'live', verify: 'CID' },
-  { scheme: 'ipns', namespace: NAMESPACES.IPFS, status: 'live', verify: 'IPNS record + CID' },
-  { scheme: 'ipld', namespace: NAMESPACES.IPFS, status: 'live', verify: 'CID' },
+  { scheme: 'hns', namespace: NAMESPACES.HNS, status: 'live', trust: 'trustless', verify: 'SPV chain proof + DANE (TLSA 3 1 1) or content CID' },
+  { scheme: 'ipfs', namespace: NAMESPACES.IPFS, status: 'live', trust: 'trustless', verify: 'CID' },
+  { scheme: 'ipns', namespace: NAMESPACES.IPFS, status: 'live', trust: 'trustless', verify: 'IPNS record + CID' },
+  { scheme: 'ipld', namespace: NAMESPACES.IPFS, status: 'live', trust: 'trustless', verify: 'CID' },
   // A topic is a free-form string, not a content address: the only thing a
   // message carries is the publishing peer's libp2p signature.
-  { scheme: 'pubsub', namespace: NAMESPACES.IPFS, status: 'live', verify: 'libp2p publisher signature — a topic is not a content address' },
+  { scheme: 'pubsub', namespace: NAMESPACES.IPFS, status: 'live', trust: 'trusted', verify: 'libp2p publisher signature — a topic is not a content address' },
   // Honest status: the handler validates the txid SHAPE and fetches from a
   // gateway, but the returned bytes are never checked against the txid's
   // data_root — the gateway is trusted. 'live' would claim verification the
   // code does not do (see the header of src/hns/ar.js). BR-6 closes this.
-  { scheme: 'ar', namespace: NAMESPACES.ARWEAVE, status: 'partial', verify: 'immutable txid (shape only — bytes gateway-trusted until BR-6)' },
+  { scheme: 'ar', namespace: NAMESPACES.ARWEAVE, status: 'partial', trust: 'trusted', verify: 'immutable txid (shape only — bytes gateway-trusted until BR-6)' },
   // Resolves the name's EIP-1577 contenthash over a PUBLIC Ethereum RPC and
   // hands the ipfs/ar pointer to those handlers. 'partial', not 'live': the
   // content is CID-verified but the name->content binding is RPC-trusted (not
   // chain-proven), so the verdict is TRUSTED (the neutral lock, as for an
   // https:// page) and never the green trustless one. Never falls back to
   // .eth-as-HNS.
-  { scheme: 'ens', namespace: NAMESPACES.ENS, status: 'partial', verify: 'ENS contenthash via public Ethereum RPC (RPC-trusted, not chain-proven — lock TRUSTED, never green)' },
-  { scheme: 'web3', namespace: NAMESPACES.WEB3, status: 'partial', verify: 'ERC-4804 EVM read (BR-5)' },
-  { scheme: 'nostr', namespace: NAMESPACES.NOSTR, status: 'partial', verify: 'schnorr signature + event id recomputed locally; relay completeness NOT proven' },
-  { scheme: 'at', namespace: NAMESPACES.ATPROTO, status: 'planned', verify: 'DID document (BR-7)' },
+  { scheme: 'ens', namespace: NAMESPACES.ENS, status: 'partial', trust: 'trusted', verify: 'ENS contenthash via public Ethereum RPC (RPC-trusted, not chain-proven — lock TRUSTED, never green)' },
+  { scheme: 'web3', namespace: NAMESPACES.WEB3, status: 'partial', trust: 'trusted', verify: 'ERC-4804 EVM read (BR-5)' },
+  { scheme: 'nostr', namespace: NAMESPACES.NOSTR, status: 'partial', trust: 'trusted', verify: 'schnorr signature + event id recomputed locally; relay completeness NOT proven' },
+  { scheme: 'at', namespace: NAMESPACES.ATPROTO, status: 'planned', trust: 'refused', verify: 'DID document (BR-7)' },
   // Fetched, not proven: the document's id is checked against the DID asked
   // for and the host is guarded, but the did:plc operation log is not audited
   // and did:web rests on WebPKI — the lock is TRUSTED, never green.
-  { scheme: 'did', namespace: NAMESPACES.DID, status: 'partial', verify: 'DID document fetched from plc.directory / the did:web host (id checked; not proven — lock TRUSTED)' },
-  { scheme: 'activitypub', namespace: NAMESPACES.ACTIVITYPUB, status: 'planned', verify: 'WebFinger/actor signature (BR-7)' },
+  { scheme: 'did', namespace: NAMESPACES.DID, status: 'partial', trust: 'trusted', verify: 'DID document fetched from plc.directory / the did:web host (id checked; not proven — lock TRUSTED)' },
+  { scheme: 'activitypub', namespace: NAMESPACES.ACTIVITYPUB, status: 'planned', trust: 'refused', verify: 'WebFinger/actor signature (BR-7)' },
   // Reached ONLY through the device-local Tor that IP Protection turns on
   // (never a hosted relay). 'partial': it works and the onion key authenticates
   // the service at the Tor layer, but it is gated on IP Protection and this
   // browser does not resist fingerprinting like Tor Browser. NEVER DNS.
-  { scheme: 'onion', namespace: NAMESPACES.TOR, status: 'partial', verify: 'Tor onion-service key via the device-local Tor circuit — NEVER DNS' },
-  { scheme: 'https', namespace: NAMESPACES.WEB, status: 'live', verify: 'WebPKI (address via the ODoH policy, BR-3)' },
-  { scheme: 'http', namespace: NAMESPACES.WEB, status: 'live', verify: 'none (plaintext)' },
-  { scheme: 'https+raw', namespace: NAMESPACES.WEB, status: 'live', verify: 'WebPKI' },
+  { scheme: 'onion', namespace: NAMESPACES.TOR, status: 'partial', trust: 'trusted', verify: 'Tor onion-service key via the device-local Tor circuit — NEVER DNS' },
+  { scheme: 'https', namespace: NAMESPACES.WEB, status: 'live', trust: 'trusted', verify: 'WebPKI (address via the ODoH policy, BR-3)' },
+  { scheme: 'http', namespace: NAMESPACES.WEB, status: 'live', trust: 'open', verify: 'none (plaintext)' },
+  { scheme: 'https+raw', namespace: NAMESPACES.WEB, status: 'live', trust: 'trusted', verify: 'WebPKI' },
   // TLS with rejectUnauthorized:false and no certificate store: encrypted,
   // and nothing else. Not TOFU — no fingerprint is remembered or compared.
-  { scheme: 'gemini', namespace: NAMESPACES.GEMINI, status: 'live', verify: 'none — TLS with no certificate verification (not TOFU: nothing is pinned)' },
-  { scheme: 'hyper', namespace: NAMESPACES.HYPER, status: 'live', verify: 'hypercore key (a DNSLink name→key binding is resolver-trusted)' },
-  { scheme: 'ssb', namespace: NAMESPACES.SSB, status: 'live', verify: 'feed signature' },
-  { scheme: 'bittorrent', namespace: NAMESPACES.BITTORRENT, status: 'live', verify: 'infohash' },
-  { scheme: 'bt', namespace: NAMESPACES.BITTORRENT, status: 'live', verify: 'infohash' },
-  { scheme: 'magnet', namespace: NAMESPACES.MAGNET, status: 'live', verify: 'infohash' },
-  { scheme: 'wildroot', namespace: NAMESPACES.BROWSER, status: 'live', verify: 'built-in' },
+  { scheme: 'gemini', namespace: NAMESPACES.GEMINI, status: 'live', trust: 'trusted', verify: 'none — TLS with no certificate verification (not TOFU: nothing is pinned)' },
+  { scheme: 'hyper', namespace: NAMESPACES.HYPER, status: 'live', trust: 'trustless', verify: 'hypercore key (a DNSLink name→key binding is resolver-trusted)' },
+  { scheme: 'ssb', namespace: NAMESPACES.SSB, status: 'live', trust: 'trustless', verify: 'feed signature' },
+  { scheme: 'bittorrent', namespace: NAMESPACES.BITTORRENT, status: 'live', trust: 'trustless', verify: 'infohash' },
+  { scheme: 'bt', namespace: NAMESPACES.BITTORRENT, status: 'live', trust: 'trustless', verify: 'infohash' },
+  { scheme: 'magnet', namespace: NAMESPACES.MAGNET, status: 'live', trust: 'trusted', verify: 'infohash' },
+  { scheme: 'wildroot', namespace: NAMESPACES.BROWSER, status: 'live', trust: 'builtin', verify: 'built-in' },
   // Permanent SILENT aliases of wildroot:// (D2): still served (old sessions,
   // links in the wild) but rewritten to wildroot:// on navigation
   // (src/scheme-alias.js) and never advertised in the UI.
-  { scheme: 'agregore', namespace: NAMESPACES.BROWSER, status: 'live', verify: 'built-in', aliasOf: 'wildroot' },
-  { scheme: 'browser', namespace: NAMESPACES.BROWSER, status: 'live', verify: 'built-in', aliasOf: 'wildroot' },
-  { scheme: 'search', namespace: NAMESPACES.SEARCH, status: 'live', verify: 'n/a (private metasearch)' },
+  { scheme: 'agregore', namespace: NAMESPACES.BROWSER, status: 'live', trust: 'builtin', verify: 'built-in', aliasOf: 'wildroot' },
+  { scheme: 'browser', namespace: NAMESPACES.BROWSER, status: 'live', trust: 'builtin', verify: 'built-in', aliasOf: 'wildroot' },
+  { scheme: 'search', namespace: NAMESPACES.SEARCH, status: 'live', trust: 'trusted', verify: 'n/a (private metasearch)' },
   // Its own scheme rather than a wildroot:// page: an isolated secure origin
   // for a page that does its own crypto; see src/protocols/paste-protocol.js.
-  { scheme: 'paste', namespace: NAMESPACES.BROWSER, status: 'live', verify: 'built-in; content verified against its CID in the page' },
+  { scheme: 'paste', namespace: NAMESPACES.BROWSER, status: 'live', trust: 'builtin', verify: 'built-in; content verified against its CID in the page' },
   // Also its own scheme, and for the same reason as paste://: the editor
   // keeps an autosaved draft in localStorage of its own.
-  { scheme: 'editor', namespace: NAMESPACES.BROWSER, status: 'live', verify: 'built-in; published document addressed by CID' },
+  { scheme: 'editor', namespace: NAMESPACES.BROWSER, status: 'live', trust: 'builtin', verify: 'built-in; published document addressed by CID' },
   // The embedded Bluesky client (vendored impro, src/bluesky-app) — its own
   // scheme for its localStorage sessions, same reason as editor/paste. The
   // CONTENT it shows is Bluesky's network over WebPKI HTTPS, not chain-
   // verified — 'live' here means the app itself is built in and local.
-  { scheme: 'bluesky', namespace: NAMESPACES.BROWSER, status: 'live', verify: 'built-in app; network content via WebPKI (Bluesky PDS/appview)' },
-  { scheme: 'mastodon', namespace: NAMESPACES.BROWSER, status: 'live', verify: 'built-in app; network content via WebPKI (the Fediverse server)' },
+  { scheme: 'bluesky', namespace: NAMESPACES.BROWSER, status: 'live', trust: 'trusted', verify: 'built-in app; network content via WebPKI (Bluesky PDS/appview)' },
+  { scheme: 'mastodon', namespace: NAMESPACES.BROWSER, status: 'live', trust: 'trusted', verify: 'built-in app; network content via WebPKI (the Fediverse server)' },
   // Converted media (src/media/media-protocol.js): a <video src> the player
   // sets, addressed by the source it was converted from. Not a link target.
-  { scheme: 'media', namespace: NAMESPACES.BROWSER, status: 'live', verify: 'built-in; bytes derived locally from a source the browser already verified', navigable: false },
+  { scheme: 'media', namespace: NAMESPACES.BROWSER, status: 'live', trust: 'builtin', verify: 'built-in; bytes derived locally from a source the browser already verified', navigable: false },
   // The document render sandbox (src/documents/docview-protocol.js): an
   // isolated origin main loads into a view. A page navigating a tab into it
   // is refused (documentToViewerPage), so it is not a link target either.
-  { scheme: 'docview', namespace: NAMESPACES.BROWSER, status: 'live', verify: 'built-in sandbox; the document it renders was opened by the user', navigable: false }
+  { scheme: 'docview', namespace: NAMESPACES.BROWSER, status: 'live', trust: 'builtin', verify: 'built-in sandbox; the document it renders was opened by the user', navigable: false }
 ])
 
 // Fast scheme -> table-row lookup.
@@ -211,14 +223,7 @@ export function schemeOf (input) {
   return s.slice(0, s.indexOf(':')).toLowerCase()
 }
 
-// v3 onion: exactly 56 base32 chars (a-z, 2-7) + ".onion". v2 (16 chars) is
-// dead and unsafe; we recognize the .onion suffix but only mark v3 valid.
-const ONION_V3 = /^[a-z2-7]{56}\.onion$/i
 const B32 = 'abcdefghijklmnopqrstuvwxyz234567' // RFC 4648 §6
-
-export function isOnionHost (host) {
-  return /\.onion$/i.test(String(host || ''))
-}
 
 /**
  * A well-formed v3 onion address — rend-spec-v3 §6:
@@ -252,89 +257,6 @@ export function isValidV3Onion (host) {
     .update(Buffer.concat([Buffer.from('.onion checksum'), raw.subarray(0, 32), raw.subarray(34)]))
     .digest()
   return raw[32] === want[0] && raw[33] === want[1]
-}
-
-export function isEthName (host) {
-  return /\.eth$/i.test(String(host || ''))
-}
-
-// An IPv4 dotted quad, or an IPv6 literal with or without its brackets.
-function isIpLiteral (host) {
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true
-  const bare = host.replace(/^\[|\]$/g, '')
-  if (bare.includes(':') && /^[0-9a-f:.]+$/i.test(bare)) return true
-  return false
-}
-
-// Strip a scheme-less path/query/fragment, any :port and a trailing dot to
-// get the bare host. The trailing dot (the DNS root form, `vitalik.eth.`)
-// must go BEFORE the suffix checks or `.eth`/`.onion` silently miss.
-// A `:port` is stripped only from a host with exactly one colon and no
-// brackets: `::1` is an address, not a host with a port of 1.
-function bareHost (input) {
-  let host = String(input || '').trim().split(/[/?#]/)[0]
-  if (!host.startsWith('[') && (host.match(/:/g) || []).length === 1) {
-    host = host.replace(/:\d+$/, '')
-  } else if (host.startsWith('[')) {
-    host = host.replace(/^(\[[^\]]*\]):\d+$/, '$1')
-  }
-  host = host.replace(/\.$/, '')
-  return host
-}
-
-// Punycode the host so a Unicode TLD (пример.рф) is compared against the
-// punycode ICANN list, and an emoji label is recognized as non-ICANN (HNS).
-function asciiTld (host) {
-  const labels = host.split('.').filter(Boolean)
-  let tld = labels[labels.length - 1]
-  try {
-    const ascii = new URL('http://' + host).hostname
-    tld = ascii.split('.').filter(Boolean).pop()
-  } catch { /* keep the raw tld */ }
-  return (tld || '').toLowerCase()
-}
-
-/**
- * Classify a bare HOST (no scheme) into exactly one namespace. Order matters
- * and is the crux of L1/L2 for typed input — each host resolves to ONE
- * namespace, decided here and nowhere else.
- *
- * Returns one of: 'tor' | 'ens' | 'hns' | 'icann' | 'web' (an IP literal, or
- * a reserved name such as `nas.local`) | null, where null means "a single
- * bare label" — the caller decides between HNS and search.
- *
- * `tlds` is an override for tests (defaults to the bundled IANA snapshot);
- * src/hns/hns-host.js consumes this function with the same override shape.
- */
-export function classifyHost (rawHost, tlds = ICANN_TLDS) {
-  const host = bareHost(rawHost)
-  if (!host || /\s/.test(host)) return null
-
-  // .onion FIRST and unconditionally: a v3 onion goes to Tor and MUST NEVER be
-  // sent to DNS/ODoH (L1). Even a malformed .onion stays in the Tor namespace
-  // (it fails as a Tor address, not as a DNS miss) — never leaked to a resolver.
-  if (isOnionHost(host)) return NAMESPACES.TOR
-
-  // .eth -> ENS. No fallback into HNS or ICANN if ENS has no record (L2).
-  if (isEthName(host)) return NAMESPACES.ENS
-
-  // A name the network reserves (RFC 6761/6762/7686/8375 and the home-network
-  // labels, src/hns/reserved-names.cjs) is the user's own device, never a
-  // Handshake lookup. `.onion` is in that list too, which is why the Tor test
-  // above runs first.
-  if (isReservedHost(host)) return NAMESPACES.WEB
-
-  // An IP literal BEFORE the label count: an IPv6 literal has no dots and
-  // would otherwise fall to the bare-label rule and become a Handshake name.
-  if (isIpLiteral(host)) return NAMESPACES.WEB
-
-  const labels = host.split('.').filter(Boolean)
-  if (labels.length < 2) return null // single label: caller decides HNS vs search
-
-  const tld = asciiTld(host)
-  // ICANN has no all-numeric TLDs; a numeric final label (14898) is Handshake.
-  if (/^\d+$/.test(tld)) return NAMESPACES.HNS
-  return tlds.has(tld) ? NAMESPACES.ICANN : NAMESPACES.HNS
 }
 
 // --- The classifier ---------------------------------------------------------
@@ -390,6 +312,19 @@ export function classify (input, opts = {}) {
   // userinfo and silently drop it (`@alice@host` -> `hns://host/`). A search.
   if (raw.includes('@')) {
     return { url: searchURL(raw), scheme: 'search', namespace: NAMESPACES.SEARCH, explicit: false, reason: 'search' }
+  }
+
+  // A NIP-19 identifier is self-describing: the human-readable part IS the
+  // type and a 30-bit checksum makes a false positive a one-in-a-billion
+  // event — so it is DECODED before it is claimed, and a Handshake name that
+  // merely starts with `npub` stays a name. `nsec` is routed on purpose: the
+  // nostr handler answers with the "that is a PRIVATE KEY" page, whereas the
+  // bare-label rule would have sent the secret to a resolver as a name.
+  if (/^(npub|note|nprofile|nevent|naddr|nsec)1[02-9ac-hj-np-z]{6,}$/i.test(raw)) {
+    const decoded = decodeNip19(raw.toLowerCase())
+    if (!decoded.error || /^nsec1/i.test(raw)) {
+      return { url: `nostr:${raw.toLowerCase()}`, scheme: 'nostr', namespace: NAMESPACES.NOSTR, explicit: false, reason: 'nip19-identifier' }
+    }
   }
 
   // A pasted CID is the most natural thing anybody does with one, and it is

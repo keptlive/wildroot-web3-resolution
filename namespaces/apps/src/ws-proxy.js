@@ -69,6 +69,17 @@ import { isHnsHost as defaultIsHnsHost } from '../../../src/hns-host.js'
 import { decodeHnsHost } from '../../../src/hns-url.cjs'
 import { isPublicAddress as defaultIsPublicAddress } from '../../../src/safe-address.js'
 import { anyFreePort } from './free-port.js'
+import { socksDialer } from '../../../src/socks-dial.js'
+
+/**
+ * The one port a CONNECT may name. A DANE pin is looked up at `_443._tcp`
+ * (Chapter 1 HS-6), so 443 is the only port on which the TLS Chromium runs
+ * through this tunnel is pinned to the name. A CONNECT to 80 is what a
+ * plaintext `ws://` from a non-secure page becomes; refusing it here means
+ * no Handshake WebSocket is ever spliced unpinned — and nothing about the
+ * refusal reaches a system resolver, which sending `ws:` DIRECT would.
+ */
+export const TUNNEL_PORT = 443
 
 const HEAD_END = Buffer.from('\r\n\r\n')
 // A CONNECT head is a request line + a handful of headers. Anything larger is
@@ -177,10 +188,16 @@ export class WsProxy {
    * @param {() => boolean} [opts.isAnonymized] true while IP Protection is on
    * @param {{user:string, pass:string}} opts.credentials per-session proxy creds
    * @param {(host:string, port:number)=>Promise<import('node:net').Socket>} [opts.dial]
+   * @param {() => (string|null)} [opts.torSocks] the device-local Tor's
+   *        `socks5://…` while IP Protection is on, else null. With it, an
+   *        anonymized request is dialled THROUGH Tor instead of refused.
    * @param {(host:string)=>boolean} [opts.isHnsHost] host classifier (test override)
    * @param {(addr:string)=>boolean} [opts.isPublicAddress] SSRF guard (test override)
    */
-  constructor ({ resolver, isAnonymized, credentials, dial, isHnsHost, isPublicAddress } = {}) {
+  constructor ({ resolver, isAnonymized, credentials, dial, isHnsHost, isPublicAddress, torSocks, ports } = {}) {
+    this.torSocks = typeof torSocks === 'function' ? torSocks : () => null
+    /** The ports a CONNECT may name. TUNNEL_PORT alone in the browser; a test's TLS server sits elsewhere. */
+    this.ports = new Set(Array.isArray(ports) && ports.length ? ports : [TUNNEL_PORT])
     if (!resolver || typeof resolver.resolve !== 'function') {
       throw new Error('ws-proxy: a resolver with .resolve() is required')
     }
@@ -287,21 +304,33 @@ export class WsProxy {
     const host = decodeHnsHost(authority.host)
     const { port } = authority
 
-    // 3. MITIGATION (c): refuse while IP Protection is on — a direct dial
-    // would leak the real IP. Checked BEFORE resolving so nothing about the
-    // request touches the network.
-    if (this.isAnonymized()) {
+    // 3. Only the pinned port (see TUNNEL_PORT). Before the gate and before
+    // resolving: a refused port costs no lookup.
+    if (!this.ports.has(port)) {
       return this._refuse(client, 403, 'Forbidden')
     }
 
-    // 4. MITIGATION (a): HNS-only. Chromium sends the literal name for a
+    // 4. MITIGATION (c): while IP Protection is on, a direct dial from this
+    // process would leak the real IP. With the device-local Tor's SOCKS port
+    // to hand, the dial goes THROUGH it — the chain proof and the DANE pin
+    // are unchanged, only the socket's route differs; without it, refuse.
+    // Checked BEFORE resolving so nothing about the request touches the
+    // network on the refusal path.
+    let dial = this.dial
+    if (this.isAnonymized()) {
+      const socks = this.torSocks()
+      if (!socks) return this._refuse(client, 403, 'Forbidden')
+      dial = socksDialer(socks)
+    }
+
+    // 5. MITIGATION (a): HNS-only. Chromium sends the literal name for a
     // Handshake host; anything else (an ICANN relay, an IP literal) is
     // refused — the PAC should never route it here in the first place.
     if (!this.isHnsHost(host)) {
       return this._refuse(client, 403, 'Forbidden')
     }
 
-    // 5. Resolve via the shared HNSResolver (the SAME lookups an hns://
+    // 6. Resolve via the shared HNSResolver (the SAME lookups an hns://
     // navigation makes), and take the dialable address.
     let resolution
     try {
@@ -316,17 +345,17 @@ export class WsProxy {
       return this._refuse(client, 502, 'Bad Gateway')
     }
 
-    // 6. MITIGATION (b): SSRF. Refuse loopback / private / link-local /
+    // 7. MITIGATION (b): SSRF. Refuse loopback / private / link-local /
     // metadata, exactly like the raw-socket HNS fetch path.
     if (!this.isPublicAddress(address)) {
       return this._refuse(client, 403, 'Forbidden')
     }
 
-    // 7. Dial and splice. Chromium does TLS + the WS handshake end to end
+    // 8. Dial and splice. Chromium does TLS + the WS handshake end to end
     // over this pipe; we never look inside it.
     let upstream
     try {
-      upstream = await this.dial(address, port)
+      upstream = await dial(address, port)
     } catch {
       return this._refuse(client, 502, 'Bad Gateway')
     }

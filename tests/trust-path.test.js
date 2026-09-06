@@ -55,7 +55,7 @@ test('DoH resolution is never reported as chain-verified', () => {
   assert.equal(name.state, 'unverified')
   assert.match(name.source, /dns\.example/)
   assert.equal(byLabel(steps, 'Connection').state, 'none')
-  assert.equal(summarize(steps).state, 'partial')
+  assert.equal(summarize(steps).state, 'open')
 })
 
 test('an oblivious DoH resolver is labelled as such', () => {

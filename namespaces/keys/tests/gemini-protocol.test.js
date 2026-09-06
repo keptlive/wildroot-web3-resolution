@@ -148,3 +148,43 @@ test('a success serves the body with the META line as its content type', async (
   assert.equal(res.headers.get('Content-Type'), 'text/gemini; lang=en')
   assert.equal(await res.text(), '# hi')
 })
+
+test('with IP Protection on, the capsule is reached through the Tor SOCKS port by name — or refused when there is none', async () => {
+  const net = await import('node:net')
+  const asked = []
+  const socks = net.createServer((client) => {
+    let stage = 0
+    client.on('data', (chunk) => {
+      if (stage === 0) { client.write(Buffer.from([5, 0])); stage = 1; return }
+      if (stage === 1) {
+        stage = 2
+        const n = chunk[4]
+        asked.push({ atyp: chunk[3], host: chunk.subarray(5, 5 + n).toString(), port: chunk.readUInt16BE(5 + n) })
+        client.write(Buffer.from([5, 0, 0, 1, 127, 0, 0, 1, 0, 0]))
+      }
+    })
+  })
+  await new Promise((resolve) => socks.listen(0, '127.0.0.1', resolve))
+  try {
+    const seen = []
+    const requestImpl = (url, opts, cb) => {
+      seen.push(opts.tlsOpt)
+      const body = Buffer.from('# hi')
+      const res = Object.assign(Readable.from([body]), { statusCode: 20, meta: 'text/gemini' })
+      setTimeout(() => cb(null, res), 0)
+    }
+    const { handler } = await createHandler({ requestImpl, isAnonymized: () => true, torSocks: () => `socks5://127.0.0.1:${socks.address().port}` })
+    const res = await handler(new Request('gemini://capsule.example/'))
+    assert.equal(res.status, 200)
+    assert.deepEqual(asked, [{ atyp: 3, host: 'capsule.example', port: 1965 }], 'dialled by NAME through the proxy, so the OS resolver was never asked')
+    assert.ok(seen[0].socket, 'the client was handed the Tor-dialled socket')
+    assert.equal(seen[0].servername, 'capsule.example')
+    seen[0].socket.destroy()
+
+    const { handler: refusing } = await createHandler({ requestImpl, isAnonymized: () => true, torSocks: () => null })
+    const refused = await refusing(new Request('gemini://capsule.example/'))
+    assert.equal(refused.status, 503)
+  } finally {
+    socks.close()
+  }
+})

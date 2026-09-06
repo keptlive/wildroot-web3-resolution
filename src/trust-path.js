@@ -212,7 +212,8 @@ export function hnsSteps (host, resolution = {}, extra = {}) {
   // 5. What the bytes actually travelled over.
   if (CONTENT_ADDRESSED.has(resolution.kind)) {
     const id = resolution.cid || resolution.txid || resolution.key
-    steps.push(step('Content', 'verified', contentLabel(resolution, id),
+    steps.push(step('Content', 'verified',
+      contentLabel(resolution, id) + (resolution.dnslink ? ' (from the DNSLink record)' : ''),
       'Content-addressed: the bytes are checked against the address they ' +
       'were requested by, so they cannot have been altered in transit.'))
     if (!chain) {
@@ -260,7 +261,12 @@ export function schemeSteps (url, dns = null, bridge = null) {
     protocol = u.protocol.replace(':', '')
     host = u.hostname
   } catch {
-    return [step('Address', 'failed', 'Not a URL this browser could parse')]
+    // Not a WHATWG URL — but a NAMED scheme still gets its own arm (the
+    // canonical AT-URI `at://did:plc:…` is one such address). Only an input
+    // with no scheme at all is a parse failure.
+    const named = /^([a-z][a-z0-9+.-]*):/i.exec(String(url || '').trim())
+    if (!named) return [step('Address', 'failed', 'Not a URL this browser could parse')]
+    protocol = named[1].toLowerCase()
   }
   switch (protocol) {
     case 'https':
@@ -392,8 +398,21 @@ export function schemeSteps (url, dns = null, bridge = null) {
     case 'about':
     case 'editor':
     case 'paste':
+    case 'media':
+    case 'docview':
       return [step('Page', 'verified', 'Built into this browser',
         'Served from the application itself; it never touched the network.')]
+    case 'bluesky':
+    case 'mastodon':
+      // The APP is built in; what it shows is a social network's content,
+      // fetched from that network's servers over ordinary HTTPS.
+      return [
+        step('Page', 'verified', 'Built into this browser',
+          'The application itself is served from this browser.'),
+        step('Content', 'unverified', `${protocol === 'bluesky' ? 'Bluesky' : 'Fediverse'} servers over HTTPS`,
+          'What this app shows came from the network\'s own servers, vouched ' +
+          'for by a certificate authority — the same standing as any https:// site.')
+      ]
     case 'onion':
       // The onion address authenticates the SERVICE at the Tor layer, but the
       // page is plain HTTP inside the tunnel and is not otherwise verified —
@@ -486,7 +505,9 @@ function icannNameStep (host, dns, bridge = null) {
 /**
  * One-line summary + overall state for the lock itself. The rule is the
  * weakest link: a page is only as verified as its least-verified step, which
- * is exactly what a padlock is claiming when it is closed.
+ * is exactly what a padlock is claiming when it is closed. Five states:
+ * `verified` (trustless), `partial` (trusted), `open` (the connection carries
+ * no protection), `failed`, `unknown`.
  * @param {Step[]} steps
  */
 export function summarize (steps) {
@@ -494,6 +515,13 @@ export function summarize (steps) {
   if (steps.some((s) => s.state === 'failed')) {
     const bad = steps.find((s) => s.state === 'failed')
     return { state: 'failed', summary: `${bad.label} failed verification.` }
+  }
+  // OPEN: the connection itself carries no protection. This is the third
+  // lock state, and it lives in the model rather than in a renderer: a plain
+  // http:// page must never aggregate to the same verdict as an https:// one.
+  const connection = steps.find((s) => s.label === 'Connection')
+  if (connection && connection.state === 'none') {
+    return { state: 'open', summary: 'This page is not encrypted or authenticated.' }
   }
   const weak = steps.filter((s) => s.state === 'unverified' || s.state === 'none')
   if (!weak.length) {

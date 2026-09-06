@@ -31,16 +31,18 @@ test('the scheme table states each one\'s maturity and verification story', () =
     scheme: 'did',
     namespace: 'did',
     status: 'partial',
+    trust: 'trusted',
     verify: 'DID document fetched from plc.directory / the did:web host ' +
       '(id checked; not proven — lock TRUSTED)'
   })
   assert.deepEqual(schemeInfo('at'), {
-    scheme: 'at', namespace: 'atproto', status: 'planned', verify: 'DID document (BR-7)'
+    scheme: 'at', namespace: 'atproto', status: 'planned', trust: 'refused', verify: 'DID document (BR-7)'
   })
   assert.deepEqual(schemeInfo('activitypub'), {
     scheme: 'activitypub',
     namespace: 'activitypub',
     status: 'planned',
+    trust: 'refused',
     verify: 'WebFinger/actor signature (BR-7)'
   })
   // Every row in the table names a namespace the table itself declares.

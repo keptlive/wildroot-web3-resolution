@@ -23,7 +23,7 @@
 
 import { timers } from './resolution-timing.js'
 import { buildQuery, parseAnswers, assertAnswersTo, TYPES } from './dns-query.js'
-import { originFrom, pointerFrom, txtStringsFrom } from './pointers.js'
+import { originFrom, pointerFrom, txtStringsFrom, dnslinkPointerFrom, mergePointers, DNSLINK_PREFIX } from './pointers.js'
 
 const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/
 
@@ -212,6 +212,20 @@ export class DoHResolver {
     return { kind: 'txt', strings, dnssecValidated: false, trust: 'doh' }
   }
 
+  /**
+   * The IPv4 address of an ICANN host, over this resolver's DoH/ODoH transport.
+   * The chain resolver uses it for the nameserver names and CNAME targets that
+   * are ICANN hosts, so that hop never goes out in the clear.
+   * @param {string} host
+   * @returns {Promise<string>} throws when there is no address
+   */
+  async addressOf (host) {
+    const a = await this._query(String(host || '').toLowerCase().replace(/\.$/, ''), 'A')
+    const rec = (a.answers || []).find((r) => r.type === TYPES.A && r.address)
+    if (!rec) throw new Error(`no address for ${host}`)
+    return rec.address
+  }
+
   /** Same shape as HNSResolver.resolve, but via DoH (no proof). */
   async resolve (host) {
     // The method is decided by the ANSWER, not the resolver: obliviousness is
@@ -239,13 +253,36 @@ export class DoHResolver {
     // (src/publish/pointers.js) — this used to be a second, subtly different
     // parser that returned on the first matching ANSWER, so a name carrying
     // `ar=` before `ipfs=` resolved differently here than it did there.
-    const txt = await this._query(host, 'TXT').catch(() => null)
-    const strings = []
-    for (const ans of (txt && txt.answers) || []) {
-      if (ans.type !== TYPES.TXT || !ans.txt) continue
-      strings.push(...txtStringsFrom([ans], TYPES.TXT))
+    // Both pointer sources, as on the chain path (src/hns/resolver.js): the
+    // `ipfs=` family at the name and DNSLink at `_dnslink.<name>`, merged by
+    // the one rule in pointers.js. Asked together — one round trip.
+    const [txt, dl] = await Promise.all([
+      this._query(host, 'TXT').catch(() => null),
+      this._query(`${DNSLINK_PREFIX}.${host}`, 'TXT').catch(() => null)
+    ])
+    const stringsOf = (reply) => {
+      const out = []
+      for (const ans of (reply && reply.answers) || []) {
+        if (ans.type !== TYPES.TXT || !ans.txt) continue
+        out.push(...txtStringsFrom([ans], TYPES.TXT))
+      }
+      return out
     }
-    const pointer = pointerFrom(strings)
+    const strings = stringsOf(txt)
+    const merged = mergePointers(pointerFrom(strings), dnslinkPointerFrom(stringsOf(dl)))
+    if (merged.conflict) {
+      const show = (p) => `${p.kind} ${p.cid || p.key || p.txid}`
+      return {
+        kind: 'pointer-conflict',
+        reason: `${host} publishes two content pointers that disagree: ` +
+          `${show(merged.conflict.direct)} at the name and ${show(merged.conflict.dnslink)} in its DNSLink record`,
+        trust: 'doh',
+        oblivious: !!(txt && txt.oblivious),
+        via: (txt && txt.via) || null,
+        endpoint: this.endpointLabel
+      }
+    }
+    const pointer = merged.pointer
     if (pointer) {
       const origin = pointer.kind === 'ipfs' ? originFrom(strings) : null
       return {

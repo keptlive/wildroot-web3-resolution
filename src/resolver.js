@@ -29,7 +29,7 @@ import {
   validateChain as validateChainUntimed, validateDs, anchorZoneKeys, isSupportedDs,
   isWildcardExpanded, WILDCARD_REASON, wireName
 } from './dnssec.js'
-import { originFrom, pointerFrom, txtStringsFrom } from './pointers.js'
+import { originFrom, pointerFrom, txtStringsFrom, dnslinkPointerFrom, mergePointers, DNSLINK_PREFIX } from './pointers.js'
 import {
   DEFAULT_OP_RPC_URLS, DEFAULT_OP_TIMEOUT, dnsNameservers, opRegistryFor, resolveOp
 } from './hip5-op.js'
@@ -194,7 +194,8 @@ export function referralIn (response, zone, host) {
 export class HNSResolver {
   constructor ({
     spv, authoritative = null, serverFor = null, timeout = 5000,
-    opRpcUrls = DEFAULT_OP_RPC_URLS, opTimeout = DEFAULT_OP_TIMEOUT, fetchImpl = null
+    opRpcUrls = DEFAULT_OP_RPC_URLS, opTimeout = DEFAULT_OP_TIMEOUT, fetchImpl = null,
+    dial = null, lookup = null
   } = {}) {
     this.spv = spv
     // Tests inject {server, port} to aim the authoritative hop at a local
@@ -214,6 +215,15 @@ export class HNSResolver {
     this.opRpcUrls = opRpcUrls
     this.opTimeout = opTimeout
     this.fetchImpl = fetchImpl
+    // The socket factory for every authoritative query. null = a direct
+    // `net.connect`; the browser hands in a SOCKS5 dialer to the device-local
+    // Tor while IP Protection is on, so the chain proof survives anonymization.
+    this.dial = dial
+    // How an ICANN host that appears in a walk (a nameserver name, a CNAME
+    // target) is turned into an address. The library default is the OS
+    // resolver, in the clear; the browser hands in its DoH/ODoH client so the
+    // one plaintext lookup this path used to make is gone on every mode.
+    this.lookup = lookup || (async (host) => (await dns.lookup(host, { family: 4 })).address)
     // Which `_op` fallbacks have already been explained. A page pulls dozens
     // of subresources from one name, and the reason is the same every time.
     this.opFallbacksLogged = new Set()
@@ -357,8 +367,7 @@ export class HNSResolver {
     const chained = await this._chainAddress(nsHost)
     if (chained) return chained
 
-    const looked = await dns.lookup(nsHost, { family: 4 })
-    return looked.address
+    return this.lookup(nsHost)
   }
 
   /**
@@ -405,14 +414,14 @@ export class HNSResolver {
         address = g.address
       } else {
         try {
-          address = (await dns.lookup(target, { family: 4 })).address
+          address = await this.lookup(target)
         } catch {
           continue
         }
       }
       if (!isPublicAddress(address)) continue
       try {
-        const a = await query(address, 53, nsHost, TYPES.A, { timeout: this.timeout })
+        const a = await query(address, 53, nsHost, TYPES.A, { timeout: this.timeout, dial: this.dial })
         const rec = a.answers.find((r) => r.type === TYPES.A && r.address)
         if (rec) return rec.address
       } catch {
@@ -501,7 +510,7 @@ export class HNSResolver {
       if (found.blocked) return found.blocked
       server = found.server
     }
-    const opts = { timeout: this.timeout }
+    const opts = { timeout: this.timeout, dial: this.dial }
     // Same delegation walk the site path takes (`_fromZone`): an identity TXT
     // under a registry TLD lives in the delegated zone, not the TLD's own, and
     // the sharing gate must not call a real person unregistered because their
@@ -697,8 +706,44 @@ export class HNSResolver {
    * @param {{zone:string, server:{server:string,port:number}, dsRecords:Array}} ctx
    * @param {number} depth
    */
+  /**
+   * Validate the TXT RRset in `reply` at `owner` up to the zone's anchor,
+   * with the §5.3.4 wildcard proof when the RRSIG says the answer was
+   * synthesised. Returns null when it validates, else the failure result.
+   * Used for the pointer at the name and for its `_dnslink` record, which
+   * are held to the same standard.
+   */
+  async _validateTxtRRset (owner, reply, ctx, fetchDnskeys, missing) {
+    const { dsRecords } = ctx
+    const rrsig = reply.answers.find(
+      (r) => r.type === TYPES.RRSIG && r.typeCovered === TYPES.TXT)
+    const rdatas = reply.answers
+      .filter((r) => r.type === TYPES.TXT && r.rdataRaw)
+      .map((r) => r.rdataRaw)
+    let result = null
+    try {
+      const { dnskeys, dnskeyRRSIG } = await fetchDnskeys()
+      const denial = rrsig && await this._wildcardProof(
+        rrsig, owner, reply.authority, ctx, { dsRecords, fetchDnskeys })
+      result = rrsig && validateChain({
+        dsRecords,
+        dnskeys,
+        dnskeyRRSIG,
+        leafOwner: owner,
+        leafType: TYPES.TXT,
+        leafRdatas: rdatas,
+        leafRRSIG: rrsig,
+        denial
+      })
+    } catch {
+      result = null
+    }
+    if (!result || !result.ok) return dnssecFailure(result, missing)
+    return null
+  }
+
   async _fromZone (host, ctx, depth) {
-    const opts = { timeout: this.timeout }
+    const opts = { timeout: this.timeout, dial: this.dial }
 
     // If this zone has a DS anchor it is DNSSEC-signed and its answers MUST
     // validate up to it — the TLD's on-chain DS at the top, and below a
@@ -758,45 +803,57 @@ export class HNSResolver {
     }
 
     const strings = txtStringsFrom(answersAbout(txt.answers, host, TYPES.CNAME), TYPES.TXT)
-    const pointer = withOrigin(strings)
-    if (pointer) {
-      if (dnssecZone) {
-        // The zone is signed, so the pointer must PROVE itself up to the
-        // on-chain DS, exactly like a TLSA pin. A signed zone whose pointer
-        // does not validate is an attack or a broken zone — fail closed
-        // rather than render whatever an on-path answer named.
-        const txtRRSIG = txt.answers.find(
-          (r) => r.type === TYPES.RRSIG && r.typeCovered === TYPES.TXT)
-        const txtRdatas = txt.answers
-          .filter((r) => r.type === TYPES.TXT && r.rdataRaw)
-          .map((r) => r.rdataRaw)
-        let result = null
-        try {
-          const { dnskeys, dnskeyRRSIG } = await fetchDnskeys()
-          const denial = txtRRSIG && await this._wildcardProof(
-            txtRRSIG, host, txt.authority, ctx, { dsRecords, fetchDnskeys })
-          result = txtRRSIG && validateChain({
-            dsRecords,
-            dnskeys,
-            dnskeyRRSIG,
-            leafOwner: host,
-            leafType: TYPES.TXT,
-            leafRdatas: txtRdatas,
-            leafRRSIG: txtRRSIG,
-            denial
-          })
-        } catch {
-          result = null
-        }
-        if (!result || !result.ok) {
-          return dnssecFailure(result, 'pointer TXT RRSIG missing')
-        }
-        pointer.dnssecValidated = true
+    const direct = withOrigin(strings)
+    if (direct && dnssecZone) {
+      // The zone is signed, so the pointer must PROVE itself up to the
+      // on-chain DS, exactly like a TLSA pin. A signed zone whose pointer
+      // does not validate is an attack or a broken zone — fail closed
+      // rather than render whatever an on-path answer named.
+      const failure = await this._validateTxtRRset(host, txt, ctx, fetchDnskeys, 'pointer TXT RRSIG missing')
+      if (failure) return failure
+    }
+
+    // THE SECOND POINTER SOURCE: DNSLink (dnslink.dev), `_dnslink.<host>`.
+    // It is the record every other IPFS client reads — IPFS Companion, Brave,
+    // kubo's `ipns://<domain>` — and the one Wildroot writes beside `ipfs=`
+    // at publish, so a site published either way opens in both. It is held
+    // to the SAME rules as the pointer at the name: on a signed zone the
+    // RRset validates to the anchor, and its absence is proven (below)
+    // before the resolution moves on to an address. The two sources are
+    // merged by pointers.js mergePointers: agreement is normal, either alone
+    // is fine, and a disagreement is surfaced as `pointer-conflict` rather
+    // than settled by a precedence rule nobody published.
+    const dnslinkOwner = `${DNSLINK_PREFIX}.${host}`
+    const dl = await query(server.server, server.port, dnslinkOwner, TYPES.TXT,
+      { ...opts, dnssec: dnssecZone })
+    const dlStrings = referralIn(dl, zone, dnslinkOwner)
+      ? [] // a delegation at the underscore label is not a DNSLink answer
+      : txtStringsFrom(answersAbout(dl.answers, dnslinkOwner, TYPES.CNAME), TYPES.TXT)
+    const viaDnslink = dnslinkPointerFrom(dlStrings)
+    if (viaDnslink && dnssecZone) {
+      const failure = await this._validateTxtRRset(dnslinkOwner, dl, ctx, fetchDnskeys, 'DNSLink TXT RRSIG missing')
+      if (failure) return failure
+    }
+
+    const merged = mergePointers(direct, viaDnslink)
+    if (merged.conflict) {
+      const show = (p) => `${p.kind} ${p.cid || p.key || p.txid}`
+      return {
+        kind: 'pointer-conflict',
+        reason: `${host} publishes two content pointers that disagree: ` +
+          `${show(merged.conflict.direct)} at the name and ${show(merged.conflict.dnslink)} in its DNSLink record`,
+        ...(dnssecZone ? { dnssecValidated: true, dnssecAnchored: true } : {})
       }
-      // Set only when true, like dnssecValidated just above: a pointer's
-      // shape is compared field-by-field by its callers and its tests, and a
+    }
+    const pointer = merged.pointer
+    if (pointer) {
+      // Set only when true, like dnssecValidated: a pointer's shape is
+      // compared field-by-field by its callers and its tests, and a
       // permanently-present `false` is noise in every unsigned zone.
-      if (dnssecZone) pointer.dnssecAnchored = true
+      if (dnssecZone) {
+        pointer.dnssecValidated = true
+        pointer.dnssecAnchored = true
+      }
       return pointer
     }
 
@@ -804,9 +861,10 @@ export class HNSResolver {
     // question moves on to the A record, for the same reason the TLSA absence
     // below does: a content-addressed site is the most protected thing a zone
     // can publish, and an on-path answer that simply withholds its `ipfs=`
-    // TXT must not be able to walk the browser down to an address instead.
-    // Only an EMPTY answer needs the proof — a TXT that exists and is not a
-    // pointer (SPF, a verification token) is an ordinary non-answer.
+    // TXT — or its `_dnslink` TXT — must not be able to walk the browser down
+    // to an address instead. Only an EMPTY answer needs the proof — a TXT
+    // that exists and is not a pointer (SPF, a verification token) is an
+    // ordinary non-answer.
     const txtAbout = answersAbout(txt.answers, host, TYPES.CNAME)
       .filter((r) => r.type === TYPES.TXT || r.type === TYPES.CNAME)
     if (dnssecZone && !txtAbout.length) {
@@ -814,6 +872,15 @@ export class HNSResolver {
       if (!provesDenial(nsecs, host, TYPES.TXT, zone)) {
         return await this._anchorFailure(fetchDnskeys, dsRecords, zone,
           `the zone did not prove that ${host} has no content pointer (RFC 4035 §5.4)`)
+      }
+    }
+    const dlAbout = answersAbout(dl.answers, dnslinkOwner, TYPES.CNAME)
+      .filter((r) => r.type === TYPES.TXT || r.type === TYPES.CNAME)
+    if (dnssecZone && !dlAbout.length) {
+      const nsecs = await this._validatedNsecs(dl.authority, { dsRecords, fetchDnskeys })
+      if (!provesDenial(nsecs, dnslinkOwner, TYPES.TXT, zone)) {
+        return await this._anchorFailure(fetchDnskeys, dsRecords, zone,
+          `the zone did not prove that ${host} has no DNSLink record (RFC 4035 §5.4)`)
       }
     }
 
@@ -900,8 +967,7 @@ export class HNSResolver {
           }
         }
         try {
-          const looked = await dns.lookup(cname.target.replace(/\.$/, ''), { family: 4 })
-          address = looked.address
+          address = await this.lookup(cname.target.replace(/\.$/, ''))
         } catch { /* fall through to unregistered */ }
       }
     }
@@ -1173,7 +1239,7 @@ export class HNSResolver {
    * @returns {Promise<{ctx?:object, fail?:object}>}
    */
   async _descend (ctx, referral, response, fetchDnskeys) {
-    const opts = { timeout: this.timeout }
+    const opts = { timeout: this.timeout, dial: this.dial }
     let childDs = []
 
     if (ctx.dsRecords.length) {

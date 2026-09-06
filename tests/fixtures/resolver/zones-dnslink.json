@@ -1,0 +1,58 @@
+{
+  "wrdnslink": {
+    "soa": {
+      "mname": "ns1.hns.one.",
+      "rname": "hostmaster.hns.one.",
+      "serial": 1,
+      "refresh": 7200,
+      "retry": 3600,
+      "expire": 1209600,
+      "minimum": 300
+    },
+    "ns": [
+      "ns1.hns.one."
+    ],
+    "records": [
+      {
+        "name": "_dnslink.only",
+        "type": "TXT",
+        "value": "dnslink=/ipfs/bafkreigph5cub32tn4ph2au3izioyxnr37lvthzdug4xlmhlbnxj7h3mqu"
+      },
+      {
+        "name": "agree",
+        "type": "TXT",
+        "value": "ipfs=bafkreigph5cub32tn4ph2au3izioyxnr37lvthzdug4xlmhlbnxj7h3mqu"
+      },
+      {
+        "name": "_dnslink.agree",
+        "type": "TXT",
+        "value": "dnslink=/ipfs/bafkreigph5cub32tn4ph2au3izioyxnr37lvthzdug4xlmhlbnxj7h3mqu"
+      },
+      {
+        "name": "conflict",
+        "type": "TXT",
+        "value": "ipfs=bafkreigph5cub32tn4ph2au3izioyxnr37lvthzdug4xlmhlbnxj7h3mqu"
+      },
+      {
+        "name": "_dnslink.conflict",
+        "type": "TXT",
+        "value": "dnslink=/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
+      },
+      {
+        "name": "_dnslink.named",
+        "type": "TXT",
+        "value": "dnslink=/ipns/k51qzi5uqu5dlvj2baxnqndepeb86cbk3ng7n3i46uzyxzyqj2xjonzllnv0v8"
+      },
+      {
+        "name": "_dnslink.pathed",
+        "type": "TXT",
+        "value": "dnslink=/ipfs/bafkreigph5cub32tn4ph2au3izioyxnr37lvthzdug4xlmhlbnxj7h3mqu/docs"
+      },
+      {
+        "name": "site",
+        "type": "A",
+        "value": "203.0.113.30"
+      }
+    ]
+  }
+}

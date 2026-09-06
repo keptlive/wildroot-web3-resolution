@@ -47,6 +47,8 @@ export const MAP = {
   'src/router.js': 'src/protocols/router.js',
   'src/safe-address.js': 'src/hns/safe-address.js',
   'src/safe-status.js': 'src/protocols/safe-status.js',
+  'src/socks-dial.js': 'src/hns/socks-dial.js',
+  'src/classify-host.cjs': 'src/hns/classify-host.cjs',
   'src/search-url.js': 'src/hns/search-url.js',
   'src/self-cert.js': 'src/hns/self-cert.js',
   'src/spv.js': 'src/hns/spv.js',

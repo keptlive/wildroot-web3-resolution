@@ -20,6 +20,9 @@
 import { Readable } from 'node:stream'
 import fetchToHandler from './fetch-to-handler.js'
 import { safeStatus } from '../../../src/safe-status.js'
+import { socksDialer } from '../../../src/socks-dial.js'
+
+const GEMINI_PORT = 1965
 
 /** Same-host redirects followed inside one request (Gemini spec §3.2.2 guidance). */
 export const MAX_REDIRECTS = 5
@@ -44,18 +47,38 @@ export function sameHostGeminiRedirect (from, meta) {
  * @param {object} [options]
  * @param {Function} [options.requestImpl] the client (tests inject one);
  *        defaults to @derhuerst/gemini's, imported lazily.
+ * @param {() => boolean} [options.isAnonymized] IP Protection on?
+ * @param {() => (string|null)} [options.torSocks] the device-local Tor's
+ *        `socks5://…` while protection is on. With it, the TLS connection is
+ *        made over a socket dialled THROUGH Tor (the capsule sees the exit,
+ *        and the OS resolver never sees the host — Tor resolves the name);
+ *        without it, an anonymized request is refused rather than leaked.
  */
 export default async function createHandler (options = {}) {
+  const isAnonymized = typeof options.isAnonymized === 'function' ? options.isAnonymized : () => false
+  const torSocks = typeof options.torSocks === 'function' ? options.torSocks : () => null
   return fetchToHandler(async () => {
     const request = options.requestImpl || (await import('@derhuerst/gemini/client.js')).default
 
-    const send = (url) => new Promise((resolve, reject) => {
-      request(url, {
-        followRedirects: (n, res) => n <= MAX_REDIRECTS && sameHostGeminiRedirect(url, res.meta),
-        verifyAlpnId: () => true,
-        tlsOpt: { rejectUnauthorized: false }
-      }, (err, res) => (err ? reject(err) : resolve(res)))
-    })
+    const send = async (url) => {
+      const tlsOpt = { rejectUnauthorized: false }
+      if (isAnonymized()) {
+        const socks = torSocks()
+        if (!socks) throw Object.assign(new Error('Gemini is refused while anonymization is on and no Tor port is available'), { status: 503 })
+        const u = new URL(url)
+        // The socket is dialled through Tor by NAME, so the OS resolver is
+        // never asked; TLS then runs over it with the hostname for SNI.
+        tlsOpt.socket = await socksDialer(socks)(u.hostname, Number(u.port) || GEMINI_PORT)
+        tlsOpt.servername = u.hostname
+      }
+      return new Promise((resolve, reject) => {
+        request(url, {
+          followRedirects: (n, res) => n <= MAX_REDIRECTS && sameHostGeminiRedirect(url, res.meta),
+          verifyAlpnId: () => true,
+          tlsOpt
+        }, (err, res) => (err ? reject(err) : resolve(res)))
+      })
+    }
 
     return async function geminiFetch (req) {
       const url = String(req.url)
@@ -75,7 +98,15 @@ export default async function createHandler (options = {}) {
         return new Response('Method Not Allowed', { status: 405, headers: { 'Content-Type': 'text/plain' } })
       }
 
-      const res = await send(url)
+      let res
+      try {
+        res = await send(url)
+      } catch (err) {
+        if (err && err.status === 503) {
+          return new Response(err.message, { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } })
+        }
+        throw err
+      }
       const { statusCode, statusMessage: statusText, meta } = res
 
       if (statusCode === 11) return form(meta, 'password')

@@ -301,7 +301,8 @@ test('e2e: the tunnel preserves end-to-end TLS so a DANE pin verifies through it
   const proxy = await startProxy(t, {
     resolver,
     credentials: CREDS,
-    isPublicAddress: () => true
+    isPublicAddress: () => true,
+    ports: [originPort] // the in-process TLS origin is not on 443
   })
 
   const c = await connect(t, proxy.port, { host: 'pxls', targetPort: originPort })
@@ -330,4 +331,54 @@ test('e2e: the tunnel preserves end-to-end TLS so a DANE pin verifies through it
   // And a wrong pin must fail closed on that same peer cert.
   const wrong = verifyDane(peerRaw, [{ usage: 3, selector: 1, matchingType: 1, certificate: 'de'.repeat(32) }])
   assert.equal(wrong.state, 'tlsa_mismatch', 'a mismatched pin is rejected, not shrugged off')
+})
+
+// ---------------------------------------------------------------- the pinned port, and Tor
+
+test('a CONNECT to any port but 443 is refused before the name is resolved — a plaintext ws:// is never spliced', async (t) => {
+  const resolver = stubResolver({ kind: 'site', address: '203.0.113.7' })
+  const proxy = await startProxy(t, { resolver, isAnonymized: () => false })
+  for (const targetPort of [80, 8080, 1965]) {
+    const c = await connect(t, proxy.port, { host: 'pxls', targetPort })
+    const head = await c.head()
+    assert.equal(head.status, 403, String(targetPort))
+  }
+  assert.deepEqual(resolver.calls, [], 'no lookup for a refused port')
+})
+
+test('with IP Protection on, the dial goes THROUGH the Tor SOCKS port when there is one, and is refused when there is not', async (t) => {
+  // A fake SOCKS5 server that records the CONNECT it is asked for and then
+  // answers "connected" without dialling anything, so the splice happens
+  // against a dead upstream — the assertion is about the route, not the bytes.
+  const asked = []
+  const socks = net.createServer((client) => {
+    let stage = 0
+    client.on('data', (chunk) => {
+      if (stage === 0) { client.write(Buffer.from([5, 0])); stage = 1; return }
+      if (stage === 1) {
+        stage = 2
+        asked.push({ atyp: chunk[3], host: chunk[3] === 1 ? [...chunk.subarray(4, 8)].join('.') : '?', port: chunk.readUInt16BE(chunk.length - 2) })
+        client.write(Buffer.from([5, 0, 0, 1, 127, 0, 0, 1, 0, 0]))
+      }
+    })
+  })
+  const socksPort = await listen(socks)
+  t.after(() => socks.close())
+  const resolver = stubResolver({ kind: 'site', address: '203.0.113.7' })
+  let socksUrl = `socks5://127.0.0.1:${socksPort}`
+  const proxy = await startProxy(t, {
+    resolver,
+    isAnonymized: () => true,
+    torSocks: () => socksUrl,
+    isPublicAddress: () => true
+  })
+  const c = await connect(t, proxy.port, { host: 'pxls', targetPort: 443 })
+  const head = await c.head()
+  assert.equal(head.status, 200, 'dialled through Tor, spliced')
+  assert.deepEqual(asked, [{ atyp: 1, host: '203.0.113.7', port: 443 }], 'the resolved address went to the SOCKS port, by address, never by name')
+  c.sock.destroy()
+  // No Tor port: refuse rather than dial from the real address.
+  socksUrl = null
+  const c2 = await connect(t, proxy.port, { host: 'pxls', targetPort: 443 })
+  assert.equal((await c2.head()).status, 403)
 })

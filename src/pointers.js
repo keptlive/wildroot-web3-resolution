@@ -270,3 +270,67 @@ export function dnslinkOwner (label) {
   const l = String(label || '@').trim() || '@'
   return l === '@' ? DNSLINK_PREFIX : `${DNSLINK_PREFIX}.${l}`
 }
+
+/**
+ * A DNSLink TXT value read back (dnslink.dev): `dnslink=/ipfs/<cid>[/path]`
+ * or `dnslink=/ipns/<key>[/path]`. The same address shapes as the `ipfs=` and
+ * `ipns=` pointers, so a site published for IPFS Companion, Brave or kubo —
+ * which read nothing but this record — opens here, and a Wildroot site (which
+ * writes both records) opens there. A path suffix is carried as `path`.
+ * Any other namespace (`/hyper/`, `/dnslink/`) is not a pointer here.
+ * @param {string} value one TXT string
+ * @returns {object|null}
+ */
+export function parseDnslink (value) {
+  const raw = String(value == null ? '' : value).trim()
+  const m = /^dnslink=\/(ipfs|ipns)\/([^/\s]+)(\/.*)?$/i.exec(raw)
+  if (!m) return null
+  const ns = m[1].toLowerCase()
+  const id = m[2]
+  const path = m[3] && m[3] !== '/' ? m[3] : ''
+  const pointer = ns === 'ipfs'
+    ? (CID_RE.test(id) ? { kind: 'ipfs', cid: id } : null)
+    : (IPNS_RE.test(id) ? { kind: 'ipns', key: id } : null)
+  if (!pointer) return null
+  return path ? { ...pointer, path } : pointer
+}
+
+/**
+ * The DNSLink pointer among the TXT strings at `_dnslink.<name>`. DNSLink
+ * says a name carries ONE dnslink value; when several parse, the first in
+ * record order wins, which is what every other DNSLink reader does.
+ * @param {string[]} strings
+ */
+export function dnslinkPointerFrom (strings) {
+  for (const s of strings || []) {
+    const p = parseDnslink(s)
+    if (p) return p
+  }
+  return null
+}
+
+/**
+ * Two pointer sources, one answer. A name may carry an `ipfs=`/`ipns=` TXT at
+ * the name and a `dnslink=` TXT at `_dnslink.<name>`; Wildroot writes both.
+ * Agreement is the normal case and either alone is fine. DISAGREEMENT IS
+ * NEVER RESOLVED BY PICKING: two records naming different content is a
+ * broken or tampered zone, and the honest answer is to say so rather than
+ * render whichever one a rule happens to prefer.
+ *
+ * @param {object|null} direct the `ipfs=`-family pointer at the name
+ * @param {object|null} dnslink the `dnslink=` pointer at `_dnslink.<name>`
+ * @returns {{pointer: object|null, conflict?: {direct: object, dnslink: object}}}
+ */
+export function mergePointers (direct, dnslink) {
+  if (!direct && !dnslink) return { pointer: null }
+  if (!dnslink) return { pointer: direct }
+  if (!direct) return { pointer: { ...dnslink, dnslink: true } }
+  const same = direct.kind === dnslink.kind &&
+    (direct.cid || direct.key || direct.txid) === (dnslink.cid || dnslink.key)
+  if (same) return { pointer: { ...direct, dnslink: true } }
+  // A non-IPFS direct pointer (ar=, bt=, hyper=) beside a dnslink is not a
+  // disagreement about the same content: DNSLink can only name IPFS content,
+  // and POINTER_PRECEDENCE already ranks ipfs first. It is still two
+  // different answers, and the rule is the same: surface it.
+  return { pointer: null, conflict: { direct, dnslink } }
+}

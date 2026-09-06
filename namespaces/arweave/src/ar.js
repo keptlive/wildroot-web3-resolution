@@ -15,7 +15,29 @@
  * follow-up. Contrast with ipfs://, where the local node verifies every block.
  */
 
+import { createHash } from 'node:crypto'
 import { isCanonicalTxid } from '../../../src/pointers.js'
+
+/**
+ * THE HEADER CHECK. An Arweave transaction id IS the SHA-256 of the
+ * transaction's signature (the protocol's definition of the id), so a
+ * transaction header fetched from a SECOND gateway can be proven to be the
+ * transaction the id names with one hash and no trust in either gateway. It
+ * does not yet prove the BYTES — that needs `data_root` and the chunk Merkle
+ * tree, which this browser does not compute — but it closes the cheapest
+ * lie: a gateway answering a transaction id with a header for something else.
+ * Applied to the transaction's own data (no manifest path), and only when a
+ * second gateway exists to ask; a header that does not match its id is a
+ * refusal, never a shrug.
+ */
+export function headerMatchesId (header, txid) {
+  const sig = header && typeof header.signature === 'string' ? header.signature : null
+  if (!sig) return false
+  let bytes
+  try { bytes = Buffer.from(sig, 'base64url') } catch { return false }
+  if (!bytes.length) return false
+  return createHash('sha256').update(bytes).digest().toString('base64url') === txid
+}
 
 /**
  * The gateways an `ar://` fetch may try, in order.
@@ -89,6 +111,10 @@ function sameScopeRedirect (location, base, txid) {
  * @param {object} options
  * @param {string} [options.gateway] pin ONE gateway (tests, callers that must)
  * @param {string[]} [options.gateways] the failover list; defaults to AR_GATEWAYS
+ * @param {boolean} [options.verifyHeader] fetch the transaction header from a
+ *        SECOND gateway and require it to hash to the id (headerMatchesId);
+ *        the browser turns this on, the library default is off because it is
+ *        one more request per transaction.
  * @param {Function} options.fetchImpl REQUIRED. The session-bound fetch
  *        (net.fetch riding the active proxy). Node's global fetch ignores
  *        session.setProxy, so defaulting to it would leak the real IP to the
@@ -96,7 +122,7 @@ function sameScopeRedirect (location, base, txid) {
  *        ungated on the strength of this injection. No default, so a caller
  *        that forgets fails at construction, not in a user's traffic.
  */
-export default function createArHandler ({ gateway = null, gateways = null, fetchImpl } = {}) {
+export default function createArHandler ({ gateway = null, gateways = null, fetchImpl, verifyHeader = false } = {}) {
   if (typeof fetchImpl !== 'function') {
     throw new Error('createArHandler needs fetchImpl: the session-bound fetch (the global fetch is not proxied)')
   }
@@ -149,6 +175,8 @@ export default function createArHandler ({ gateway = null, gateways = null, fetc
     // returned as it came, statuses included.
     let res = null
     let lastErr = null
+    let headerVerified = false
+    let servedBy = null
     for (let i = 0; i < hosts.length; i++) {
       let target = `${hosts[i]}/${txid}${path}${query}`
       try {
@@ -171,14 +199,37 @@ export default function createArHandler ({ gateway = null, gateways = null, fetc
         throw err
       }
       if (res.status >= 500 && i < hosts.length - 1) continue
+      servedBy = hosts[i]
       break
     }
     if (!res) throw (lastErr || new Error('no Arweave gateway answered'))
+    // The header check, against a gateway OTHER than the one that served the
+    // bytes: a lying gateway would supply a matching header too.
+    if (res.status === 200 && !path && hosts.length > 1 && verifyHeader) {
+      const other = hosts.find((h) => h !== servedBy) || hosts[1]
+      let header = null
+      try {
+        const h = await doFetch(`${other}/tx/${txid}`, 'GET', { 'user-agent': 'hns.one-browser', accept: 'application/json' })
+        if (h.status === 200) header = await h.json()
+      } catch {
+        header = null // the second gateway is unreachable: nothing was checked, and the response says so
+      }
+      if (header && !headerMatchesId(header, txid)) {
+        return new Response(`The transaction header ${other} serves for ${txid} is not the transaction that id names (its signature does not hash to the id). Refused.`, {
+          status: 502, headers: { 'content-type': 'text/plain' }
+        })
+      }
+      if (header) headerVerified = true
+    }
     const out = new Headers()
     for (const k of RETURNED) {
       const v = res.headers.get(k)
       if (v) out.set(k, v)
     }
+    // What was and was not checked, machine-readable for the trust panel:
+    // `header` when the transaction header was proven to be this id's;
+    // `none` otherwise. Never `bytes` — the data_root is not computed here.
+    out.set('X-Arweave-Verified', headerVerified ? 'header' : 'none')
     return new Response(res.body, { status: res.status, headers: out })
   }
 
