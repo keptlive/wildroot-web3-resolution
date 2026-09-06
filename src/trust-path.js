@@ -529,8 +529,10 @@ export function summarize (steps) {
   }
   return {
     state: 'partial',
+    // The label leads and the verdict follows, so a plural label ("Name
+    // records") and a singular one ("Connection") both read right.
     summary: weak.length === 1
-      ? `${weak[0].label} is not verified.`
+      ? `Not verified: ${weak[0].label.toLowerCase()}.`
       : `${weak.length} steps are not verified: ${weak.map((s) => s.label.toLowerCase()).join(', ')}.`
   }
 }

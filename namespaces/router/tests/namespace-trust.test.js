@@ -190,7 +190,7 @@ test('the lock follows the weakest link, and a failure never closes it', () => {
 
 test('the summary NAMES the weak steps rather than counting them silently', () => {
   const one = summarize([{ label: 'Domain name', state: 'unverified', source: 'x' }])
-  assert.match(one.summary, /Domain name is not verified/)
+  assert.match(one.summary, /Not verified: domain name\./)
   const two = summarize([
     { label: 'Domain name', state: 'unverified', source: 'x' },
     { label: 'Connection', state: 'unverified', source: 'x' }

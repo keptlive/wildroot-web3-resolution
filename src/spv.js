@@ -73,6 +73,8 @@ export const DEFAULT_PORTS = Object.freeze({ http: 14539, ns: 14541 })
 
 /** Beside the api key: the ports the spawned node was given. */
 const PORTS_FILE = '.node-ports'
+/** How long stopChild waits for the killed node to exit before a respawn may proceed. */
+const STOP_WAIT_MS = 5000
 
 /** How much of hsd's stderr is kept to explain an exit. */
 const STDERR_TAIL_BYTES = 4096
@@ -611,12 +613,32 @@ export class SPVNode {
     return !!this.child && this._proxyOfChild === proxy
   }
 
-  /** Kill only our own child/orphan process (recovery path). */
+  /**
+   * Kill only our own child/orphan process (recovery path) — and WAIT for it
+   * to be gone. A respawn that follows at once (setProxy) begins by probing
+   * for an orphan to adopt; on Windows the kill lands late enough that the
+   * probe found the OLD node still answering and adopted it, so a toggle of
+   * IP Protection left the node on the wrong proxy (the Windows gate,
+   * 2.78.20: "direct again"). The saved key and ports are removed too, so a
+   * process that outlives the wait cannot be adopted either.
+   */
   async stopChild () {
-    if (this.child) killTree(this.child)
-    else if (this.adoptedPid) killPid(this.adoptedPid)
+    const child = this.child
+    const pid = this.adoptedPid
     this.child = null
     this.adoptedPid = null
+    if (child) {
+      const exited = new Promise((resolve) => { if (child.exitCode !== null || child.signalCode) resolve(); else child.once('exit', resolve) })
+      killTree(child)
+      await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS))])
+    } else if (pid) {
+      killPid(pid)
+      const gone = async () => { for (let i = 0; i < STOP_WAIT_MS / 50; i++) { try { process.kill(pid, 0) } catch { return } await new Promise((resolve) => setTimeout(resolve, 50)) } }
+      await gone()
+    }
+    for (const f of ['.node-api-key', '.node-pid', PORTS_FILE]) {
+      try { fs.unlinkSync(path.join(this.prefix, f)) } catch {}
+    }
   }
 
   async stop () {
