@@ -124,7 +124,9 @@ export function sandboxLabel (txid) {
  * own origin (sandboxLabel) — the SAME transaction (the txid stays the first
  * path segment), https, one hop. Anything else is refused — a `location`
  * handed back to the renderer would restore the open redirect that
- * `redirect: 'manual'` closes.
+ * `redirect: 'manual'` closes. (The fetch handed in must really RETURN the
+ * 3xx on a manual redirect; Electron's net.fetch rejects instead, so the
+ * browser hands in src/protocols/manual-redirect-fetch.js.)
  */
 export function sameScopeRedirect (location, base, txid) {
   let target
