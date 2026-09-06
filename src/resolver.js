@@ -847,6 +847,13 @@ export class HNSResolver {
     }
     const pointer = merged.pointer
     if (pointer) {
+      // The stated origin (`car=`) is a record at the NAME, whichever source
+      // named the content: a DNSLink-only site with a `car=` beside it gets
+      // its origin too, exactly as it does over DoH.
+      if (pointer.kind === 'ipfs' && !pointer.origin) {
+        const origin = originFrom(strings)
+        if (origin) pointer.origin = origin
+      }
       // Set only when true, like dnssecValidated: a pointer's shape is
       // compared field-by-field by its callers and its tests, and a
       // permanently-present `false` is noise in every unsigned zone.

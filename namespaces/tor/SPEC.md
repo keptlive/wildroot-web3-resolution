@@ -598,6 +598,41 @@ One SOCKS URL with no credentials is applied, so Tor's `IsolateSOCKSAuth` has
 nothing to isolate on and every site in the session can share circuits
 ([`../../DEVIATIONS.md`](../../DEVIATIONS.md) TO-3).
 
+**Three paths outside the session dial the same port directly.** Electron's
+session proxy covers what the network stack sends; it does not cover raw TCP
+opened from the main process. Three such paths exist, and while the mode is on
+each of them — instead of refusing, and instead of dialling directly — speaks
+SOCKS5 to **the port this controller chose** (`status.rules`, the
+`socks5://127.0.0.1:<port>` URL of §7.1) through one shared client,
+`../../src/socks-dial.js` (RFC 1928, the "no authentication" method only):
+
+| Path | What it dials, and how | Specified in |
+|---|---|---|
+| the Handshake resolver's authoritative hop | the nameserver's **address**, `ATYP` IPv4 or IPv6 | Chapter 1 |
+| the `wss://` tunnel's upstream | the origin's resolved **address**, `ATYP` IPv4 or IPv6 | Chapter 11 §4.4 |
+| a `gemini://` request's TLS socket | the capsule's **name**, `ATYP` `DOMAINNAME`, so no local lookup happens | Chapter 9 §K.6.2 |
+
+Two properties of that are this chapter's, and normative here. First, **it is
+still device-local only**: the only SOCKS server any of them may address is the
+one this controller chose on `127.0.0.1`, so §1's rule holds unchanged — a
+dialer pointed at a hosted SOCKS endpoint would be the escape hatch this chapter
+refuses to have (§7.1, DEVIATIONS §2.1). Second, **the address type is the
+caller's decision and it matters**: a resolved address is sent as an address so
+the proxy learns no name, and a host that has not been resolved is sent as a
+name so that Tor resolves it and the operating system never does. An
+implementation **MUST NOT** invert either half — resolving locally to send an
+address is a leak, and sending a name that was already resolved discloses it for
+nothing.
+
+**And TO-3 applies to these dials too.** They send no SOCKS credential either,
+so a Handshake nameserver lookup, a WebSocket to a Handshake origin and a Gemini
+capsule share circuits with each other and with everything in the session. The
+per-origin credential of [`../../DEVIATIONS.md`](../../DEVIATIONS.md) TO-D1
+would, unlike the session proxy, be trivial to supply here — these callers
+construct their own dialer — which makes them the cheapest place to *measure*
+whether Tor isolates on it before the harder question of the session proxy is
+answered.
+
 This is what makes onion resolution possible at all: the onion handler does not
 build a tunnel, it rides the one the session already has. The cost of that
 simplicity is in [`../../DEVIATIONS.md`](../../DEVIATIONS.md) TO-6.
@@ -704,7 +739,7 @@ and is the single most important behaviour in this chapter.
 |---|---|
 | a name resolver | **nothing** — resolution is proxy-side (§6.4) |
 | the local network / ISP | that Tor is in use; not which service |
-| the Tor network | what Tor's own design exposes; out of scope. Traffic is not isolated per site, so one circuit can carry several of them (TO-3) |
+| the Tor network | what Tor's own design exposes; out of scope. Traffic is not isolated per site, so one circuit can carry several of them — and, since the resolver's authoritative hop, the `wss://` tunnel and `gemini://` dial this same port for themselves (§7.5), a circuit can carry those as well (TO-3) |
 | **the onion service** | the request line, a pinned `User-Agent` and `Accept-Language`, and the five forwarded headers a request actually carried; and everything the *page* can do once it runs — this browser does not resist fingerprinting the way Tor Browser does, so canvas, fonts, screen metrics, timing and storage are all available to it. **A user who needs anonymity rather than IP-hiding needs Tor Browser, and the product says so in every place this appears.** |
 
 **At the edges:**

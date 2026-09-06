@@ -93,32 +93,6 @@ worth doing together with HS-6, not before it.
 
 ---
 
-### HS-4. DNSLink is written but never read
-
-**What.** The publish path writes `_dnslink.<label> TXT dnslink=/ipfs/<cid>` so
-kubo, Brave and the public gateways can resolve our names. The resolver reads
-only `ipfs=` / `ar=` and the other pointer forms at the label itself, and never
-looks at `_dnslink`. `../../src/resolver.js`, `../../src/doh.js`,
-`../../src/pointers.js`.
-
-**The standard says.** DNSLink (<https://dnslink.dev/>) is the convention the
-IPFS ecosystem uses for a name→CID binding, and SPEC §10 says it SHOULD be read
-as a second pointer source.
-
-**Why.** Historical. Our own publisher writes both forms, so the gap never bit
-us.
-
-**Consequence.** A Handshake site published by somebody else the ordinary
-IPFS-Companion way — `_dnslink` only, no `ipfs=` — resolves here as an
-A-record site, or as unregistered. That is exactly backwards: the
-ecosystem-standard publication is the one we cannot read.
-
-**Status.** OPEN, and the highest-value item in this file. It costs one extra
-`TXT` query, issued only when the label itself carries no pointer, and it must
-carry the same validation rules as the pointer query it follows (SPEC §6.5d–e).
-
----
-
 ### HS-5. One DANE profile; an unusable TLSA RRset is refused rather than ignored
 
 **What.** Only usage 3 / selector 1 / matching type 1 (DANE-EE, SPKI, SHA-256)
@@ -170,39 +144,6 @@ port actually dialled.
 
 ---
 
-### HS-7. The chain's authoritative "unregistered" can be overridden by DoH
-
-**What.** When the chain-proof path returns `unregistered`, the composition
-layer asks a DoH resolver a second time and prefers the DoH answer if it is not
-`unregistered`. The branch lives in the composition layer (§4), not in
-`../../src/`.
-
-**The standard says.** RFC 9498 §9.10, adopted in the spine: resolve in the
-alternative namespace and do not continue elsewhere on failure. Both answers
-here are inside the Handshake namespace, so this is not a namespace breach — it
-is a *trust* inversion, which no standard forbids and which SPEC §9.1 tells an
-implementation not to do.
-
-**Why.** Availability: a proof-starved or mid-sync node must degrade to
-"resolved, less verified" rather than to a false 404. "There is no name
-alice.w3", shown about a name that plainly exists, is the worst failure a
-naming system can produce.
-
-**Consequence.** This is the one place in the design where a **weaker source
-outranks a stronger one**. Handshake consensus said the name has no records; a
-resolver said it does; we believe the resolver. Anyone who can answer as a DoH
-resolver can therefore make an unregistered name appear registered, with the
-chain proof in hand and contradicted.
-
-**Status.** OPEN. The recommendation is to keep the override **only** while the
-SPV node is not synced or its proof is null — the case the branch was written
-for, which today reports `unreachable` rather than `unregistered` anyway — and
-to make a *synced* chain's `unregistered` final. That narrows the override to
-the state in which the chain has said nothing, and removes it from the state in
-which the chain has spoken. Matt's decision.
-
----
-
 ### HS-8. A DoH-resolved TLSA is used as a pin, on the resolver's word
 
 **What.** On the DoH fallback path a `_443._tcp.<host>` TLSA lookup is made and
@@ -231,26 +172,36 @@ a host was ever pinned; that is HS-12, and it is open.
 
 ---
 
-### HS-9. CNAME chains inside a signed zone are not validated under the target's owner
+### HS-9. A CNAME target's own RRset is not validated under the target's owner
 
-**What.** A `CNAME` in a signed zone is validated as an RRset before it is
-followed (SPEC §6.5f), but the **target's** RRset is not validated under the
-target's own owner name. In practice the target of a Handshake CNAME is an
-ICANN host, whose address is resolved through the operating system's resolver
-and is therefore ICANN's word. `../../src/resolver.js`.
+**What.** The `CNAME` RRset itself **is** validated: on the address path a
+`CNAME` in a signed zone is not followed until the RRset validates to the
+on-chain DS anchor, with the RFC 4035 §5.3.4 wildcard proof where the answer was
+wildcard-expanded (SPEC §6.5f). What is not done is the rest of RFC 4035
+§5.3.1's chain: the **target's** RRset is not validated under the target's own
+owner name. In practice the target of a Handshake `CNAME` is an ICANN host,
+whose address comes back through the ICANN-host lookup seam (SPEC §6.11) and is
+therefore ICANN's word, not the Handshake zone's. `../../src/resolver.js`.
 
 **The standard says.** RFC 4035 §5.3.1 describes validating each RRset in a
 CNAME chain under its own owner name.
 
-**Consequence.** A CNAME to an ICANN host works, and the resolution is reported
-as unvalidated from that point on (`dnssecValidated` stays false, the trust
-panel says the address came from the system resolver). A CNAME *within* a
-signed Handshake zone, pointing at another name in the same or a delegated
-zone, is not chased and validated the way §5.3.1 describes.
+**Consequence.** Two things, of different sizes. A `CNAME` to an ICANN host
+works and the resolution is reported as unvalidated from that point on
+(`dnssecValidated` stays false and the trust panel names the source of the
+address) — which is the truth and cannot be anything else, because the target's
+zone is not anchored to the Handshake chain at all. A `CNAME` *within* a signed
+Handshake zone, pointing at another name in the same zone or a delegated one, is
+not chased and validated the way §5.3.1 describes; its RRset is validated, its
+target's is not.
 
-**Status.** OPEN. Chase the target inside the zone, validating each RRset under
-its own owner, and keep the ICANN-target case reported as unvalidated — it
-cannot be anything else.
+It also decides which half of RFC 7671 §7.2 the DANE base-domain rule rests on
+(SPEC §8): because the expansion is not *secure* in the RFC's sense, the pin is
+correctly looked up at the original name.
+
+**Status.** OPEN, and narrow: what remains is chasing the target
+inside the zone and validating each RRset under its own owner. Keep the
+ICANN-target case reported as unvalidated.
 
 ---
 
@@ -411,6 +362,43 @@ not be retried against another server, which would be shopping for an answer.
 
 ---
 
+### HS-16. Changing the anonymization mode restarts the SPV node, which re-syncs
+
+**What.** The chain path survives anonymization by pointing the SPV node's own
+peer traffic at the device-local SOCKS proxy and dialling this
+implementation's authoritative queries through the same port (SPEC §6.11). hsd
+reads its `--proxy` setting **once, at start**, so a change of mode is a
+respawn of the node: the process is stopped and started with the new setting,
+and its headers sync again — from the persisted chain in the ordinary case, or
+from scratch for a node running entirely in memory (the fallback when no native
+LevelDB backend is available). Until it reaches the tip its proofs are null,
+so resolution rides DoH over the proxied fetch in the meantime, exactly as it
+does at launch. An adopted or externally-configured node is not restarted at
+all: the wish is recorded and the caller can see that the running node does not
+honour it. `../../src/spv.js` (`setProxy`, `_nodeIsProxied`).
+
+**The standard says.** Nothing. This is a property of hsd's command line, and
+through it of every client that spawns hsd rather than linking it.
+
+**Consequence.** Turning IP Protection on or off costs a window — seconds from
+a persisted chain, minutes from scratch — in which every Handshake name resolves
+`unverified` over DoH rather than chain-proven, and the trust panel says so
+while it lasts. The guarantee a page load receives therefore depends on the
+clock (§2.5) at one more moment than it used to: not only at launch, but at
+every mode change. It is a degradation to the weaker-but-honest path, never to
+a false answer, and the alternative — keeping a node whose peers see the real
+address while protection is on — is worse.
+
+**Status.** OPEN, and the fix is not in this tree. The clean answer is a node
+that can be told to change its proxy at runtime (an hsd RPC, or a peer manager
+that re-dials) so a mode change costs a reconnection instead of a re-sync; the
+cheap mitigation is to keep the chain directory persisted on every platform, so
+the re-sync is always the short one. A composition that spawns the node
+**MUST** report the interim honestly rather than presenting a DoH answer as
+chain-proven.
+
+---
+
 ## 2. Things we are not sure about
 
 These are the ones we would most like other implementers to argue with. Each is
@@ -463,9 +451,13 @@ are not settled on:
   resolver answers, and gets HS-8's weaker pin semantics as a bonus. We think
   the answer is the "pinned before" memory (§2.4) rather than removing the
   fallback, but we are not sure.
-- **HS-7**, the `unregistered` override, is the one place a weaker source
-  overrides a stronger one, and we think it should be narrowed to the
-  unsynced-node case.
+- **Where the fallback is *not* allowed is settled**, and it is the part that
+  matters: a synced chain's authoritative `unregistered` is final, and a DoH
+  answer never overrides it (SPEC §9.1). DoH answers only the three states in
+  which the chain said nothing — no node, a node short of the tip, and a thrown
+  chain-path failure — and even on the third a DoH `unregistered` is not adopted
+  in place of the failure. What is left unsettled is the paragraph above, which
+  is about availability, not about precedence.
 - **What "trusted" should mean in an interface.** The lock has three visible
   states, not two (SPEC §4.1). Whether that is comprehensible to anybody who has
   not read this specification is an open product question, not just an
@@ -500,7 +492,9 @@ reason this project exists. It is not the same as running a full node:
   `unreachable` and the client rides DoH until it reaches the tip, then flips to
   chain proof mid-session. That is correct, but it means the guarantee a given
   page load got depends on the clock, which the trust panel has to explain and
-  which nobody expects.
+  which nobody expects. Turning anonymization on or off restarts the node and
+  re-opens that window deliberately (HS-16), so the clock dependence is not
+  only a launch-time artefact.
 
 ### 2.6. Whether a proven absence should raise the lock as far as it does
 
@@ -509,6 +503,34 @@ fully validated resolution over plaintext (SPEC §8). Every record the answer
 rests on is chained to the on-chain DS, so the claim is true. It still means a
 closed-book plaintext connection is reported as validated, and we are not
 certain users read the distinction the way the model intends.
+
+### 2.7. What DNSLink interoperation is worth while the gateways it was for retire
+
+Reading DNSLink (SPEC §10.1) is justified as the migration path, and the
+ecosystem that path leads to is contracting on a published timetable: the public
+gateways `ipfs.io` and `dweb.link` retire on **2026-09-21**, and the Shipyard
+bootstrap nodes that every default kubo configuration dials on **2026-09-30**.
+
+What that changes and what it does not:
+
+- **The record convention does not retire.** `_dnslink.<name> TXT dnslink=/…`
+  is read by kubo, IPFS Companion and Brave in the client, not by a gateway.
+  A site published for those clients keeps working, which is exactly the
+  interoperation the read buys, and it becomes *more* valuable rather than less
+  when the hosted middlemen go away.
+- **A gateway URL in documentation does retire.** This chapter names no public
+  gateway, and where an example needs one it is a gateway whose operator is
+  known to whoever publishes the example (`https://pinthis.cloud/ipfs/<cid>`).
+  Quoting `ipfs.io` would put a dead host in a specification.
+- **Retrieval is somebody else's chapter, and it has the harder problem.**
+  Losing the default bootstrap peers is a Chapter 3 concern (an implementation
+  that ships a node needs peers of its own); it does not touch what a name
+  *means*.
+
+The uncertainty is one of emphasis rather than mechanism: we are confident the
+read is right, and not confident how long "the ecosystem reads DNSLink" stays
+true if the ecosystem's own defaults keep shrinking. If it stops being true the
+read costs one query per resolution and should be re-argued, not quietly kept.
 
 ---
 
@@ -520,9 +542,14 @@ Items considered and not applied. Each states the problem and what we would do.
 
 A resolution's cost is bounded only by a delegation depth of 3 and a per-query
 timeout. Nothing counts the *total* queries one navigation can cause: each zone
-in the walk fetches DNSKEYs, TXT, A and TLSA, each nameserver name may need its
-own chain lookup and its own queries, and a hostile registry TLD can compose
-those into far more work than any legitimate zone needs.
+in the walk fetches DNSKEYs, TXT, `_dnslink` TXT, A and TLSA, each nameserver
+name may need its own chain lookup and its own queries, and a hostile registry
+TLD can compose those into far more work than any legitimate zone needs. The
+DNSLink query (SPEC §6.5d) is one more per zone on every name, including a plain
+address-record name that carries no pointer at all, which is the price of being
+able to detect a disagreement rather than only a missing record; on the DoH
+route it is asked in parallel and costs no round trip, on the
+authoritative-DNS route it costs one.
 
 **Recommendation.** Thread a counter through the resolution context — one
 object, incremented at the single place a query is issued — cap it at roughly
@@ -553,12 +580,18 @@ how the code reads:
 
 1. **The composition layer.** In Wildroot, `src/hns/index.js` is the Electron
    `hns://` protocol handler: it chooses per request between the chain resolver
-   and DoH, applies the DoH fallback policy, applies HS-7, opens the TLS
-   connection, checks the DANE pin against the peer certificate, and records the
-   trust steps. It is Electron-bound and is not extracted into `../../src/`. Its
-   *policy* is specified normatively here (SPEC §8, §9), and the two deviations
-   that live in it (HS-7, HS-8) are documented above — but the code for them is
-   not in this tree. An implementation of this chapter writes that layer itself.
+   and DoH, applies the DoH fallback policy, injects the two egress seams of
+   SPEC §6.11 (the SOCKS dialler for the authoritative hop and the DoH/ODoH
+   client for ICANN hosts) and the proxied fetch, keeps the SPV node's proxy
+   setting following the anonymization mode, opens the TLS connection, checks
+   the DANE pin against the peer certificate, and records the trust steps. It is
+   Electron-bound and is not extracted into `../../src/`. Its *policy* is
+   specified normatively here (SPEC §6.11, §8, §9); the one deviation that lives
+   in it is HS-8, and the restart cost of the proxy switch is HS-16 — but the
+   code for them is not in this tree. An implementation of this chapter writes
+   that layer itself, and the rule that makes it auditable is that the seams are
+   injected rather than defaulted: a composition that omits one gets a working
+   resolver that leaks, silently, because it works.
 
 2. **Content fetching.** What happens to an `ipfs=`, `ar=`, `hyper=` or torrent
    pointer once resolved — the IPFS node, the Arweave gateway, the torrent

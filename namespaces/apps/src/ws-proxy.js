@@ -43,18 +43,26 @@
  * that CAN authenticate a wss:// proxy re-enables the gate with no code change;
  * today none is passed.)
  *
- * THREE MITIGATIONS, all enforced here (plus loopback-only binding above):
- *   (a) HNS-ONLY — a CONNECT to any non-Handshake host is refused (normal
+ * FIVE FENCES, all enforced here, numbered as the public specification numbers
+ * them (Chapter 11 §4.4); a CONNECT meets them in the order 0, 1, 4, 2, 3:
+ *   (0) LOOPBACK — the listener binds 127.0.0.1 and nothing else; with no
+ *       proxy auth possible (above) that bind is the access control.
+ *   (1) ONE PORT — only TUNNEL_PORT (443) is spliced. `_443._tcp` is the only
+ *       owner name a DANE pin exists at, so 443 is the only port a splice can
+ *       be pinned on; `CONNECT host:80` (a plaintext ws:// from a non-secure
+ *       page) is refused here rather than sent DIRECT, which would put the
+ *       name in a system-resolver query.
+ *   (4) TOR — while IP Protection is on, a direct dial would leak the real IP.
+ *       With the device-local Tor's SOCKS port to hand the dial goes THROUGH
+ *       it (src/hns/socks-dial.js, by address, so Tor learns no name); with
+ *       none, the CONNECT is refused with a clean 403 (the page sees
+ *       ws.onerror). Decided before the name is resolved.
+ *   (2) HNS-ONLY — a CONNECT to any non-Handshake host is refused (normal
  *       wss:// relays are sent DIRECT by the PAC and never reach us; this is
  *       the defence in depth if one ever does).
- *   (b) SSRF — the resolved address is run through the same isPublicAddress
+ *   (3) SSRF — the resolved address is run through the same isPublicAddress
  *       guard as every other HNS fetch, so a name pointing at loopback /
  *       private / link-local / metadata is refused.
- *   (c) TOR GATE — while IP Protection is on, a direct dial would leak the
- *       real IP, so the CONNECT is refused with a clean 403 (the page sees
- *       ws.onerror), mirroring the 523 gate on the raw-socket HNS path in
- *       src/hns/index.js. Tor-CHAINING so wss works while anonymized is a
- *       documented follow-up, not this.
  *
  * Pure and injectable: the resolver, the anonymized-check, the dial, the HNS
  * classifier and the public-address guard are all constructor inputs so the
@@ -304,13 +312,13 @@ export class WsProxy {
     const host = decodeHnsHost(authority.host)
     const { port } = authority
 
-    // 3. Only the pinned port (see TUNNEL_PORT). Before the gate and before
-    // resolving: a refused port costs no lookup.
+    // 3. FENCE 1: only the pinned port (see TUNNEL_PORT). Before the Tor
+    // rule and before resolving: a refused port costs no lookup.
     if (!this.ports.has(port)) {
       return this._refuse(client, 403, 'Forbidden')
     }
 
-    // 4. MITIGATION (c): while IP Protection is on, a direct dial from this
+    // 4. FENCE 4: while IP Protection is on, a direct dial from this
     // process would leak the real IP. With the device-local Tor's SOCKS port
     // to hand, the dial goes THROUGH it — the chain proof and the DANE pin
     // are unchanged, only the socket's route differs; without it, refuse.
@@ -323,7 +331,7 @@ export class WsProxy {
       dial = socksDialer(socks)
     }
 
-    // 5. MITIGATION (a): HNS-only. Chromium sends the literal name for a
+    // 5. FENCE 2: HNS-only. Chromium sends the literal name for a
     // Handshake host; anything else (an ICANN relay, an IP literal) is
     // refused — the PAC should never route it here in the first place.
     if (!this.isHnsHost(host)) {
@@ -345,7 +353,7 @@ export class WsProxy {
       return this._refuse(client, 502, 'Bad Gateway')
     }
 
-    // 7. MITIGATION (b): SSRF. Refuse loopback / private / link-local /
+    // 7. FENCE 3: SSRF. Refuse loopback / private / link-local /
     // metadata, exactly like the raw-socket HNS fetch path.
     if (!this.isPublicAddress(address)) {
       return this._refuse(client, 403, 'Forbidden')

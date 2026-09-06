@@ -103,29 +103,6 @@ already has one adds a second place for it to be wrong, and the honest sentence
 costs nothing. The limit is stated where a reader meets it (SPEC §4.2 and §9)
 rather than glossed. What we owe and cannot yet give is §2.3.
 
-### IP-4. DNSLink is written and never read
-
-**What.** `dnslinkValue`/`dnslinkOwner` (`../../src/pointers.js:245-259`) write
-`_dnslink.<label> TXT dnslink=/ipns/<key>` — for kubo, Brave, IPFS Companion and
-the public gateways. Nothing in this stack ever *reads* a `_dnslink` owner.
-
-**The standard says.** [DNSLink](https://dnslink.dev/) is the convention for
-naming IPFS content from DNS, and the whole ecosystem reads it. SPEC §6.3 says
-an implementation **SHOULD** read `_dnslink.<name>` when the name itself carries
-no `ipfs=`.
-
-**Why.** The reference implementation reads `ipfs=` at the label itself, which
-is one query fewer and carries the DNSSEC proof the rest of the resolution
-already needs.
-
-**Consequence.** A Handshake site published by somebody else the ordinary IPFS
-way — DNSLink only — resolves here as an address-record site, or as
-unregistered. It is the largest interoperability hole in the namespace, and it
-costs one extra query to close, only for a label that has no `ipfs=`.
-
-**Status.** `OPEN`, and it is the first item on this chapter's list. See IP-D1
-for the change and the two rules that must not be skipped.
-
 ### IP-5. A URL host is canonicalised; two of our address forms are case-sensitive
 
 **What.** All four schemes are registered as **standard** schemes in the Wildroot
@@ -314,8 +291,6 @@ engineering. The parts worth defending are normative and stated as such in SPEC
 §8.2: never pin a partial DAG, bound the response whether or not the gateway
 honoured the range, and every block still arrives hash-checked.
 
----
-
 ## 2. Things we are not sure about
 
 ### 2.1. Whether a stated origin is the right primitive at all (IP-9)
@@ -359,12 +334,22 @@ cannot yet.
 
 ### 2.4. Whether `ipns://<domain>` (DNSLink through the node) works at all
 
-kubo resolves a DNSLink when an IPNS path names a domain rather than a key. The
-reference implementation sets `DNS.Resolvers: {}` on both daemons, deliberately,
-because the "auto" value meant DoH queries to third parties. What that empty
-value leaves — the system resolver, or nothing — is untested, and there is no
-test for `ipns://example.com` in either tree. So the one path by which this
-stack could read a DNSLink today (IP-4) is of unknown status.
+This is the open remainder of the DNSLink story. The resolver reads DNSLink
+itself, on both routes, for a name resolved through this stack (SPEC §6.3).
+What is unknown is the *node-side* reader: kubo resolves a DNSLink when an IPNS path names a domain rather than a
+key, and `ipns://example.com` is a URL a user can type. The reference
+implementation sets `DNS.Resolvers: {}` on both daemons, deliberately, because
+the "auto" value meant DoH queries to third parties. What that empty value
+leaves — the system resolver, or nothing — is untested, and there is no test for
+`ipns://example.com` in either tree.
+
+Two outcomes, and we do not know which we have: the scheme resolves domains
+through whatever DNS the daemon's host provides (a plaintext query this stack
+did not choose and does not report), or it resolves nothing and the URL form is
+dead. Both are worth knowing and neither is what a reader of §4.2 would assume.
+A third option exists once it is measured — resolve the domain in this stack,
+where the record is read under stated rules, and hand the node a key — but there
+is no point designing that before the measurement (IP-D8).
 
 ### 2.5. Whether the archive-root check should exist (IP-8)
 
@@ -385,26 +370,6 @@ that is a problem in practice or a misconfiguration nobody will make.
 ---
 
 ## 3. Open design items
-
-### IP-D1. Read DNSLink as a second pointer source
-
-Every Handshake site published the ordinary IPFS way — IPFS Companion, kubo, a
-gateway's publish flow — carries `_dnslink.<name> TXT dnslink=/ipfs/<cid>` and no
-`ipfs=`, and this stack resolves all of them as address-record sites or as
-unregistered (IP-4). The read would go in the resolver's pointer step, beside
-`txtStringsFrom` (`../../src/resolver.js:758`, `../../src/doh.js:243`), and costs
-one query for a label that has no `ipfs=`.
-
-**Recommendation.** Do it, and do it first: it is the largest interoperability
-gap in the namespace and the cheapest to close. When a label's TXT set yields no
-pointer, query `_dnslink.<label>` for TXT and parse `dnslink=/ipfs/<cid>` and
-`dnslink=/ipns/<key>` through the same address shapes `parsePointer` uses,
-treating the result as a pointer of the corresponding kind. Two rules must not
-be skipped: the DNSLink record is subject to the **same DNSSEC requirement** as
-an `ipfs=` — on a signed zone it validates to the on-chain DS or the resolution
-fails — and its **absence must be proven** before an address record is consulted.
-Without both, this adds a rung to the spine's §11.3 downgrade ladder instead of
-closing a hole.
 
 ### IP-D2. Tighten the `car=` grammar to the decision it implements
 
@@ -456,17 +421,22 @@ the archive **claims** the DAG it asked for — a check against a confused origi
 not a hostile one — and the hash check on every block is what makes a hostile one
 harmless.
 
-### IP-D6. Correct the comment that says IPFS names work while anonymised
+### IP-D6. Correct the error page that tells a user IPFS names work while anonymised
 
-The Wildroot tree's `src/hns/index.js:502` says *"Names served from IPFS or
-Arweave work normally"* while anonymisation is on. The `ipfs` branch above it
-refuses with `503` under exactly that condition, and so does the
-`ipns`/`bittorrent`/`hyper` branch. It is a stale comment on a
-security-relevant branch, and it reads as a statement about what the
-anonymisation gate does.
+The A-record branch's own refusal page in the Wildroot tree
+(`src/hns/index.js`) ends with *"Names served from IPFS or Arweave work
+normally."* Arweave does — it rides the proxied session fetch. IPFS does not:
+the `ipfs` branch above refuses with `503` under exactly that condition, and so
+does the `ipns`/`bittorrent`/`hyper` branch. The sentence is shown to a user at
+the moment they are trying to understand what anonymisation blocks, which makes
+it worse than a stale code comment: it is a wrong statement about the gate,
+delivered by the gate.
 
-**Recommendation.** Rewrite it: Arweave rides the proxied session fetch and is
-fine; IPFS is refused above, for the same reason as this branch.
+**Recommendation.** Say what is true — Arweave and other HTTPS-fetched content
+work; anything served over the local node's libp2p connections (IPFS, IPNS,
+BitTorrent, Hyper) is blocked, for the reason in SPEC §12.4 — and pin the page's
+claim with a test, since it is the only place this policy is explained to
+anybody.
 
 ### IP-D7. Delete the hard-coded `.pinthis` gateway table
 
@@ -487,13 +457,42 @@ does not have, so both belong in the Wildroot tree's live suite.
    `ipfs://Qm…`, `ipns://12D3Koo…` and `pubsub://MixedTopic` and log the URL the
    handler receives. If the host arrives lowercased, those address forms are
    unreachable as URLs and IP-5 becomes a fact rather than a prediction.
-2. **`ipns://<domain>` (IP-4, §2.4).** With `DNS.Resolvers: {}` set on both
-   daemons, does kubo still resolve a DNSLink? There is no test for it in either
-   tree, and it is the one path by which this stack could read a DNSLink today.
+2. **`ipns://<domain>` (§2.4).** With `DNS.Resolvers: {}` set on both daemons,
+   does kubo still resolve a DNSLink, and if it does, through which resolver?
+   There is no test for it in either tree. The question is not whether this
+   stack can read a DNSLink — it reads one directly (SPEC §6.3) — but whether
+   the `ipns://<domain>` URL form works and whether it makes a DNS query nobody
+   declared.
 
 **Recommendation.** Write both, in that order. The first decides whether SPEC
-§4.2 and §4.4 state a hazard or a defect; the second decides whether IP-D1 is
-the only way to read a DNSLink or merely the best one.
+§4.2 and §4.4 state a hazard or a defect; the second decides whether
+`ipns://<domain>` is a supported form, an undeclared plaintext lookup, or a URL
+that should be refused.
+
+### IP-D9. Let a stated-origin name load while anonymised, by stopping the node routing
+
+The `car=` warm is already the private half: it is an HTTPS fetch through the
+injected, proxied fetch, and every block it imports is hash-checked, so a name
+with a stated origin could be served under anonymisation with no peer-to-peer
+traffic at all. What keeps the `ipfs=` gate in place is the **node**, not the
+fetch (SPEC §12.4): a kubo holding blocks announces them, publishing provider
+records for exactly the content just read from the real address, and serving the
+page also means asking that node for the CID.
+
+**Recommendation.** Make the node stop routing while anonymisation is on —
+`Routing.Type: none`, kubo's offline routing, in place of the `--routing=dhtclient`
+the daemon is started with — so it neither queries the DHT nor announces what it
+holds, and then serve a name that has a usable stated origin (and only such a
+name) from the imported blocks. Three things have to be settled before it
+ships, and none of them is the code: whether the setting can be changed without
+respawning the daemon (it is repo configuration, so probably not — which makes
+this the same restart-cost question the SPV node has), what a name **without** a
+stated origin does in that mode (refuse, as now, is the honest answer), and
+whether a node that has been offline-routing must re-announce afterwards, which
+would leak on a delay instead of immediately. A gate removed on the strength of
+"the fetch is proxied" alone would be a regression, and the divergence inventory
+row that proposes this (`../../DIVERGENCE.md`, row 9) should not be read as
+authorising that.
 
 ---
 

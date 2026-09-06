@@ -144,3 +144,60 @@ test('a failed resolution is FAILED, never quietly trusted', () => {
 // chrome (src/ui/style.css, src/ui/omni-box.js, src/index.js) renders these
 // verdicts and never recomputes them. They are about the browser, not the
 // resolution standard, and stay in the Wildroot tree.
+
+test('the scheme table\'s `trust` column is what the panel actually delivers, scheme by scheme', async () => {
+  // A table entry that claims more (or less) than schemeSteps() produces is
+  // the exact kind of drift this file exists to stop: every row is resolved
+  // to a sample URL and its verdict compared with the claim.
+  const { SCHEME_TABLE } = await import('../src/router.js')
+  const sample = {
+    hns: null, // hnsSteps, not schemeSteps — covered below
+    ipfs: 'ipfs://bafyfoo/',
+    ipns: 'ipns://k51x/',
+    ipld: 'ipld://bafyfoo/x',
+    pubsub: 'pubsub://topic/',
+    ar: 'ar://tx/',
+    ens: 'ens://vitalik.eth/',
+    web3: 'web3://0x1111111111111111111111111111111111111111/',
+    nostr: 'nostr://npub1abc',
+    at: 'at://did:plc:x/y',
+    did: 'did:plc:abc',
+    activitypub: 'activitypub:@a@b.c',
+    onion: 'onion://' + 'a'.repeat(56) + '.onion/',
+    https: 'https://example.com/',
+    http: 'http://example.com/',
+    'https+raw': 'https+raw://example.com/',
+    gemini: 'gemini://x.test/',
+    hyper: 'hyper://' + 'k'.repeat(52) + '/',
+    ssb: 'ssb://%25x/',
+    bittorrent: 'bittorrent://' + 'a'.repeat(40) + '/',
+    bt: 'bt://' + 'a'.repeat(40) + '/',
+    magnet: 'magnet:?xt=urn:btih:' + 'a'.repeat(40),
+    wildroot: 'wildroot://welcome',
+    agregore: 'agregore://welcome',
+    browser: 'browser://welcome',
+    search: 'search://?q=x',
+    paste: 'paste://x',
+    editor: 'editor://new/',
+    bluesky: 'bluesky://home',
+    mastodon: 'mastodon://home',
+    media: 'media://x',
+    docview: 'docview://x'
+  }
+  const expected = { trustless: 'verified', trusted: 'partial', open: 'open', refused: 'partial', builtin: 'verified' }
+  for (const row of SCHEME_TABLE) {
+    assert.ok(['trustless', 'trusted', 'open', 'refused', 'builtin'].includes(row.trust), `${row.scheme} has a trust claim`)
+    const url = sample[row.scheme]
+    if (url === null) continue
+    assert.ok(url, `a sample URL for ${row.scheme}`)
+    const steps = schemeSteps(url)
+    const { state } = summarize(steps)
+    assert.equal(state, expected[row.trust], `${row.scheme}: the table says ${row.trust}, the panel says ${state}`)
+    if (row.trust === 'refused') {
+      assert.ok(steps.every((s) => s.state !== 'verified'), `${row.scheme}: a refused scheme verifies nothing`)
+    }
+  }
+  // hns: the chain path, TRUSTLESS when the proof and the pin hold.
+  const chain = hnsSteps('site.w3', { trust: 'spv', kind: 'ipfs', cid: 'bafyfoo' })
+  assert.equal(summarize(chain).state, 'verified')
+})

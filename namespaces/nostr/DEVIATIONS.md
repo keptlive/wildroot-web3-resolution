@@ -19,40 +19,40 @@ leaves out.
 
 ## 1. Deviations
 
-### NO-1. A bare NIP-19 identifier is not routed to Nostr, and a NIP-05 address is routed nowhere
-*SPEC §3 · `../../src/router.js` `classify`/`classifyHost`*
+### NO-1. A NIP-05 address is classified nowhere
+*SPEC §3 · `../../src/router.js` `classify`, `../../src/classify-host.cjs`*
 
-**What.** `parseNostrURI` accepts a bare `npub1…`, but the omnibox classifier
-has no Nostr row for it. A pasted `npub1…` is a single label with no dot, so
-the bare-label rule sends it to the Handshake chain as a name. A pasted
-`alice@example.com` matches nothing and becomes a search.
+**What.** A bare NIP-19 identifier has a classifier row and is routed to this
+namespace (SPEC §3). A pasted **NIP-05 address** does not: `alice@example.com`
+carries a single `@`, and a scheme-less input with an `@` in it that is not the
+canonical `@user@host` Fediverse form is a search. So the one Nostr address
+form that looks like an email address is neither Nostr nor anything else.
 
-**The standard says.** Nothing directly: neither NIP-19 nor NIP-21 specifies
-how an address bar should behave. The rule this misses is our own — SPEC §3's
-"a bare NIP-19 identifier SHOULD be classified as Nostr", which follows from
-NIP-19's design, where the human-readable part *is* the type and a BIP-173
-checksum makes a false positive a 1-in-2³⁰ event.
+**The standard says.** Nothing directly: neither NIP-05 nor NIP-21 specifies
+how an address bar should behave. What makes this a deviation rather than a
+missing feature is that the form is genuinely ambiguous — `alice@example.com`
+is the NIP-05 shape *and* the Mastodon shape *and* an email address — and the
+browser resolves it as both elsewhere while the address bar resolves it as
+neither.
 
-**Why.** The classifier's rows were built around *hosts*. Every other
-self-describing address form does have a row — `.eth` → ENS, a 56-character v3
-address → Tor, `/ipfs/<cid>` → IPFS, a pasted CID → `ipfs://`, `@user@host` →
-`activitypub:` — and NIP-19 was not added with them.
+**Why.** The `@` rule exists for a real hazard: the URL constructor reads
+everything before the last `@` as userinfo and silently drops it, so
+`alice@example` typed as a host navigates to `example` with a stray credential.
+Making every `@` a search is the safe direction. The cost is that the one
+address form that would benefit from a lookup gets a search.
 
-**Consequence.** Pasting the most common Nostr identifier in existence produces
-a chain lookup for a name nobody owns, and then a "not registered" page. It is
-not a security problem: L2 holds, the Handshake lookup fails inside its own
-namespace and does not become anything else. It is a usability failure that
-makes the `nostr:` handler nearly unreachable in practice, since almost nobody
-types the scheme. An `nsec` pasted into the address bar is the sharp edge: it
-is currently carried into a chain lookup as a *name* rather than being met with
-the refusal page §5.3 specifies.
+**Consequence.** Wildroot's `social-model.js` classifies the ambiguous form as
+`fediverse-or-nip05` and resolves *both*, presenting whichever answers — so the
+capability exists in the product and is unreachable from the address bar. It is
+not a security problem: a search discloses the string to the search backend,
+which is what a search always does, and no namespace is entered on a guess.
+Pinned by `tests/classification.test.js` ("DOCUMENTED GAP (NO-1)").
 
-**Status: OPEN.** Add a classifier row before the bare-label rule, gated on the
-bech32 checksum rather than on the prefix alone, so a Handshake name that
-merely begins `npub` is not taken from the bare-label rule. Route `nsec` to the
-handler too: that is what produces the "that is a PRIVATE KEY" page instead of
-a chain lookup that transmits a secret as a name, and it is the strongest
-single argument for the change. The concrete shape is NO-D2.
+**Status: OPEN.** The honest fix is not a classifier row — one input cannot
+belong to two namespaces — but an omnibox that *offers* both resolutions as
+suggestions and lets the user choose, which is where "I meant to look that up"
+is answered for a bare word already. NO-D1 is the related work on the `nip05`
+claim itself.
 
 ---
 
@@ -198,8 +198,9 @@ parses, so "it was not sent anywhere" is true.
 **Consequence.** The error text names the string's *type*. It never echoes the
 key. Anyone reading over the user's shoulder learns that a secret was pasted,
 which is a disclosure we accept as strictly better than the alternative. The
-claim is only true on the `nostr:` path — a bare `nsec` pasted into the address
-bar goes elsewhere, which is NO-1.
+claim holds on both paths a secret can arrive on: a bare `nsec` typed into the
+address bar is classified into this namespace on its prefix, before any name
+rule sees it (SPEC §3), so it reaches this refusal rather than a resolver.
 
 **Status: DELIBERATE.** The wording is the feature and a test pins both halves
 of it.
@@ -393,6 +394,36 @@ rather than simply doing.
 
 ---
 
+### NO-14. The `nsec` arm is claimed on its prefix, not on its checksum
+*SPEC §3, §5.3 · `../../src/router.js` `classify`*
+
+**What.** The five public prefixes are claimed only when `decodeNip19`
+succeeds. `nsec` is claimed whenever the input matches `nsec1` followed by six
+or more bech32 characters, decode or no decode — because its decode is
+*designed* to fail (§5.3). So `nsec1qqqqqq`, which is not a valid identifier,
+is routed to this namespace and met with the PRIVATE KEY refusal, and a
+Handshake name of that shape can never be reached.
+
+**The standard says.** Nothing. NIP-21 excludes `nsec` from the URI scheme,
+which is consistent with refusing it rather than resolving it.
+
+**Why.** The alternative is worse in the only direction that matters. A
+checksum-gated `nsec` arm would release a mistyped or truncated secret key to
+the bare-label rule, which transmits it to a chain node or a DoH resolver *as a
+name*. A mistyped secret is exactly the case where the refusal is most needed.
+
+**Consequence.** A narrow range of the Handshake namespace — names beginning
+`nsec1` with a bech32 tail — is unreachable from the address bar. We know of no
+such registration, and it can still be reached with an explicit `hns://`, which
+is what L1 is for. The trade is a deliberate one: an unreachable name is
+recoverable, a disclosed secret is not.
+
+**Status: DELIBERATE.** An implementation **MAY** narrow the arm to
+prefix + valid bech32 *charset* (which is what is implemented) and **MUST NOT**
+narrow it to a valid checksum.
+
+---
+
 ## 2. Things we are not sure about
 
 These are the ones we would most like other implementers to argue with. Each
@@ -483,15 +514,16 @@ detail that turns into a security bug.
 
 ### 2.6. Whether a bare `npub` should navigate
 
-NO-1 says it should and we have not done it. The counter-argument is that a
-browser which turns any unrecognised bech32-shaped string into a network
-request has made a decision on thin evidence, and that Handshake's bare-label
-rule already claims that input space (most Handshake sites are bare TLDs).
+It does, and the rule that decides it is explicit and tested (SPEC §3). What we
+are still not certain of is the collision itself: Handshake's bare-label rule
+claims the same input space (most Handshake sites are bare TLDs), and we
+settled it with the bech32 checksum — a 30-bit checksum over a fixed
+human-readable part, which we think is not thin evidence for a namespace claim.
 
-We think the checksum settles it — a 30-bit checksum plus a fixed HRP is not
-thin evidence — but the two rules do collide, and whichever wins should win
-explicitly and be tested, rather than by accident of ordering inside
-`classify()`.
+The residue is the `nsec` arm, which does *not* have that evidence: it is
+claimed on the prefix alone, so it takes a small range of the Handshake
+namespace with it (NO-14). We are confident that is the right trade for a
+secret key and we would rather it were argued with than assumed.
 
 ### 2.7. What we should be doing about relay disclosure
 
@@ -537,22 +569,6 @@ still `unverified` in the trust model and still labelled with the domain's
 name); the domain names a *different* key or none (a contradiction, which is
 worth saying loudly); the domain could not be asked. Bound it with the same
 deadline the relay query uses, and never let a slow domain hold the page.
-
-### NO-D2. Classify a bare NIP-19 identifier as Nostr
-
-**Problem.** A pasted `npub1…` becomes a Handshake chain lookup for a name
-nobody owns, and a pasted `nsec1…` is carried into that lookup as a name
-(NO-1). Every other self-describing address form has a classifier row.
-
-**Recommendation.** Add a row to `classify()` *before* the bare-label rule,
-matching `^(npub|note|nprofile|nevent|naddr|nsec)1[02-9ac-hj-np-z]+$` and
-gated on `decodeNip19` returning no error — a prefix test alone would take a
-Handshake name that merely begins `npub`. Include `nsec` deliberately: routing
-it to the handler is what produces the refusal page instead of a network lookup
-that transmits a secret, and that is a privacy fix on its own. The cost is that
-`router.js` gains a dependency on `nip19.js`; both are Electron-free, so the
-edge is clean, and the classifier's existing note about reaching past the scope
-line should be extended to cover it.
 
 ### NO-D3. Publish the `_nostr` record, or stop documenting it
 

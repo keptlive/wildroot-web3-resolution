@@ -212,7 +212,7 @@ test('OPTIONAL auth (future platform): with credentials, no/wrong auth -> 407, n
   assert.equal(resolver.calls.length, 0, 'a challenged client never gets to resolve anything')
 })
 
-test('MITIGATION (c): a loopback/private resolution is refused (SSRF), no dial', async (t) => {
+test('FENCE 3: a loopback/private resolution is refused (SSRF), no dial', async (t) => {
   const dialed = []
   const resolver = stubResolver({ kind: 'site', address: '127.0.0.1', tlsa: [] })
   // REAL isPublicAddress guard here.
@@ -223,7 +223,7 @@ test('MITIGATION (c): a loopback/private resolution is refused (SSRF), no dial',
   assert.equal(dialed.length, 0, 'a private resolution must never be dialed')
 })
 
-test('MITIGATION (d): while anonymized, a CONNECT is refused before resolving', async (t) => {
+test('FENCE 4: while anonymized with no Tor port, a CONNECT is refused before resolving', async (t) => {
   const resolver = stubResolver({ kind: 'site', address: '93.184.216.34', tlsa: [] })
   const dialed = []
   const proxy = await startProxy(t, {
@@ -239,7 +239,7 @@ test('MITIGATION (d): while anonymized, a CONNECT is refused before resolving', 
   assert.equal(dialed.length, 0)
 })
 
-test('MITIGATION (b): a non-HNS host is refused and never resolved', async (t) => {
+test('FENCE 2: a non-HNS host is refused and never resolved', async (t) => {
   const resolver = stubResolver({ kind: 'site', address: '93.184.216.34', tlsa: [] })
   const proxy = await startProxy(t, { resolver, credentials: CREDS, dial: async () => { throw new Error('nope') } })
   const c = await connect(t, proxy.port, { host: 'example.com' }) // ICANN TLD -> not HNS
@@ -248,7 +248,7 @@ test('MITIGATION (b): a non-HNS host is refused and never resolved', async (t) =
   assert.equal(resolver.calls.length, 0, 'non-HNS hosts are never looked up')
 })
 
-test('MITIGATION (b): an IP literal (v4 or bracketed v6) is refused', async (t) => {
+test('FENCE 2: an IP literal (v4 or bracketed v6) is refused', async (t) => {
   const resolver = stubResolver({ kind: 'site', address: '93.184.216.34', tlsa: [] })
   const proxy = await startProxy(t, { resolver, credentials: CREDS })
   for (const target of ['93.184.216.34:443', '[::1]:443']) {

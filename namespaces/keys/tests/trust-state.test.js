@@ -84,9 +84,9 @@ test('`bt://` and `bittorrent://` are described identically, and the two key sha
 test('gemini says the connection is encrypted and the certificate is not verified', () => {
   // Gemini has its own case, so "nothing is established about who answered" is
   // a statement about Gemini rather than the sentence the panel prints for a
-  // scheme nobody thought about. Encrypted, unauthenticated, lock open: there
-  // is no certificate store, so nothing is pinned and nothing is compared
-  // (KY-1).
+  // scheme nobody thought about. Encrypted, unauthenticated, verdict
+  // `partial`: there is no certificate store, so nothing is pinned and nothing
+  // is compared (KY-1).
   const step = only('gemini://geminiprotocol.net/')
   assert.equal(step.label, 'Connection')
   assert.equal(step.state, 'unverified')

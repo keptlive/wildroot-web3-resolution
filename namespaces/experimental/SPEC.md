@@ -203,6 +203,25 @@ fetch, which is **not** proxied — an embedder that omits the injection gets a
 working route and an unproxied one, silently, which is why the browser pins the
 injection with a test rather than a code review.
 
+**The route therefore runs while the user is anonymized, and needs no gate of
+its own.** Its one egress is an HTTPS request, and an HTTPS request made through
+the injected fetch is covered by whatever proxied session the embedder
+configured — which is what the injection is for. What decides whether the
+route is *reached* under anonymization belongs to Chapter 1: the `_op` step sits
+inside the chain-proof path (Chapter 1 §6.3), and a composition selects that
+path while anonymized only when the SPV node's peer traffic and the
+authoritative hop both go through the proxy (Chapter 1 §6.11). The condition is
+"the chain path is alive under the proxy", and it is inherited rather than
+re-decided here.
+
+An implementation therefore **MUST NOT** refuse the `_op` route merely because
+anonymization is on: refusing a request that is already proxied buys no privacy
+and turns every name under an `_op` registry into a failure in the mode where a
+user most wants a name to resolve. It **MUST NOT** answer it through an
+unproxied default fetch either (`OP-D1`). The two rules are one rule — the
+egress is the embedder's to route, and the route's job is to make that possible
+rather than to make the decision.
+
 ## A.7 Draft normative text for a HIP
 
 > A Handshake name MAY delegate resolution of names beneath it to a smart

@@ -223,20 +223,36 @@ rather than the loader wrapper's.
 Every namespace in this chapter opens its own transport: BitTorrent and
 hyperswarm dial peers directly, SSB dials its own multiserver addresses, and a
 Gemini request is a raw TLS socket opened from the main process. None of them
-rides Electron's `session.setProxy`. While the browser's anonymization is on,
-each of these schemes therefore answers **503** with a sentence saying why, and
-**nothing underneath runs** — the gate answers before the engine is even
-considered (`src/gate.js`, extracted byte-identical).
+rides Electron's `session.setProxy`.
 
-503 specifically, never an invented status: a protocol handler's status goes
-straight into Chromium's `net::GetHttpReasonPhrase()`, which `NOTREACHED`s on a
-code it does not know.
+> **The rule.** An implementation that offers an anonymizing mode **MUST**
+> either route a namespace through it or refuse the namespace. Leaking is not a
+> third option.
 
-An implementation that offers an anonymizing mode **MUST** either route a
-namespace through it or refuse the namespace. Leaking is not a third option.
+The three peer-to-peer namespaces are **refused**. While the browser's
+anonymization is on, `hyper://`, `ssb://` and `bittorrent://` / `bt://` answer
+**503** with a sentence saying why, and **nothing underneath runs** — the gate
+answers before the engine is even considered (`src/gate.js`, extracted
+byte-identical). Refusal rather than routing is not laziness: a swarm's UDP DHT
+and uTP cannot ride a SOCKS circuit at all, and the peer handshakes disclose the
+real address anyway (§K.11).
+
+`gemini://` is **routed**, and is therefore not behind the gate. Its transport
+is a single TCP connection to a single host, which is exactly what a SOCKS5
+proxy carries, so while anonymization is on the handler dials the capsule
+through the device-local Tor itself and refuses only when there is no Tor port
+to dial (§K.6.2). The two halves of the rule are both live in this chapter,
+which is the useful thing about it: the choice between them is made by what the
+transport *is*, not by how much trouble it is.
+
+503 specifically in both cases, never an invented status: a protocol handler's
+status goes straight into Chromium's `net::GetHttpReasonPhrase()`, which
+`NOTREACHED`s on a code it does not know.
 
 *(`tests/engine-lifecycle.test.js`, "IP Protection refuses the whole
-namespace".)*
+namespace"; `tests/gemini-protocol.test.js`, "with IP Protection on, the capsule
+is reached through the Tor SOCKS port by name — or refused when there is
+none".)*
 
 ---
 
@@ -397,12 +413,15 @@ origin (§K.6.3).
 An ordinary RFC 3986 hierarchical URI: `gemini://host[:port]/path[?query]`,
 default port **1965**. There is no identifier validation of our own.
 
-The host is a DNS name, and it is resolved by **Node's `tls.connect()`** —
-which means the operating system's resolver. It does **not** go through the
-browser's DoH policy, its Oblivious DoH, or the Handshake resolver. A
-`gemini://` navigation therefore looks its host up in the clear even when every
-other lookup the browser makes is encrypted (D **KY-8**). A Gemini host that is
-a Handshake name does not resolve at all.
+The host is a DNS name, and **who resolves it depends on the privacy mode**:
+
+| IP Protection | Who resolves the host | Consequence |
+|---|---|---|
+| off | Node's `tls.connect()`, i.e. the operating system's resolver | the lookup is in the clear: it does not go through the browser's DoH policy, its Oblivious DoH, or the Handshake resolver, so one scheme looks its hosts up in the open while every other lookup the browser makes is encrypted (D **KY-8**) |
+| on | the device-local Tor, from the name itself | no local lookup happens at all: the socket is dialled through SOCKS5 with the host as `ATYP` domain (§K.6.2), so the operating system's resolver is never asked |
+
+A Gemini host that is a Handshake name does not resolve on either route: nothing
+here consults the Handshake resolver, and Tor will not either.
 
 ### K.6.2 The connection, and the trust that is not there
 
@@ -411,7 +430,36 @@ minVersion   TLSv1.2                       (the Gemini specification's floor)
 ALPN         "gemini"                      — offered; the check is overridden to pass
 SNI          the requested hostname
 tlsOpt       { rejectUnauthorized: false }
+             + { socket, servername }      while IP Protection is on
 ```
+
+**The socket, while anonymization is on.** The handler takes `isAnonymized` and
+`torSocks` (`src/gemini-protocol.js:57-59`). While protection is on it opens the
+TCP connection itself, through the device-local Tor's SOCKS5 port (RFC 1928,
+`socksDialer`, `../../src/socks-dial.js`), and hands the connected socket to the
+TLS client as `tlsOpt.socket` with `tlsOpt.servername` set to the hostname
+(`:64-73`). Three properties follow, and an implementation that routes this
+scheme through a proxy **MUST** hold all three:
+
+1. **The dial is by NAME** — the host goes to the proxy as RFC 1928 `ATYP`
+   `0x03` (`DOMAINNAME`) and is resolved inside Tor — so the operating system's
+   resolver is never asked while protection is on (§K.6.1). This is the same
+   mechanism RFC 7686 requires for `.onion` (Chapter 8 §6.4), applied here for
+   privacy rather than for correctness.
+2. **`servername` is set explicitly.** TLS runs over a socket the client did not
+   open, so SNI cannot be inferred from a hostname the client resolved; it
+   **MUST** be passed, or the capsule is asked for the wrong virtual host and any
+   future certificate pin (KY-D1) would be keyed to nothing.
+3. **No Tor port is a refusal, not a fallback.** With protection on and no SOCKS
+   port available, the request answers **503** and no socket is opened
+   (`:65-67`, `:105-107`). Falling back to a direct dial would leak the address
+   the mode exists to hide, which is the rule of §K.3.6.
+
+Because the scheme is routed rather than gated, `gemini://` is the one namespace
+in this chapter that keeps working while anonymization is on. What it does not
+gain is any trust: the paragraphs below are unchanged by the route, and the
+capsule sees a Tor exit's address instead of the user's — an anonymity
+property, not an authentication one.
 
 The Gemini specification's whole security model is TOFU: a client remembers the
 certificate (or its public key) it saw for a host and refuses a different one
@@ -501,7 +549,7 @@ the words the capsule chose.
 | | |
 |---|---|
 | **Verified by construction** | Nothing. |
-| **Trusted** | The DNS answer (system resolver, in the clear), and the TLS peer (any certificate, remembered nowhere). |
+| **Trusted** | The name→address answer — the operating system's resolver in the clear with IP Protection off, the device-local Tor with it on (§K.6.1) — and the TLS peer (any certificate, remembered nowhere). |
 | **Bounded rather than trusted** | Redirects: same-host only, five at most, and any other target is handed back to the browser as a navigation or refused (§K.6.3). |
 | **Trust state** | Open — encrypted, unauthenticated (§K.9). |
 
@@ -734,23 +782,35 @@ agree. See `../../DEVIATIONS.md` §3, **KY-D6**.
 
 ## K.9 Trust states
 
-The spine defines the three lock states. What a *user* is told about an address
-in this chapter is produced by `schemeSteps()` in `../../src/trust-path.js`,
-and every scheme here has its own case: nothing in this chapter falls through
-to the default sentence, *"this browser has no verification path for this
-scheme"*, which is reserved for a scheme nobody has thought about.
+The spine defines the lock states and the five verdicts they aggregate to. What
+a *user* is told about an address in this chapter is produced by `schemeSteps()`
+in `../../src/trust-path.js`, and every scheme here has its own case: nothing in
+this chapter falls through to the default sentence, *"this browser has no
+verification path for this scheme"*, which is reserved for a scheme nobody has
+thought about.
 
-| Address | Steps | Lock |
+| Address | Steps | Verdict, and the lock |
 |---|---|---|
-| `hyper://<key>/` | **Content, verified** — "Key-addressed: every block is checked against the signature of the key in the address. That proves who wrote it, not that you were shown the newest version." | closed |
-| `hyper://<dotted host>/` | **Name records, unverified** — "read from a public DNS resolver and taken on its word — no DNSSEC, no chain proof"; then **Content, verified** — "Whatever key the record named, every block is checked against that key's signatures." | open |
-| `ssb://feed/…` | **Content, verified** — "every message is checked against the feed key's signature. That proves who wrote it, not that the feed is complete." | closed |
-| `bt://<40 hex>/`, `bittorrent://<40 hex>/` | **Content, verified** — "Content-addressed: every piece is checked against the infohash, so the bytes cannot have been altered." | closed |
-| `bittorrent://<64 hex>/` | **Content, verified** — "Key-addressed (BEP 46): the pointer is signed by the key in the address and the pieces are hash-checked. The key proves who published it, not that this is the newest version." | closed |
-| `gemini://host/` | **Connection, unverified** — "Gemini over TLS, certificate not verified … neither checked against an authority nor remembered from a previous visit, so nothing establishes who answered." | open |
-| `magnet:…` | **Address, none** — "A magnet link is only a pointer to a torrent; nothing loads until it is added." | open |
+| `hyper://<key>/` | **Content, verified** — "Key-addressed: every block is checked against the signature of the key in the address. That proves who wrote it, not that you were shown the newest version." | `verified` — TRUSTLESS |
+| `hyper://<dotted host>/` | **Name records, unverified** — "read from a public DNS resolver and taken on its word — no DNSSEC, no chain proof"; then **Content, verified** — "Whatever key the record named, every block is checked against that key's signatures." | `partial` — TRUSTED |
+| `ssb://feed/…` | **Content, verified** — "every message is checked against the feed key's signature. That proves who wrote it, not that the feed is complete." | `verified` — TRUSTLESS |
+| `bt://<40 hex>/`, `bittorrent://<40 hex>/` | **Content, verified** — "Content-addressed: every piece is checked against the infohash, so the bytes cannot have been altered." | `verified` — TRUSTLESS |
+| `bittorrent://<64 hex>/` | **Content, verified** — "Key-addressed (BEP 46): the pointer is signed by the key in the address and the pieces are hash-checked. The key proves who published it, not that this is the newest version." | `verified` — TRUSTLESS |
+| `gemini://host/` | **Connection, unverified** — "Gemini over TLS, certificate not verified … neither checked against an authority nor remembered from a previous visit, so nothing establishes who answered." | `partial` — TRUSTED |
+| `magnet:…` | **Address, none** — "A magnet link is only a pointer to a torrent; nothing loads until it is added." | `partial` — TRUSTED |
 
-Four properties of that table are normative for this chapter.
+**No address in this chapter is OPEN, and `gemini://` is the interesting case.**
+The spine reserves OPEN for a `Connection` step of `none` — a transport that
+carries no protection at all — and Gemini's connection is TLS, so its step is
+`unverified` rather than `none` and the verdict is `partial`. The distinction is
+worth holding: "encrypted by nobody in particular" and "not encrypted" are
+different failures, and an implementation that collapsed them would either
+flatter plain HTTP or slander TLS. The scheme table's `trust` word for `gemini`
+is accordingly `trusted`, not `open`, and the reference tree holds the panel to
+that row for every scheme by test (`tests/hns/lock-semantics.test.js` in the
+browser tree).
+
+Five properties of that table are normative for this chapter.
 
 - **A verdict is about the property the address carries, and no more.** A key
   or hash address is reported verified for *integrity of the bytes*, and each
@@ -760,8 +820,15 @@ Four properties of that table are normative for this chapter.
 - **A key reached through a name is not a key that was typed.** A dotted
   `hyper://` host is two steps — the mapping **unverified**, the content
   **verified** — the same shape the `ens://` and HIP-5 `_op` rows use for the
-  same gap, and the lock does not close. An implementation **MUST NOT** report
-  a resolved address as though its key had been typed.
+  same gap. The lock still closes, because the bytes really are key-verified,
+  but the verdict **MUST** be `partial` and never `verified`. An implementation
+  **MUST NOT** report a resolved address as though its key had been typed.
+- **The verdict is not changed by the route the socket took.** `gemini://`
+  reaches its capsule through the device-local Tor while IP Protection is on
+  (§K.6.2) and directly when it is off, and both produce exactly the steps in
+  the table above. Tor changes who sees the address, not who authenticated the
+  answer, and an implementation **MUST NOT** score a step differently because
+  the connection was anonymized.
 - **The two BitTorrent spellings are one namespace and say one thing**, and the
   two key *shapes* inside it do not: a 40-hex infohash fixes the bytes forever;
   a 64-hex BEP-46 key authenticates a pointer that changes.
@@ -817,15 +884,22 @@ open, and an implementation should be explicit about all four:
    indefinitely, and nothing in this browser would notice.
 3. **The name hop.** Two of these namespaces reach a key through a *name* —
    `hyper://` via DNSLink, `gemini://` via ordinary DNS — and in both cases the
-   name is resolved outside every DNS protection the rest of the browser
-   applies, with no signature. That hop is the whole security of the address
-   for those forms.
+   answer carries no signature, so that hop is the whole security of the address
+   for those forms. It is also resolved outside every DNS protection the rest of
+   the browser applies: always for `hyper://` (D **KY-4**), and for `gemini://`
+   whenever IP Protection is off, which is when the operating system's resolver
+   answers (D **KY-8**). With protection on, the Gemini name is resolved inside
+   Tor instead — which removes the disclosure and adds no signature.
 4. **Metadata.** Joining a swarm publishes your address to it. This is why the
-   IP-Protection gate (§K.3.6) refuses these namespaces outright rather than
-   pretending to proxy them, why Local Service Discovery is off, and why
-   BitTorrent is deliberately never wired to the bundled Tor: UDP DHT and uTP
-   cannot ride a SOCKS circuit, and the handshakes leak the real address
-   anyway.
+   IP-Protection gate (§K.3.6) refuses the three peer-to-peer namespaces
+   outright rather than pretending to proxy them, why Local Service Discovery is
+   off, and why BitTorrent is deliberately never wired to the bundled Tor: UDP
+   DHT and uTP cannot ride a SOCKS circuit, and the handshakes leak the real
+   address anyway. `gemini://` is the exception because its transport is one TCP
+   connection to one host, which a SOCKS circuit carries exactly — so it is
+   routed through Tor rather than refused. Routing it buys the address and the
+   lookup, and nothing else: every Gemini connection in the session shares the
+   same circuits, because no SOCKS credential is sent (Chapter 8, TO-3).
 
 **And one that is not about the network at all.** Four of these five schemes are
 registered *standard and secure*, which gives them a real, persistent tuple

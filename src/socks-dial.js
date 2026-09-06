@@ -1,13 +1,14 @@
 // A SOCKS5 CONNECT dialer (RFC 1928, "no authentication" method only).
 //
-// WHY THIS EXISTS. Two of this browser's own network paths are raw TCP from
-// the main process, which Electron's session proxy does not cover: the
-// resolver's authoritative DNS hop (src/hns/resolver.js → dns-query.js) and
-// the WebSocket tunnel's upstream dial (src/hns/ws-proxy.js). With IP
-// Protection on, both used to be refused or degraded rather than leak the
-// real address. A dialer that speaks SOCKS5 to the device-local Tor port
-// lets them keep working — the chain proof stays, the DANE pin stays, only
-// the socket goes through Tor. The only SOCKS server this ever talks to is
+// WHY THIS EXISTS. Three of this browser's own network paths are raw TCP
+// from the main process, which Electron's session proxy does not cover: the
+// resolver's authoritative DNS hop (src/hns/resolver.js → dns-query.js), the
+// WebSocket tunnel's upstream dial (src/hns/ws-proxy.js) and a gemini://
+// capsule's TLS socket (src/protocols/gemini-protocol.js). With IP
+// Protection on, each would otherwise be refused or degraded rather than
+// leak the real address. A dialer that speaks SOCKS5 to the device-local Tor
+// port lets them keep working — the chain proof stays, the DANE pin stays,
+// only the socket goes through Tor. The only SOCKS server this ever talks to is
 // the one the anonymizer chose (src/hns/anonymize.js), on loopback.
 //
 // Address type: a dotted-quad target is sent as ATYP IPv4 so no name reaches

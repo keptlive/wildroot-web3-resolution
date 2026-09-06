@@ -95,8 +95,7 @@ test('a DID may be passed directly; no handle lookup happens', async () => {
 test('the DID-document fetch refuses redirects and carries a timeout', async () => {
   // The did:web branch fetches an attacker-influenceable host; a 302 must not
   // carry it into internal space. src/did-protocol.js sets the same two, and
-  // additionally refuses a private or reserved host before connecting — a
-  // guard this reader does not have (DI-6).
+  // this reader shares its host guard (isSafeDidWebHost) before connecting.
   const fetchFn = fakeFetch([['plc.directory', { json: PLC_DOC }]])
   await makeBsky({ fetchFn }).resolvePds('did:plc:self')
   assert.equal(fetchFn.calls[0].init.redirect, 'error')

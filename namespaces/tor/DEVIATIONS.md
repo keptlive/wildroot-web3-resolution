@@ -104,7 +104,10 @@ than a patch to apply; see §2.2 and TO-D2.
 ### TO-3. No SOCKS stream isolation: everything shares circuits
 
 **What.** One SOCKS proxy URL with no credentials is applied to the whole
-session (`src/anonymize.js:243-258`).
+session (`src/anonymize.js:243-258`), and the three main-process paths that dial
+the same port for themselves — the Handshake resolver's authoritative hop, the
+`wss://` tunnel's upstream and a `gemini://` TLS socket, all through
+`../../src/socks-dial.js` (SPEC §7.5) — send none either.
 
 **The standard says.** RFC 1929 defines username/password authentication for
 SOCKS 5. Tor's `SocksPort` overloads it for *stream isolation* and has
@@ -112,19 +115,29 @@ SOCKS 5. Tor's `SocksPort` overloads it for *stream isolation* and has
 that supplied distinct SOCKS username/password pairs per first-party origin
 would get a separate circuit per origin at no cost. We supply none.
 
-**Why.** The proxy is configured once, as an Electron session-level
-`proxyRules` string. That API has no hook for per-request SOCKS credentials.
+**Why.** For the session the proxy is configured once, as an Electron
+session-level `proxyRules` string, and that API has no hook for per-request
+SOCKS credentials. For the three direct dialers the reason is different and
+weaker: the shared SOCKS client simply does not take a credential, because it
+was written for the session's own no-auth port and nothing asked it for one.
 
 **Consequence.** Every onion service, and all clearnet traffic in the same
 session, can share exit-side and circuit-level correlation. Tor Browser isolates
 by first-party domain precisely to prevent that. It is a genuine anonymity gap,
-and it is part of what "hides your IP, is not full anonymity" is paying for.
+and it is part of what "hides your IP, is not full anonymity" is paying for. The
+direct dialers widen it in a specific and slightly worse way: a Handshake
+nameserver query, the WebSocket to that name's origin and an unrelated Gemini
+capsule can all traverse one circuit, so a relay that sees the lookup may see
+the socket that follows it.
 
-**Status: OPEN**, with a real obstacle: we do not currently know how to do this
-through Electron's session proxy API, and the fix is a piece of design work
-rather than a line of code. TO-D1 states the three routes we can see and why
-none of them is a one-liner. Until one exists, the product claim must keep
-saying that per-site isolation is absent.
+**Status: OPEN**, with a real obstacle for the session half: we do not currently
+know how to do this through Electron's session proxy API, and the fix is a piece
+of design work rather than a line of code. TO-D1 states the three routes we can
+see and why none of them is a one-liner. The three direct dialers are the
+exception — they build their own SOCKS connection and could pass a credential
+today — which makes them the place to measure whether Tor isolates on one at
+all. Until per-site isolation exists anywhere, the product claim must keep
+saying it is absent.
 
 ---
 
@@ -352,8 +365,14 @@ sent distinct credentials. Electron's `session.setProxy` takes a session-wide
 `proxyRules` string with no hook for per-request SOCKS credentials, so there is
 no small version of this change (TO-3, TO-6).
 
-**Recommendation.** Take the three routes in order of what they would prove, not
-of effort. **(a)** A PAC script returning a different `SOCKS5` line per host
+**Recommendation.** Start where it is nearly free: the three main-process
+dialers of SPEC §7.5 construct their own SOCKS connection, so giving
+`../../src/socks-dial.js` an optional username/password derived from the
+first-party (the Handshake name, the WebSocket origin, the capsule host) is a
+parameter and a test, and it answers the question the session-wide routes below
+all depend on — *does this Tor isolate on it?* — for the cost of an afternoon. A
+positive answer justifies the session work; a negative one saves it. Then take
+the three session routes in order of what they would prove, not of effort. **(a)** A PAC script returning a different `SOCKS5` line per host
 gets a distinct proxy *string* per origin but still no credentials, so whether
 Tor isolates on it is doubtful and must be measured before it is believed; it
 also has to compose with the WebSocket PAC the same controller already installs

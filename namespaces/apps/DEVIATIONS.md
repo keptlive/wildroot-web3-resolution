@@ -13,10 +13,12 @@ provide — that a WebSocket from a Handshake page is end-to-end TLS pinned to t
 same on-chain key material as the document, through a tunnel that never holds a
 key — holds, and the pin is proven through a real spliced connection by
 `tests/ws-proxy.test.js` ("e2e: the tunnel preserves end-to-end TLS so a DANE
-pin verifies through it"). The four fences hold and each is pinned by a test.
-Everything below is about the *other* things: the scheme the PAC also routes,
-the authentication that cannot exist, the origin the token is bound to, and a
-long list of what we have not measured.
+pin verifies through it"). The five fences hold and each is pinned by a test,
+including on the anonymized route, where the upstream is dialled through the
+device-local Tor by address and the name is never given to the proxy.
+Everything below is about the *other* things: the authentication that cannot
+exist, the service worker we do not allow, the origin the token is bound to, the
+manifest nobody signs, and a long list of what we have not measured.
 
 Paths written `../../src/…` are shared modules of the top-level package; paths
 written `src/…` and `tests/…` are this chapter's, under `namespaces/apps/`.
@@ -27,53 +29,14 @@ extracted into this repository (SPEC.md, "Paths").
 
 ## 1. Deviations
 
-### AP-1. The PAC routes plaintext `ws://` to the tunnel as well as `wss://`
-
-**What.** `FindProxyForURL` tests `wss:` and `ws:` with the same branch and
-returns the tunnel for either when the host is a Handshake host
-(`src/ws-proxy-pac.js:58-63`). The tunnel itself has no scheme knowledge — it
-sees `CONNECT <host>:<port>` — so a plaintext WebSocket to a Handshake name is
-resolved, dialled and spliced in the clear, with no certificate gate and no
-DANE pin. SPEC §4.1's rule that this chapter never routes `ws://` is true only
-because the *renderer* refuses to emit one from a secure context, not because
-anything here declines it.
-
-**The standard says.** W3C Mixed Content blocks a plaintext WebSocket from a
-secure context, which is why no `hns://` page can reach this branch. It says
-nothing about a non-secure page: an ordinary `http://` document, or any other
-non-secure context in the same session, may open `ws://<handshake name>/` and
-the PAC will send it here.
-
-**Why.** The branch was written when the whole feature was "WebSockets to
-Handshake hosts" and the security argument had not yet narrowed to "only
-`wss://` can exist". Nothing depends on the `ws:` half.
-
-**Consequence.** A plaintext, unauthenticated, unpinned socket to a Handshake
-name is reachable from a non-secure page, and it looks to the tunnel exactly
-like the pinned case. It cannot be *upgraded* into a Handshake page's secure
-context, so it is not a downgrade of anything this chapter promises — but it is
-a capability nobody asked for, and it is the one path here that carries bytes
-with no verification story at all.
-
-**Status: OPEN.** Sending a `ws:` URL `DIRECT` would be worse, not better: the
-engine would then hand the Handshake name to the system resolver — the
-disclosure the tunnel exists to prevent — before failing. The fix belongs in
-the tunnel, which sees the port: refuse a `CONNECT` to any port other than 443,
-the one port a DANE pin covers (Chapter 1 HS-6), so a plaintext `ws://` (port
-80) is refused with a clean 403 and nothing reaches the system resolver, while
-every `wss://` this chapter promises still works. `tests/native-origin.test.js`
-pins the current PAC behaviour so that the change is a deliberate, visible edit.
-`src/ws-proxy.js:288` (the parsed authority), a port check beside the HNS-only
-fence.
-
 ### AP-2. The tunnel cannot require proxy authentication, and ships with none
 
 **What.** The tunnel is an unauthenticated local proxy. It accepts a `CONNECT`
 from any process on the machine that can reach `127.0.0.1:<port>`, subject only
-to the Handshake-only, SSRF and anonymization fences. The `Proxy-Authorization`
-check is implemented and constant-time (`src/ws-proxy.js:192`, `:251-255`,
-`:275-278`) but is skipped because no credential is passed
-(browser `src/protocols/index.js:255-261`).
+to the port, Handshake-only, SSRF and Tor fences. The `Proxy-Authorization`
+check is implemented and constant-time (`src/ws-proxy.js:217`, `:276-280`,
+`:300-303`) but is skipped because no credential is passed
+(browser `src/protocols/index.js:267-277`).
 
 **The standard says.** RFC 9110 §11 (with RFC 7235's mechanism) defines exactly
 this: a proxy answers `407` with `Proxy-Authenticate` and the client retries
@@ -85,15 +48,18 @@ surface a proxy-auth challenge to its embedder for a `wss://` handshake, so the
 
 **Why.** Two implementations were built and neither could connect once. The
 choice is between a fence that cannot be enforced and an honest statement that
-the boundary is the loopback bind plus the three content fences.
+the boundary is the loopback bind plus the four content fences.
 
 **Consequence.** Any local process can use the tunnel to resolve a Handshake
-name and open a TCP connection to its public address. That is a real widening
-of what this component does compared with an authenticated proxy, and the
-argument that it is acceptable is a specific one: a process already on loopback
-can resolve the same name over public DoH and dial the same address by itself,
-so the tunnel confers no capability it lacked — while the Handshake-only and
-SSRF fences mean it confers rather *less* than a general proxy would.
+name and open a TCP connection to its public address on port 443. That is a real
+widening of what this component does compared with an authenticated proxy, and
+the argument that it is acceptable is a specific one: a process already on
+loopback can resolve the same name over public DoH and dial the same address by
+itself, so the tunnel confers no capability it lacked — while the port,
+Handshake-only and SSRF fences mean it confers rather *less* than a general
+proxy would. While IP Protection is on that connection is made through the
+user's own Tor client rather than directly, which is a route the local process
+could also have taken itself.
 
 **Status: DELIBERATE.** The credential path is retained and tested
 (`tests/ws-proxy.test.js`, "OPTIONAL auth (future platform)") so that a platform
@@ -229,6 +195,41 @@ distinguish signed from unsigned rather than warning identically for both, and a
 downgrade from signed to unsigned on re-install should be refused rather than
 warned about.
 
+### AP-7. A Handshake WebSocket is reachable on port 443 and nowhere else
+
+**What.** The tunnel accepts a `CONNECT` to 443 and refuses every other port
+before resolving (`TUNNEL_PORT`, `src/ws-proxy.js:90`, `:317-319`; SPEC §4.4
+fence 1). The PAC still routes `wss://<name>:8443/…` to the tunnel — it decides
+on scheme and host, not port — so an application that serves its socket
+anywhere but 443 is routed here and then refused with a `403` the page cannot
+distinguish from any other failure.
+
+**The standard says.** RFC 6698 gives TLSA records a per-port owner name
+(`_<port>._tcp.<name>`), so DANE itself has no objection to a pinned socket on
+8443. Nothing in RFC 6455 or in the URL Standard restricts a `wss://` port
+either. The restriction is this implementation's.
+
+**Why.** Two links in the chain are fixed to 443, not one. The resolver reads a
+pin at `_443._tcp.<host>` and only there, whatever port a URL names — that is
+Chapter 1's own deviation HS-6 — and the
+engine's certificate-verification request carries a hostname with **no port**
+(browser `src/index.js:1330-1351`), so even a resolver that fetched the right
+RRset would have nothing to select it with at verification time. Accepting an
+arbitrary port would therefore mean splicing TLS that the pin check cannot
+cover — which is exactly what fence 1 exists to prevent.
+
+**Consequence.** A publisher must terminate its WebSocket on 443 at the
+Handshake name (SPEC §4.8), which is what every reference deployment does
+anyway, and a non-default port is a dead end with a bad error. The cost is
+carried by the deployment, not by the trust story.
+
+**Status: DELIBERATE**, with a clean fix if a port ever needs to be. Give the
+resolution a port parameter, read `_<port>._tcp.<name>`, and thread the port
+from the CONNECT through to the certificate check; until the engine's
+verification callback carries the port, the honest set is the one port the pin
+covers, and refusing is better than splicing unpinned. Both halves must move
+together, or the port becomes reachable before it becomes pinned.
+
 ---
 
 ## 2. Things we are not sure about
@@ -249,13 +250,28 @@ contributes `none` to the trust state — and the claim "the 101 is verified"
 should be read as "the user agent is required to verify it", not as something we
 have pinned.
 
-### 2.2. Whether the tunnel is even reached for a plaintext `ws://`
+### 2.2. What Chromium actually sends to the tunnel for a plaintext `ws://`
 
-AP-1 is about what the PAC *decides*. What Chromium then *does* with a `ws://`
-URL through an HTTP proxy — issue `CONNECT`, or issue the WebSocket `GET`
-through the proxy as an absolute-URI request — we have not measured. If it is
-the latter, the tunnel answers `405 Allow: CONNECT` and AP-1 is harmless in
-practice. We are not going to describe it as harmless on a guess.
+The PAC routes `ws:` to the tunnel (SPEC §4.6). What Chromium then *does* with
+that URL through an HTTP proxy — issue `CONNECT <host>:80`, or issue the
+WebSocket `GET` through the proxy as an absolute-URI request — we have not
+measured. Nothing rests on the answer, because both are refused without a
+lookup: a `CONNECT` to 80 by the port fence with `403`, an
+absolute-URI `GET` by the method check with `405 Allow: CONNECT`. We record it
+because "both branches refuse" is a reason not to measure it, and "we measured
+it" would be a different and stronger claim.
+
+### 2.2a. What the anonymized route costs in latency and circuit sharing
+
+The Tor route of SPEC §4.4 fence 4 is pinned by test against a stub SOCKS
+server; it has not been measured against a real Tor circuit. Two things are
+therefore unquantified: what a WebSocket handshake costs through a circuit that
+may still be building (Chapter 8 §7.2 routes before readiness deliberately), and
+what a long-lived socket does to a session whose circuits are shared by
+everything in it (Chapter 8 TO-3). Neither is a correctness question — the
+fences and the pin are the same on both routes — but a realtime application is
+the one kind of page for which "it works, slowly, forever" is a different
+product from "it works".
 
 ### 2.3. Whether the PAC leaves loopback traffic reachable while IP Protection is on
 
@@ -349,28 +365,6 @@ WebSocket branch, so it holds for both. It costs four lines, it restores the
 bypass the controller intended in the one configuration where the controller no
 longer owns it, and it removes the need to answer §2.3 at all.
 
-### AP-D2. Chain the tunnel through Tor instead of refusing
-
-While IP Protection is on, every WebSocket to a Handshake name is refused
-(`src/ws-proxy.js:290-295`), because a direct dial from the browser process
-would disclose the real address. So a privacy-conscious user cannot use a
-realtime Handshake application at all.
-
-**Recommendation.** Dial the upstream through the Tor SOCKS port with
-proxy-side resolution inside Tor, so the name is never resolved locally and the
-dial never leaves the tunnel. It needs its own review — the resolution path
-changes root of trust when it moves inside Tor, and the SSRF guard has nothing
-to inspect when the proxy resolves — which is why refusing is right until the
-review happens, and why the refusal must stay clean rather than becoming a
-silent hang.
-
-### AP-D3. Refuse a `CONNECT` to a port other than 443
-
-See AP-1. `src/ws-proxy.js:288`, a port check beside the HNS-only fence, plus a
-test that `CONNECT pxls:80` is refused and `CONNECT pxls:443` is not. The PAC
-keeps routing `ws:` to the tunnel: the tunnel refusing is the only outcome that
-puts no Handshake name in a system-resolver query.
-
 ### AP-D4. Decide the service-worker question for `hns://`
 
 See AP-3. `browser src/main.cjs:110-120`. The blocking question is what a
@@ -405,9 +399,10 @@ so the change is in the discovery base and its test.
 ### AP-D8. Surface the tunnel's refusal reason
 
 Every fence answers a distinct HTTP status that the WebSocket API discards, so
-"IP Protection is on", "this name has no address", "this name resolves to a
-private address" and "the origin is down" are one untyped `error` event to the
-page and nothing at all to the user (`src/ws-proxy.js:239-249`).
+"this is not port 443", "IP Protection is on and there is no Tor circuit", "this
+name has no address", "this name resolves to a private address" and "the origin
+is down" are one untyped `error` event to the page and nothing at all to the
+user (`src/ws-proxy.js:264-274`).
 **Recommendation.** Record each refusal with its reason and the name, and show
 it where the connection's trust state is already shown. The information exists
 and is thrown away at the socket boundary.
@@ -415,12 +410,14 @@ and is thrown away at the socket boundary.
 ### AP-D9. Bound the tunnel's concurrency
 
 The tunnel accepts and tracks unbounded connections
-(`src/ws-proxy.js:206-210`), and every accepted CONNECT to an unresolved
+(`src/ws-proxy.js:230-235`), and every accepted CONNECT to an unresolved
 Handshake host costs one resolution. **Recommendation.** A cap on live tunnels
 and a small per-name rate limit on resolutions, refusing with `503` beyond it.
 The risk today is bounded by the loopback bind, so this is hygiene rather than a
 hole — but it is the kind of hygiene that is much easier to add before the
-tunnel is chained through Tor (AP-D2).
+tunnel's dials are, while IP Protection is on, made through the user's own Tor
+circuit (SPEC §4.4 fence 4), where every accepted CONNECT costs circuit capacity
+as well as a resolution.
 
 ---
 

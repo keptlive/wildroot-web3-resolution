@@ -57,7 +57,7 @@ judgement and not a citation.
 
 **What.** Two suffixes are removed from the Handshake namespace by a literal
 regular expression before any list is consulted: `/\.onion$/i` and `/\.eth$/i`
-(`src/router.js:216, 254`).
+(`src/classify-host.cjs:33, 37`).
 
 **The standard says.** RFC 7686 §2 rule 1: applications SHOULD NOT resolve
 `.onion` names via DNS, and by the same argument must not resolve them on a
@@ -85,7 +85,7 @@ question open for the rest — see §2.3.
 ### RT-3. A single bare label is a Handshake name
 
 **What.** `pinner`, `hnshosting`, `bananas`, `14898` and `🤝` navigate as
-Handshake names (`src/router.js:436-463`). `com`, `org`, `app`, `blog` and
+Handshake names (`src/router.js:383-409`). `com`, `org`, `app`, `blog` and
 `link` — labels that are themselves ICANN top-level domains — are searches.
 Anything containing whitespace is a search.
 
@@ -114,7 +114,7 @@ as a default for somebody else's — see §2.2.
 
 **What.** The explicit-scheme test refuses to treat `example.com:8080` as a
 scheme, because a real scheme is never followed by a bare port number. The
-exception is a token the registry already knows (`src/router.js:193-202`):
+exception is a token the registry already knows (`src/router.js:205-217`):
 
 ```
 hasExplicitScheme('example.com:8080') -> false   (host:port)
@@ -144,7 +144,7 @@ think it is a bug nobody noticed.
 
 **What.** `NAMESPACES.ICANN` is declared and used by the classifier, but no row
 in `SCHEME_TABLE` carries it — an ICANN name is navigated as `https://`, whose
-row is in namespace `web` (`src/router.js:56-77, 424-426`). So:
+row is in namespace `web` (`src/router.js:62-84, 368-370`). So:
 
 ```
 classify('example.com').namespace  === 'icann'
@@ -213,42 +213,51 @@ specification RFC 7595 asks for; nothing in the code changes. See RT-D4.
 
 ---
 
-### RT-7. The host rule is written three times, held together by a test
+### RT-7. The PAC script carries a second, ASCII-only copy of the host rule
 
-**What.** The classifier is the authority, but the address bar cannot import it
-(different module systems — one is CommonJS and extends `HTMLElement`, the
-other is an ES module), and the WebSocket proxy's rule is PAC JavaScript that
-runs *inside* the browser's network stack and can import nothing at all. The two
-*lists* the rule consults are each one file read by all three consumers
-(`src/reserved-names.cjs`, `src/icann-tlds.cjs`). The predicate *code* is still
-written three times, held together by a test that lifts the predicate functions
-out of the other two sources, evaluates them beside the router's classifier, and
-compares across a corpus.
+**What.** The host rule is one dependency-free module,
+`../../src/classify-host.cjs`: the router imports it and re-exports its
+predicates, and the address bar requires the same file and carries no host rule
+of its own. The WebSocket PAC script cannot load it. A PAC script is a string
+evaluated inside the browser's network stack, with no module loader and — the
+part that decides this — **no URL parser**, which `asciiTld` needs to punycode
+a Unicode label before comparing it. So the PAC embeds the two lists
+(`src/reserved-names.cjs`, `src/icann-tlds.cjs`, the same files) and an
+ASCII-only form of the rule: a bare label or a non-ICANN / numeric final label
+is Handshake, and IP literals, `localhost`, reserved labels, `.eth` and
+`.onion` are not.
 
 **The standard says.** Nothing. This is a departure from our own stated design:
 SPEC §11.5 says one classifier, consumed everywhere.
 
-**Why.** The module-system boundary is real for the address bar and absolute
-for the PAC script, which is a string evaluated by the network stack.
+**Why.** The PAC sandbox has neither an import nor a `URL`. The rule it needs is
+also narrower than the classifier's — it answers one question, "does this
+ws/wss host go through the Handshake tunnel or around it" — and the hosts it
+sees have already been through Chromium's own host parser, so they arrive as
+A-labels.
 
-**Consequence.** The test is a good one — it fails on the pre-fix sources rather
-than merely passing on the current ones — but it is a *mitigation*. Two
-implementations of one rule is exactly how `.eth` came to mean two different
-things in the same browser, and a test that reads source text is brittle in a
-way an import is not (it breaks on a rename rather than on a behaviour change).
+**Consequence.** One copy remains, and what it is held to is *behaviour* rather
+than source text: the test generates the PAC, evaluates it the way the network
+stack does, and compares `FindProxyForURL`'s routing decision with
+`classifyHost()`'s answer across a corpus that includes a Unicode host, a
+numeric TLD, a malformed onion, IP literals and reserved names. A divergence
+fails the test rather than a rename. The residual risk is a host shape the
+corpus does not contain, and the direction of a divergence matters: a host the
+PAC wrongly calls Handshake goes to a proxy that refuses it, while a host it
+wrongly calls ordinary is a WebSocket leaving around the tunnel.
 
-**Status: OPEN.** The obstacle is true of the *modules* and not of the *rule*:
-the pure predicates (`bareHost`, `asciiTld`, `isOnionHost`, `isEthName`,
-`isIpLiteral`, `classifyHost`) can be extracted into a dependency-free `.cjs`
-that the router imports, the omnibox requires, and the PAC generator emits — the
-same move the two lists have already made, for the same reason. See RT-D3.
+**Status: OPEN**, and narrowly. The remaining copy cannot be removed while the
+rule must run inside a PAC sandbox; it can only be made smaller. Emitting a
+generated, ASCII-only projection *of the shared module* — rather than a
+hand-written mirror of it — would leave one source and one generator, and is
+the shape any fix should take.
 
 ---
 
 ### RT-8. `classify()` returns `javascript:`, `data:` and `file:` untouched
 
 **What.** L1 says an explicit scheme is authoritative and the classifier does
-not get a vote. It applies to every scheme (`src/router.js:363-376`):
+not get a vote. It applies to every scheme (`src/router.js:288-300`):
 
 ```
 classify('javascript:alert(1)') -> { scheme: 'javascript', namespace: null, known: false }
@@ -300,7 +309,7 @@ interoperability gap with a standard we otherwise implement.
 ### RT-10. `agregore://` and `browser://` are permanent silent aliases
 
 **What.** Two schemes are served identically to `wildroot://` and rewritten to
-it on navigation. They are never advertised (`src/router.js:141-142`).
+it on navigation. They are never advertised (`src/router.js:152-154`).
 
 **The standard says.** Nothing. Listed because the WHATWG URL Standard's origin
 model is what makes it consequential: three schemes are three tuple origins.
@@ -320,7 +329,7 @@ rewrite load-bearing rather than cosmetic.
 
 **What.** A host is converted to A-labels by handing it to the URL constructor
 and reading back `hostname`. When the constructor throws, the raw final label is
-used for the ICANN comparison instead (`src/router.js:284-292`):
+used for the ICANN comparison instead (`src/classify-host.cjs:68-76`):
 
 ```js
 try {
@@ -359,7 +368,7 @@ visible to the interface and to a test. See RT-D5.
 ### RT-12. The dispatcher's 400 branch is unreachable through a WHATWG `Request`
 
 **What.** `dispatch` answers `400` with no namespace marker when the URL will
-not parse *and* names no scheme (`src/router.js:557-571`). A WHATWG `Request`
+not parse *and* names no scheme (`src/router.js:504-518`). A WHATWG `Request`
 cannot be constructed with an unparseable URL, so through the documented
 interface the branch is dead; it is reachable only from a caller that passes a
 plain object with a `url` property, which is what the Electron runtime and our
@@ -534,21 +543,6 @@ reason. The alternative (splitting `web` into `icann` and `web`, and making
 considerably more machinery; either is better than two dialects, and the choice
 should be written down wherever it is made.
 
-### RT-D3. Collapse the three copies of the predicate code into one
-
-The two *lists* are shared (`reserved-names.cjs`, `icann-tlds.cjs`); the
-predicate *code* is still written in the router, the address bar and the PAC
-generator, and held together by a test that lifts functions out of source text
-(RT-7). A source-lifting test breaks on a rename rather than on a behaviour
-change, and it cannot cover a copy that was never lifted.
-
-**Recommendation.** Extract the pure predicates — `bareHost`, `asciiTld`,
-`isOnionHost`, `isEthName`, `isIpLiteral`, `classifyHost` — into a
-dependency-free `.cjs`. The router imports it, the omnibox requires it, and the
-PAC generator emits its source into the generated script instead of
-re-implementing it. The lifting test then shrinks to one assertion: that the PAC
-generator emitted the shared function rather than a copy.
-
 ### RT-D4. Register `hns:` with IANA
 
 Of the 19 unregistered schemes, 18 are application-private and should stay that
@@ -585,11 +579,13 @@ interface and pinnable by a test.
    specification, that layer is yours to write — and RT-D1 says what we think is
    wrong with ours.
 
-2. **The address bar and the PAC script.** The two other copies of the predicate
-   code (RT-7) live in the browser tree. The test that holds them to the
-   router's answer reads their **source text**, so it cannot run here; the
-   corpus it uses is reproduced in `tests/classification-order.test.js` as a
-   table the router is held to on its own.
+2. **The address bar and the PAC script.** Both live in the browser tree. The
+   address bar requires the shared `src/classify-host.cjs` and so has no rule
+   of its own to extract; the PAC generator's ASCII-only copy (RT-7) does, and
+   the test that evaluates the generated script beside `classifyHost()` runs
+   there. The corpus it uses is reproduced in
+   `tests/classification-order.test.js` as a table the router is held to on its
+   own.
 
 3. **The per-namespace resolvers.** What happens *after* a namespace is chosen
    belongs to the spine (for Handshake) and to the sibling chapters (for

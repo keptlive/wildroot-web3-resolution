@@ -137,13 +137,22 @@ only the current behaviour: there is no history of defects in these documents.
 Where the specification and the code disagree, that is a bug in one of them —
 please say which you think it is.
 
+Two things this release commits to are worth naming here. **DNSLink is the
+migration path**: a Handshake name's content is read from its `ipfs=` record
+and from its `_dnslink` record under the same rules, so a site published for
+IPFS Companion, Brave or kubo opens in Wildroot unchanged and a Wildroot site
+opens there. **The chain proof survives anonymization**: with IP Protection on,
+the authoritative hop and the SPV node's peers go through the device-local Tor
+and the proof is kept.
+
 Things we would most like argued with are collected in `DEVIATIONS.md`: each
 chapter's *"Things we are not sure about"* and *"Open design items"*, the
-latter each with our recommendation. The largest are: reading DNSLink as a
-pointer source; verifying Arweave bytes against the transaction; resolving AT
-Protocol handles locally rather than through an AppView; auditing the
-`did:plc` operation log; whether the DoH override of a chain-proven
-"unregistered" should exist; and whether `hns:` should be registered with IANA.
+latter each with our recommendation. The largest are: verifying Arweave bytes
+against the transaction (the header is verified, the bytes are not); resolving
+AT Protocol handles locally rather than through an AppView; auditing the
+`did:plc` operation log; a private IPFS path for named sites (the local node's
+DHT); whether numeric Handshake TLDs are supported at all; and whether `hns:`
+should be registered with IANA.
 
 ## Licence
 
@@ -165,7 +174,7 @@ byte-identical to the same files in the Wildroot tree.
 
 ## Citing
 
-> Wildroot, *Web3 name resolution: a specification*, version 0.2.
+> Wildroot, *Web3 name resolution: a specification*, version 0.3.
 > https://github.com/keptlive/wildroot-web3-resolution
 
 ## Contributing

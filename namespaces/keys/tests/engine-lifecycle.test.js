@@ -90,11 +90,12 @@ test('every answer carries the CORS headers, whether or not they were mutable', 
 })
 
 test('IP Protection refuses the whole namespace with a 503 — nothing underneath runs', async () => {
-  // BitTorrent dials peers directly, hyperswarm dials peers directly, and a
-  // Gemini request is a raw TLS socket from the main process: none of them
-  // rides session.setProxy, so while anonymization is on they are refused
-  // rather than leaked. 503, never a made-up status: an unknown code reaches
-  // Chromium's NOTREACHED in the protocol loader.
+  // BitTorrent dials peers directly and hyperswarm dials peers directly:
+  // neither rides session.setProxy, so while anonymization is on they are
+  // refused rather than leaked. (Gemini is one TCP connection to one host, so
+  // it is routed through the Tor SOCKS port instead — gemini-protocol.test.js.)
+  // 503, never a made-up status: an unknown code reaches Chromium's
+  // NOTREACHED in the protocol loader.
   let anonymized = true
   const engine = stubEngine()
   const { handler } = fetchToHandler(engine.make)

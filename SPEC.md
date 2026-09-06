@@ -1,6 +1,6 @@
 # Web3 name resolution — a specification
 
-**Version:** 0.2 (draft for public comment)
+**Version:** 0.3 (draft for public comment)
 **Status:** Describes the behaviour of the reference implementation in this
 repository, which ships in the Wildroot browser. Not endorsed by any standards
 body. Normative statements describe what an implementation must do *to
@@ -208,14 +208,18 @@ states, not two:
   where `ens://`, `ar://`, `did:`, `nostr:`, a DNSLink-resolved `hyper://` name
   and Chapter 10's `_op` resolution sit. An indicator that renders this state
   identically to the one above is lying by omission.
-- **OPEN**: a step `failed`, or the connection itself carries no protection (a
-  `Connection` step of `none`: plain HTTP, an onion service's HTTP inside the
-  tunnel is reported as `unverified`, not `none`).
+- **OPEN**: the connection itself carries no protection (a `Connection` step
+  of `none`: plain HTTP; an onion service's HTTP inside the tunnel is reported
+  as `unverified`, not `none`). A step that `failed` is its own verdict.
 
 The rule is the weakest link: a `failed` step MUST NOT aggregate to a closed
-lock; a single `unverified` step MUST NOT aggregate to trustless. The reference
-implementation's aggregation is `summarize()` in `src/trust-path.js`, and its
-verdicts for every scheme are pinned by `tests/lock-semantics.test.js`.
+lock; a single `unverified` step MUST NOT aggregate to trustless; a plaintext
+connection MUST NOT aggregate to the same verdict an encrypted one gets. The
+reference implementation's aggregation is `summarize()` in
+`src/trust-path.js` — five states: `verified`, `partial`, `open`, `failed`,
+`unknown` — and every scheme row in the registry carries the verdict it can at
+best reach (`trust`: trustless, trusted, open, refused, builtin), which
+`tests/lock-semantics.test.js` holds the panel to.
 
 ---
 
@@ -272,14 +276,22 @@ this order; the first match is final.
    `data:` and `file:`. A `host:port` shape (`example.com:8080`) is a host, not
    a scheme.
 2. **`@user@host`** — the Fediverse address form — is `activitypub:`. It is
-   not a host: the URL parser would read the second `@` as userinfo.
-3. **A bare CID** (`bafy…` base32 CIDv1, or `Qm…` base58 CIDv0, *parsed*, not
+   not a host: the URL parser would read the second `@` as userinfo. Any other
+   `@` in a scheme-less input is a search: no namespace has one in an address,
+   and the URL constructor would drop what precedes it.
+3. **A bare NIP-19 identifier** (`npub`, `note`, `nprofile`, `nevent`,
+   `naddr`, `nsec` followed by a bech32 body) is `nostr:` — DECODED before it
+   is claimed, so a Handshake name that merely starts with `npub` stays a
+   name; an `nsec` is routed on purpose, so the secret reaches the handler's
+   refusal page instead of a resolver.
+4. **A bare CID** (`bafy…` base32 CIDv1, or `Qm…` base58 CIDv0, *parsed*, not
    shape-matched) is `ipfs://<cid>/`; a CIDv0 is written as its CIDv1 because
    a case-sensitive host does not survive the URL parser. An IPNS key is
    deliberately **not** sniffed: `Qm…` is both a legacy IPNS key and a CIDv0.
-4. **`/ipfs/…` and `/ipns/…`** gateway paths are `ipfs://` and `ipns://`.
-5. **`localhost[:port]`** is `http://`.
-6. **Host classification**, in this order:
+5. **`/ipfs/…` and `/ipns/…`** gateway paths are `ipfs://` and `ipns://`.
+6. **`localhost[:port]`** is `http://`.
+7. **Host classification** (`src/classify-host.cjs`, the ONE implementation
+   the router and the omnibox both load), in this order:
    1. any whitespace → no namespace (a search);
    2. `*.onion` → `tor`, valid or not — a mistyped onion address leaks to a
       resolver as effectively as a real one, so the suffix decides;
@@ -295,13 +307,13 @@ this order; the first match is final.
    5. an **IP literal**, IPv4 or IPv6 with or without brackets → `web`,
       checked *before* the label count so that `::1` is an address and not a
       bare label;
-   6. a single label → step 7;
+   6. a single label → step 8;
    7. an all-numeric final label → `hns` (ICANN has no numeric TLDs).
       **Experimental:** whether numeric Handshake TLDs are supported at all is
       undecided, and the URL form such a name needs is Chapter 10 Part B;
    8. a final label in the ICANN root → `icann`, navigated as `https://`;
    9. any other final label → `hns`.
-7. **A single bare label** is a Handshake name unless the label is itself an
+8. **A single bare label** is a Handshake name unless the label is itself an
    ICANN TLD (`com`, `org`, `app` — a word somebody is mid-way through typing),
    which is a **search**.
 
@@ -311,11 +323,12 @@ is converted to A-labels before comparison (the reference implementation does
 so through the WHATWG URL parser; `DEVIATIONS.md` RT records what that means).
 The same rule **MUST** be applied on every path that classifies a host — typed
 input, a link click, an `http(s)`→`hns` rewrite, a subresource load, a
-WebSocket — and the reference implementation holds its three copies (the
-router, the omnibox, the PAC script) to one answer with a test that lifts the
-predicates out of the other two.
+WebSocket. The reference implementation has one implementation of the host
+rule, loaded by the router and the omnibox; the WebSocket PAC script, which
+runs in a sandbox with no URL parser, carries an ASCII-only form of it and is
+held to the shared answer by a test.
 
-**A search is a terminal, not a fallback.** An input that reaches step 7 and is
+**A search is a terminal, not a fallback.** An input that reaches step 8 and is
 an ICANN TLD, or contains whitespace, named no protocol; there is nothing to
 fall back from.
 
@@ -356,7 +369,7 @@ chapter's prefix.
 
 | Chapter | Namespace | Root of trust | Verdict when it succeeds |
 |---|---|---|---|
-| [1 — Handshake](namespaces/handshake/SPEC.md) (`HS`) | `hns` | a chain proof from a local SPV node; DNSSEC anchored to the on-chain DS; DANE `3 1 1` | TRUSTLESS for a content pointer or a pinned, validated address; TRUSTED over the DoH fallback |
+| [1 — Handshake](namespaces/handshake/SPEC.md) (`HS`) | `hns` | a chain proof from a local SPV node; DNSSEC anchored to the on-chain DS; DANE `3 1 1`; content pointers read from `ipfs=`/`ar=` records AND from DNSLink — the migration path from every other IPFS client | TRUSTLESS for a content pointer or a pinned, validated address; TRUSTED over the DoH fallback; OPEN for a proven-unpinned name over plain HTTP |
 | [2 — ICANN names](namespaces/icann/SPEC.md) (`IC`) | `icann` / `web` | WebPKI; the address from encrypted DNS (plain or oblivious) per a transport plan decided once and reported truthfully | TRUSTED |
 | [3 — IPFS, IPNS and DNSLink](namespaces/ipfs/SPEC.md) (`IP`) | `ipfs` | the CID: every block hash-checked by the local node; an IPNS record's signature | TRUSTLESS |
 | [4 — Arweave](namespaces/arweave/SPEC.md) (`AR`) | `arweave` | the transaction id names immutable bytes, but the bytes are fetched from an ar.io gateway and **not** checked against it | TRUSTED |

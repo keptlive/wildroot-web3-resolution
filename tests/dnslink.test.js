@@ -89,6 +89,15 @@ test('DoH: both records agreeing is the normal case; disagreeing is surfaced', a
   assert.match(clash.reason, new RegExp(OTHER))
 })
 
+test('DoH: a stated origin beside a DNSLink-only pointer is carried', async () => {
+  const out = await dohFor({
+    'warmed.14898:TXT': [{ type: TYPES.TXT, data: `car=https://origin.example/ipfs/${CID}` }],
+    '_dnslink.warmed.14898:TXT': [{ type: TYPES.TXT, data: `dnslink=/ipfs/${CID}` }]
+  }).resolve('warmed.14898')
+  assert.equal(out.cid, CID)
+  assert.equal(out.origin, `https://origin.example/ipfs/${CID}`)
+})
+
 test('DoH: an ipns DNSLink is an ipns pointer, and a name with neither still resolves its address', async () => {
   const named = await dohFor({ '_dnslink.named.14898:TXT': [{ type: TYPES.TXT, data: `dnslink=/ipns/${KEY}` }] }).resolve('named.14898')
   assert.equal(named.kind, 'ipns')
@@ -121,6 +130,11 @@ test('chain path: a site published the IPFS-Companion way (DNSLink only) opens',
     const pathed = await r.resolve('pathed.wrdnslink')
     assert.equal(pathed.cid, CID)
     assert.equal(pathed.path, '/docs')
+    // A stated origin beside a DNSLink-only pointer is carried, as over DoH.
+    const warmed = await r.resolve('warmed.wrdnslink')
+    assert.equal(warmed.cid, CID)
+    assert.equal(warmed.dnslink, true)
+    assert.equal(warmed.origin, `https://origin.example/ipfs/${CID}`)
   }))
 
 test('chain path: both records agree → one pointer; both disagree → a conflict, nothing rendered', () =>

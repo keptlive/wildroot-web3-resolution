@@ -334,20 +334,60 @@ table decides, so every resolution path agrees regardless of how a server
 happened to order them. An implementation **MUST** use a single precedence table
 for every path.
 
-### 6.3 DNSLink
+### 6.3 DNSLink, the second pointer source
 
-DNSLink (`_dnslink.<name> TXT dnslink=/ipfs/<cid>` or `/ipns/<key>`) is the
-ecosystem's convention: kubo, Brave, IPFS Companion and the public gateways all
-read it.
+DNSLink (`_dnslink.<name> TXT dnslink=/ipfs/<cid>` or `/ipns/<key>`, either with
+a trailing path) is the ecosystem's convention: kubo, Brave, IPFS Companion and
+the public gateways all read it, and for most published IPFS sites it is the
+*only* pointer record there is.
 
-- An implementation **SHOULD** read `_dnslink.<name>` as a second pointer source
-  when the name itself carries no `ipfs=`.
-- The reference implementation **writes** DNSLink and **does not read it**
-  (IP-4). A Handshake site published by someone else with only a DNSLink
-  therefore resolves here as an address-record site, or as unregistered.
-- When writing, `dnslink=/ipns/<key>` **SHOULD** be preferred over
-  `dnslink=/ipfs/<cid>`: an IPNS-valued DNSLink never has to be rewritten, while
-  a CID-valued one is a DNS write on every publish.
+**It is read here, as a second pointer source of equal standing.** Both records
+are asked for on every resolution that reads pointers at all — the name's own
+`TXT` and `_dnslink.<name>` — on the authoritative-DNS route, where the DNSLink
+query follows the pointer query, and on the DoH route, where the two are asked
+in parallel. The full rules belong to Chapter 1 (`../handshake/SPEC.md` §6.5d–e
+and §10.1); what matters in this chapter is:
+
+- **The address space is the same.** A `dnslink=/ipfs/<cid>` value is parsed by
+  the same `CID_RE` an `ipfs=` value is, and `dnslink=/ipns/<key>` by the same
+  `IPNS_RE`, so the two carriers cannot disagree about what a valid address is
+  (§6.1, §6.4). A value that fails its shape check is **not a pointer**, and it
+  **MUST NOT** cause a fall-through to the name's address records.
+- **Only `/ipfs/` and `/ipns/` are pointers.** Another DNSLink namespace
+  (`/hyper/`, a nested `/dnslink/`) is not one here. A trailing path is carried
+  with the pointer.
+- **One value per name.** Where several `dnslink=` values parse, the first in
+  record order wins, which is what every other DNSLink reader does.
+- **The same proof obligations as `ipfs=`.** On a DNSSEC-signed zone the
+  `_dnslink` RRset validates to the on-chain DS anchor or the resolution fails,
+  and its **absence** is proven before an address record is consulted. Reading a
+  second pointer source without the second denial proof would add a rung to the
+  spine's §11.3 downgrade ladder — withhold `_dnslink.<name>` and a
+  content-addressed site walks down to an address — instead of closing a hole.
+- **Disagreement is surfaced, never resolved by precedence.** Either record
+  alone is the pointer; the two agreeing (same kind, same address) is the normal
+  case for a name this implementation published, and is recorded so an interface
+  can say the pointer came from the DNSLink record; the two naming **different**
+  content is a `pointer-conflict` (§11) and nothing is fetched. The precedence
+  table of §6.2 ranks pointer *kinds* at one name; it is not a tie-breaker
+  between two records that contradict each other, and using it as one would let
+  whoever controls one of the two records decide the answer.
+
+**What the read buys is interoperation in both directions.** A site published
+the ordinary IPFS way — IPFS Companion, kubo, a gateway's publish flow, no
+`ipfs=` anywhere — opens here unchanged. A site published by this
+implementation, which writes both records, opens in every one of those clients.
+
+When writing, `dnslink=/ipns/<key>` **SHOULD** be preferred over
+`dnslink=/ipfs/<cid>`: an IPNS-valued DNSLink never has to be rewritten, while a
+CID-valued one is a DNS write on every publish.
+
+**What is still not settled is the other direction of the same convention:**
+whether `ipns://<domain>` — a domain in an IPNS path, resolved as a DNSLink by
+the *node* rather than by this stack — works at all when the daemon is
+configured with `DNS.Resolvers: {}` (`../../DEVIATIONS.md`, Chapter 3 §2.4, and
+IP-D8). That path is a second, node-side DNSLink reader whose behaviour under
+this implementation's own privacy configuration is untested.
 
 ### 6.4 The EIP-1577 carrier
 
@@ -388,10 +428,13 @@ them are ours.
 1. **Resolve the name** — chain proof, then the authoritative walk or the `_op`
    route, with DNSSEC validation anchored to the on-chain DS. Spine §6.
 2. **Assemble the TXT strings** with the RFC 1035 §3.3.14 join rule, then take
-   the winning pointer by precedence (§6.2).
-3. If the winner is `ipfs`, and the same TXT set contains a valid `car=`, attach
+   the winning pointer by precedence (§6.2) — from the name's own records.
+3. **Read the DNSLink record** at `_dnslink.<name>` under the same rules
+   (§6.3), and merge: either source alone is the pointer, agreement yields it,
+   disagreement is a `pointer-conflict` and nothing is fetched.
+4. If the winner is `ipfs`, and the same TXT set contains a valid `car=`, attach
    the **stated origin** to the resolution. It is carried, never resolved to.
-4. **The result is `kind: 'ipfs'` with a CID (and possibly an origin), or
+5. **The result is `kind: 'ipfs'` with a CID (and possibly an origin), or
    `kind: 'ipns'` with a key.** In both cases the name's address records
    (`A`, `SYNTH4`, `GLUE4`) are **NOT** consulted: the name resolves into this
    namespace and stays there.
@@ -454,6 +497,12 @@ location from which an archive of *that* CID can be fetched.
   nowhere.
 - The origin is attached to an `ipfs` pointer and to no other kind: an Arweave
   or torrent pointer with a `car=` beside it carries no origin.
+- `car=` lives at the name whichever record the pointer came from, so an
+  implementation **MUST** attach it to a pointer read from the name's DNSLink
+  record too. The reference implementation does so on both routes (the
+  authoritative path attaches the origin after the two sources are merged; the
+  DoH path reads it from the name's strings after the merge), so a DNSLink-only
+  site with a `car=` beside it warms from its origin exactly as an `ipfs=` site.
 - A name that states no origin **MAY** fall back to a table mapping a TLD to a
   known gateway. The reference implementation carries one such entry, for
   `.pinthis` names, which is a transitional artefact of names published before
@@ -527,7 +576,7 @@ present these as equivalent:
 | bytes ↔ CID | the hash. Unconditional. |
 | `ipfs=` on a name ↔ that name | the spine's chain proof, and the DNSSEC validation of the TXT record if the zone is signed |
 | `ipns://<key>` ↔ a CID | an **IPNS record**: a signature by the key, with a sequence number and a validity window — resolved and checked by the node, not by this stack (IP-3) |
-| a DNSLink ↔ a CID | ordinary DNS, with whatever DNSSEC the zone has |
+| a DNSLink ↔ a CID | ordinary DNS, with whatever DNSSEC the zone has. On a Handshake name that is the spine's chain proof plus the validation of the `_dnslink` RRset to the on-chain DS, and the proof of its absence where there is none (§6.3) — the same standing as an `ipfs=` record, because it is the same DNS answer |
 | an `ipld://` path traversal | the hash, at every link |
 | a `pubsub://` topic | **nothing.** A libp2p publisher signature at best; no content address exists |
 | a `car=` origin ↔ the archive | **nothing, deliberately.** A hint; the CID check is what protects the reader |
@@ -572,8 +621,9 @@ Every failure below is a refusal **inside this namespace**. None of them
 |---|---|---|
 | `bad-address` | the host is not a CID / not an IPNS key | refused before any retrieval |
 | `unsupported-pointer` | the name's pointer is a codec this build cannot fetch (e.g. Swarm) | `501`, naming the protocol, with an explicit statement that the seller's nameservers were **not** then consulted |
+| `pointer-conflict` | the name's own pointer record and its DNSLink record name **different** content (§6.3) | `502`, naming both pointers and saying the two records must agree; neither is fetched and neither is preferred |
 | `no-node` | no IPFS node is available | `501` "this name points at IPFS content but no IPFS daemon is running" |
-| `anonymized` | an anonymising proxy is on, and the node dials peers over a path it cannot cover | `503`, refusing rather than leaking the real address (spine §11.6) |
+| `anonymized` | an anonymising proxy is on, and the local node's libp2p traffic — the CIDs it asks for **and the CIDs it announces having** — is outside what that proxy covers | `503`, refusing rather than leaking the real address (§12.4, spine §11.6) |
 | `first-byte-timeout` | the blocks did not arrive | `504` after 45 s — a bounded, diagnosable answer instead of a hang |
 | warm states | `not-ours`, `no-node`, `present`, `warmed`, `windowed`, `too-large`, `failed`, `disabled` | **never** an error: a warm that could not happen is logged and the ordinary fetch proceeds |
 
@@ -601,7 +651,8 @@ guard that used to refuse two hundred characters of junk starts accepting it
 follows assumes it is hostile:
 
 - It is fetched over HTTPS only, so the capability in the URL is not handed to
-  the network.
+  the network, and through the **injected** fetch, so it rides whatever proxied
+  session the embedder configured rather than a platform default (§12.4).
 - What comes back is imported into the node's blockstore, where **every block is
   hash-checked**. Blocks that are not what they claim do not enter.
 - The archive is **not pinned**, so an unreferenced import is garbage-collected
@@ -630,7 +681,24 @@ which.
 Asking the DHT for a CID tells peers which content is being read, from an
 address no HTTP proxy covers. That is why the reference implementation refuses
 an IPFS-served name outright while anonymisation is on rather than serving it
-over a path that would leak. It is also why the local node is configured with
+over a path that would leak.
+
+**One part of this path is already private, and the refusal still stands. The
+reason is worth stating exactly.** The `car=` warm (§8) is an HTTPS fetch made
+through the fetch implementation the embedder injects, so it rides the proxied
+session like any other HTTPS request: that leg leaks nothing under anonymisation
+and needs no gate. What it does is **import blocks into the local node**, and a
+node holding blocks *announces* them — it publishes provider records for what it
+has, over the same libp2p connections no HTTP proxy covers. So a fetch that is
+private on the way in creates an advertisement on the way out, from the real
+address, naming exactly the content just read. Serving the page also means
+asking the node for the CID, which is a second reason. The gate therefore stays
+where it is — on the `ipfs=` branch, before the warm — and an implementation
+**MUST NOT** conclude from "the warm fetch is proxied" that the name can be
+served. Closing the gap means stopping the node from routing at all while
+anonymisation is on (`IP-D9`), not moving the gate.
+
+It is also why the local node is configured with
 **no delegated routers and no delegated publishers**: a delegated router would
 hand one company the list of every CID a person reads, and a delegated
 publisher the list of everything a person publishes. The `car=` warm is the

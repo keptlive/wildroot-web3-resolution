@@ -11,8 +11,8 @@
  * SPEC §6. The interface is handed the plan the engine was CONFIGURED with
  * (`effectiveDnsPlan()`), never the static configuration, so every wording
  * below is driven from a `planDnsTransport()` result rather than from a
- * `dns` block. One test pins an aggregation rule the code does not implement
- * where the security panel reads it (../../DEVIATIONS.md IC-10).
+ * `dns` block. A plaintext connection aggregates to its own verdict, `open`,
+ * in the model (summarize), so the panel and the lock cannot disagree on it.
  */
 
 import test from 'node:test'

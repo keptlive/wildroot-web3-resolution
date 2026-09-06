@@ -320,10 +320,12 @@ export function classify (input, opts = {}) {
   // merely starts with `npub` stays a name. `nsec` is routed on purpose: the
   // nostr handler answers with the "that is a PRIVATE KEY" page, whereas the
   // bare-label rule would have sent the secret to a resolver as a name.
-  if (/^(npub|note|nprofile|nevent|naddr|nsec)1[02-9ac-hj-np-z]{6,}$/i.test(raw)) {
-    const decoded = decodeNip19(raw.toLowerCase())
-    if (!decoded.error || /^nsec1/i.test(raw)) {
-      return { url: `nostr:${raw.toLowerCase()}`, scheme: 'nostr', namespace: NAMESPACES.NOSTR, explicit: false, reason: 'nip19-identifier' }
+  // A trailing slash — the address bar adds one — is not part of the identifier.
+  const nip19 = raw.replace(/\/+$/, '')
+  if (/^(npub|note|nprofile|nevent|naddr|nsec)1[02-9ac-hj-np-z]{6,}$/i.test(nip19)) {
+    const decoded = decodeNip19(nip19.toLowerCase())
+    if (!decoded.error || /^nsec1/i.test(nip19)) {
+      return { url: `nostr:${nip19.toLowerCase()}`, scheme: 'nostr', namespace: NAMESPACES.NOSTR, explicit: false, reason: 'nip19-identifier' }
     }
   }
 

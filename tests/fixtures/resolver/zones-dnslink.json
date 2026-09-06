@@ -52,6 +52,16 @@
         "name": "site",
         "type": "A",
         "value": "203.0.113.30"
+      },
+      {
+        "name": "warmed",
+        "type": "TXT",
+        "value": "car=https://origin.example/ipfs/bafkreigph5cub32tn4ph2au3izioyxnr37lvthzdug4xlmhlbnxj7h3mqu"
+      },
+      {
+        "name": "_dnslink.warmed",
+        "type": "TXT",
+        "value": "dnslink=/ipfs/bafkreigph5cub32tn4ph2au3izioyxnr37lvthzdug4xlmhlbnxj7h3mqu"
       }
     ]
   }

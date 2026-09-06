@@ -117,7 +117,8 @@ the transport *policy*; the resolution itself is somebody else's, by design.
 This is rule 2 of the spine's namespace selection, and it is the whole rule. It
 is decided by data — membership of one set — and not by code. The set is
 `../../src/icann-tlds.cjs`; the classifier is `classifyHost()` in
-`../../src/router.js` (browser: `src/protocols/router.js:306-335`).
+`../../src/classify-host.cjs:87-116` — one implementation, loaded by the
+router and by the address bar (browser: `src/hns/classify-host.cjs`).
 
 An implementation **MUST NOT** apply any fallback across this boundary in
 either direction. An ICANN name that fails to resolve is an ICANN failure; it
@@ -165,10 +166,10 @@ Before the final label is compared against the set, a host **MUST** be:
 - **stripped of any `:port`** and of any path, query or fragment. The port is
   stripped only from a host with exactly one colon, or from a bracketed host,
   so that `::1` stays an address rather than becoming a host with a port of `1`
-  (`bareHost()`, `src/protocols/router.js:271-282`);
+  (`bareHost()`, `../../src/classify-host.cjs:55-64`);
 - **converted to A-labels** — RFC 5890/5891. In this implementation the
   conversion is done by handing the host to the WHATWG URL host parser and
-  reading `hostname` back (`asciiTld()`, `src/protocols/router.js:284-293`),
+  reading `hostname` back (`asciiTld()`, `../../src/classify-host.cjs:68-76`),
   which is UTS-46 as the URL Standard defines it rather than IDNA2008. The
   bundled set holds IANA's published punycode, so `пример.рф` matches
   `xn--p1ai` and an emoji label matches nothing and is Handshake's. The
@@ -238,7 +239,7 @@ returns `null` and the caller decides. In `classify()`, the ICANN set is
 consulted a second time and used **in reverse**: a bare `com`, `org` or `app`
 is a word somebody is part-way through typing and becomes a **search**; any
 other bare label (`hnshosting`, `14898`, `🤝`) is a Handshake name
-(`src/protocols/router.js:436-465`). An implementation **MUST NOT** turn a bare
+(`../../src/router.js:383-409`). An implementation **MUST NOT** turn a bare
 label into an ICANN lookup: there is no such name.
 
 The same reversal is what makes whitespace safe. `classifyHost` returns `null`
@@ -249,24 +250,32 @@ would become a Handshake lookup.
 ### 2.6 The rule must be applied on every path
 
 An implementation **MUST** apply the same classification wherever a host is
-classified, and **MUST** hold each list it depends on in exactly one place. In
-this implementation there are four consumers of the classification and three of
-the reserved-name list, and they agree by construction:
+classified, and **MUST** hold both the rule and each list it depends on in
+exactly one place. In this implementation every consumer but one calls the
+same function:
 
 | Path | Function | Reads |
 |---|---|---|
-| typed input / omnibox decision | `classify()` → `classifyHost()` | the ICANN snapshot and the reserved list |
-| omnibox suggestion rows | `src/ui/omni-box.js` (CommonJS, cannot import the router) | the same two `.cjs` files |
-| `http(s)`→`hns` navigation rewrite | `rewriteToHns()` → `isHnsHost()` → `classifyHost()` | via the router |
-| subresource guard (`onBeforeRequest`) | `rewriteToHns()` | via the router |
-| session-wide certificate verification | `isHnsHost()` | via the router |
-| WebSocket PAC script (runs inside the engine) | `src/hns/ws-proxy-pac.js`, which embeds the lists | the same two `.cjs` files |
+| typed input / omnibox decision | `classify()` → `classifyHost()` | `classify-host.cjs`, and through it both lists |
+| omnibox suggestion rows | `src/ui/omni-box.js` (CommonJS, cannot import the ES-module router) | `require`s the same `classify-host.cjs` |
+| `http(s)`→`hns` navigation rewrite | `rewriteToHns()` → `isHnsHost()` → `classifyHost()` | the same module |
+| subresource guard (`onBeforeRequest`) | `rewriteToHns()` | the same module |
+| session-wide certificate verification | `isHnsHost()` | the same module |
+| WebSocket PAC script (runs inside the engine) | `src/hns/ws-proxy-pac.js` — an ASCII-only copy of the rule, held to `classifyHost()`'s answers by test | embeds the two lists |
 
-The two lists are `../../src/icann-tlds.cjs` and `../../src/reserved-names.cjs`,
-each a CommonJS module so that the ES-module router, the CommonJS omnibox and
-the generated PAC text can all read the same bytes. A list kept in two places
-is a list that disagrees with itself, and on this boundary the disagreement is
-a disclosure.
+The rule itself is `../../src/classify-host.cjs`, written in CommonJS precisely
+so that the ES-module router and the CommonJS address bar can load the same
+bytes rather than each carrying a copy. The two lists it consults are
+`../../src/icann-tlds.cjs` and `../../src/reserved-names.cjs`, for the same
+reason.
+
+The one exception is the PAC script, which is a string evaluated inside the
+engine's network stack: it has no module loader and no URL parser, so it cannot
+call the shared rule and carries an ASCII-only form of it, held to the shared
+answer by a test that evaluates the generated script
+([Part II's `DEVIATIONS.md`](../router/DEVIATIONS.md) `RT-7`). A rule
+kept in two places is a rule that disagrees with itself, and on this boundary
+the disagreement is a disclosure.
 
 `rewriteToHns()` (`src/hns/hns-host.js:85-98`) returns `null` for every ICANN
 host, which is the mechanically checkable form of §7: an ICANN name never
@@ -535,7 +544,7 @@ network. IC-9.
 
 An ICANN page produces exactly two steps, in the four-state vocabulary of the
 spine's §4 (`icannNameStep()` and `schemeSteps()`,
-`../../src/trust-path.js:255-490`):
+`../../src/trust-path.js:256-511`):
 
 | Step | State | What it says |
 |---|---|---|
@@ -601,19 +610,28 @@ subdomain rule are right — `../../DEVIATIONS.md` §2 on that window.
 
 ### 6.3 Aggregating to a lock
 
-An ICANN page is **TRUSTED**, never **TRUSTLESS**, in the three-state scheme of
+An `https:` ICANN page is **TRUSTED**, never **TRUSTLESS**, in the scheme of
 the spine's §4.1. An implementation **MUST NOT** let an oblivious lookup
 upgrade the verdict: obliviousness is a privacy property and the lock is an
 integrity claim. A refused lookup (form 3) is a `failed` step, and the page
 aggregates to `failed`.
 
-`summarize()` returns `partial` for both `https:` and `http:` here, because it
-treats `none` and `unverified` alike as "weak". The spine's §4.1 says a
-plaintext connection aggregates to **OPEN**, and the address bar derives that
-separately (`src/index.js:1512-1513`) — but the security panel, which calls
-`summarize()` directly (`src/window.js:2766`), does not. IC-10. An
-implementation following this specification **MUST** implement the plaintext
-rule in the aggregation itself.
+An `http:` ICANN page is **OPEN**, and that is a verdict of the aggregation
+itself, not of a renderer. `summarize()` tests for a `Connection` step in state
+`none` *before* it collapses `none` and `unverified` together as "weak", and
+returns `{ state: 'open' }` — one of five verdicts: `verified`, `partial`,
+`open`, `failed`, `unknown`. So the padlock and the security panel behind it
+read the same verdict for a plaintext page instead of deriving it twice.
+
+An implementation **MUST** put the plaintext rule in the aggregation. Deriving
+it beside the indicator instead leaves the model saying that an `http:` page
+and an `https:` page have the same standing, and every other consumer of the
+model — a panel, an extension API, a log line — inherits that claim. This is
+also the reason the rule is stated as a `Connection` step of `none` rather than
+as "the scheme is http": an `hns://` name that resolves to an address with no
+TLSA pin and is loaded over plain HTTP reaches the same verdict by the same
+test, and a Tor onion service, whose page is plain HTTP *inside* an
+authenticated tunnel, deliberately reports `unverified` and does not.
 
 ---
 
@@ -670,37 +688,50 @@ list is configuration, never discovered. IC-11.
 ## 8. The one place we resolve an ICANN name ourselves
 
 There is exactly one exception to "we do not resolve ICANN names", and it is
-inside a **Handshake** resolution. When a Handshake zone delegates to a
-nameserver whose own name is an ICANN domain, or a CNAME inside a Handshake
-zone points at an ICANN host, the resolver needs that host's address and gets
-it from the runtime's OS resolver — `dns.lookup()` at
-`src/hns/resolver.js:360`, `:408` and `:903`.
+inside a **Handshake** resolution. Three points in a chain walk need the
+address of a host whose name is ICANN's: the name of a nameserver the chain
+delegated to, the name of a glue-less `NS` target, and the target of a `CNAME`
+inside a Handshake zone.
 
-Four properties of that path, all of which an implementation should know:
+That address comes from **one injected function**. The resolver takes a
+`lookup` in its constructor and every one of the three call sites goes through
+it (`../../src/resolver.js:226`, and the three uses at `:370`, `:417`, `:970`).
+The browser supplies `DoHResolver.addressOf` (`../../src/doh.js:222`) — its
+own DoH/ODoH client — in
+**every** mode, so the lookup rides the same encrypted, and where configured
+oblivious, transport as any other name this program resolves. There is no
+plaintext lookup left on the chain path.
 
-- It is the **least** protected DNS this browser does. `dns.lookup()` is
-  `getaddrinfo`: it does not use the engine's configured secure DNS, it does
-  not use the ODoH bridge, and it is not covered by any of §5. The ICANN name
-  goes out in the clear.
-- It is also the one DNS answer in this browser that is **not** checked against
-  the question that was asked. Every message the Handshake resolver parses
-  itself is — `assertAnswersTo(parsed, name, type)` is applied on the TCP path
-  and on every DoH and ODoH answer (`../../src/dns-query.js:342-349`,
-  `../../src/doh.js:69-71`), which matters most over DoH, where RFC 8484 §4.1
+Five properties of that path, all of which an implementation should know:
+
+- **The transport is the client's to choose, and the library's default is not
+  the good one.** With no `lookup` supplied, `HNSResolver` falls back to the
+  runtime's `dns.lookup()` — `getaddrinfo`, in the clear, outside the whole of
+  §5. That default exists so the module runs as a library under plain `node`,
+  and it means an integrator who takes this code and does not pass a `lookup`
+  gets exactly the disclosure the browser's own composition avoids. An
+  implementation **MUST** supply its own encrypted resolver here, and
+  **SHOULD** make the omission visible rather than silent (IC-16).
+- **This is not our oblivious path becoming a general resolver.** The lookup is
+  an ICANN name, resolved the way §5 resolves ICANN names; it inherits §5's
+  properties and §5's limits, including the bootstrap disclosure of §5.6.
+- **The answer is checked against the question.** Every DoH and ODoH message
+  the client parses goes through `assertAnswersTo(parsed, name, type)`
+  (`../../src/doh.js:71`, and `../../src/dns-query.js:342-400` on the
+  authoritative TCP path), which matters most over DoH, where RFC 8484 §4.1
   fixes the message id at zero and the question section is the only thing left
-  to match on. `dns.lookup()` returns an address rather than a message, so
-  there is nothing to check: the platform resolver is trusted to have asked
-  what we asked it to ask.
-- Its answer is **unvalidated**, and the resolution says so: an address
-  obtained this way is the OS resolver's word, and a CNAME to an ICANN host
-  makes the Handshake answer unauthenticated from that point.
-- Its answer **is** SSRF-guarded (`_nameserverFor`, `src/hns/resolver.js:325`,
-  and the CNAME path at `:909`), because that address is attacker-chosen in
-  exactly the way §7.3's is not.
+  to match on. The `dns.lookup()` default cannot be checked this way — it
+  returns an address, not a message — which is a second reason to replace it.
+- Its answer is **unvalidated**. Encrypted is not signed: an address obtained
+  this way is the resolver's word, DNSSEC or not, and a `CNAME` to an ICANN
+  host makes the Handshake answer unauthenticated from that point. The
+  resolution says so, and the trust panel's step says so.
+- Its answer **is** SSRF-guarded (`_nameserverFor` and the `CNAME` path,
+  `../../src/resolver.js`), because that address is attacker-chosen in exactly
+  the way §7.3's is not.
 
 This is a Handshake-side property with an ICANN-side consequence, which is why
-it is recorded in both chapters. IC-9 covers it together with the bootstrap
-lookups.
+it is recorded in both chapters.
 
 ---
 

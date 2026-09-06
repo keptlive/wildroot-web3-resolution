@@ -16,13 +16,16 @@ the Wildroot tree, and against `../../src/pointers.js` and
 
 ## 1. Deviations
 
-### AR-1. Bytes are never verified against the transaction id
+### AR-1. The BYTES are never verified against the transaction
 
 *SPEC §9.2 · `src/ar.js` (whole module)*
 
-**What.** No chunk proof is checked, `data_root` is never read, the transaction
-signature is never fetched, and `SHA-256(signature) == id` is never recomputed.
-The gateway is trusted like any HTTPS host.
+**What.** No chunk proof is checked and `data_root` is never compared with
+anything. The transaction *header* is checked — fetched from a second gateway
+and required to hash to the identifier (SPEC §9.1.1), which is where the
+`data_root` arrives, authenticated — and then the bytes that were served are
+not measured against it. For the content itself the answering gateway is
+trusted like any HTTPS host.
 
 **The standard says.** An Arweave transaction id is the SHA-256 digest of the
 transaction's signature, and a format-2 transaction's data is committed by the
@@ -32,30 +35,34 @@ a bundled data item: *"The id of the DataItem, is the SHA256 digest of this
 signature."*). The identifier is therefore checkable, and a client that does
 not check it is trusting whoever answered.
 
-**Why.** Stated honestly in the module header from the first version: full
-chunk verification is a real amount of work — the transaction header, the chunk
-endpoint, the Merkle proof format — and the intermediate step, a second-gateway
-spot check, has not been built either. The scheme's namespace-table row records
-`status: 'partial'` rather than `live` for exactly this reason, which is the
-model this file wants: the deviation lives in the code's own metadata, not only
-in prose.
+**Why.** Full chunk verification is a real amount of work — the chunk endpoint,
+the Merkle proof format, and a bounded buffer to hash against — where the header
+check was one hash and one request. The cheap half was therefore done first
+(AR-D1), and the expensive half is what is left. The scheme's namespace-table
+row still records `status: 'partial'` rather than `live` for exactly this
+reason, which is the model this file wants: the deviation lives in the code's
+own metadata, not only in prose.
 
-**Consequence.** SPEC §11.7: a successful `ar://` fetch establishes only that a
+**Consequence.** SPEC §11.7: a successful `ar://` fetch establishes that a
 TLS-authenticated host from a list we shipped returned these bytes for this
-identifier. A hostile or compromised gateway serves arbitrary bytes and nothing
-notices. Contrast `ipfs://`, where the local node checks every block hash, and
-`bittorrent://`, where the infohash does it — Arweave is the one content scheme
-in this browser whose bytes are not checked at all. What limits the damage is
-that the claim is not overstated anywhere: the trust panel calls the content
-step `unverified`, the aggregate verdict is `partial`, and the scheme table
-says `partial` (SPEC §9.2).
+identifier, and — with the header check — that a second, independent host agrees
+the identifier names a real transaction. Neither is a statement about the bytes.
+A hostile or compromised gateway still serves arbitrary content for the right
+transaction and nothing notices. Contrast `ipfs://`, where the local node checks
+every block hash, and `bittorrent://`, where the infohash does it — Arweave is
+the one content scheme in this browser whose bytes are not checked. What limits
+the damage is that the claim is not overstated anywhere: the trust panel calls
+the content step `unverified`, the aggregate verdict is `partial`, the scheme
+table says `partial`, and the response header says `header`, never `bytes`
+(SPEC §9.2, §9.1.1).
 
-**Status: OPEN.** The order of work is AR-D1 first — a header fetched from a
-*second* gateway plus one SHA-256, which needs no Merkle code and closes most of
-the gap for the content a browser actually loads — and full chunk verification
-after it. The label may say `verified` only for content that was actually
-checked, and never for content above whatever size threshold the cheap check
-uses.
+**Status: OPEN**, and confined to the bytes: the header step of AR-D1 holds and
+the `data_root` step does not exist. What remains is to hash a buffered single-chunk body
+against the `data_root` the header delivers, with a size threshold, and to
+fall back to a cross-gateway body comparison above it — then full chunk proofs.
+The trust label may say `verified` only for content that was actually checked,
+and never for content the threshold skipped: a check that silently stops
+applying above a size is worse than no check, because the label does not stop.
 
 ---
 
@@ -134,8 +141,11 @@ reimplements it will be subtly behind. The argument against: it makes the
 **path→id mapping** gateway-trusted on top of the bytes being gateway-trusted,
 and it means the multi-gateway failover of §6.1 carries no cross-check
 whatsoever, because the client never learns which id a gateway resolved a path
-to. Even a client that verified bytes (AR-1) would still be trusting the
-mapping.
+to. This is also exactly why the header check is skipped for a manifest path
+(SPEC §9.1.1): there is no single transaction the second gateway could be asked
+about, so a site served through a manifest — which is most published sites — gets
+the weakest form of every guarantee in this chapter. Even a client that verified
+bytes (AR-1) would still be trusting the mapping.
 
 We do not know whether the right answer is "parse manifests client-side" (real
 work, real drift risk) or "keep delegating and be loud about it" (what we do).
@@ -202,27 +212,32 @@ us.
 
 ## 3. Open design items
 
-### AR-D1. Cheap verification, before full chunk proofs
+### AR-D1. The `data_root` half of the cheap check
 
-Full verification (AR-1) is the transaction header, the chunk endpoint and the
-Merkle proof format. There is a much smaller step that closes most of the gap
-for the content this browser actually loads, and doing it first is what makes
-the big one optional rather than blocking.
+This item had two steps and the first is built. The header is fetched from a
+gateway other than the one that served the bytes and required to hash to the
+identifier (SPEC §9.1.1, `headerMatchesId`, `tests/arweave-header.test.js`); a
+mismatch is a 502 in the Arweave namespace, and `X-Arweave-Verified` reports
+which of `header` and `none` happened.
 
-**Recommendation.** After a successful fetch, when the response is small enough
-to buffer (a threshold — 4 MB covers a manifest and most pages): fetch
-`GET <a DIFFERENT gateway>/tx/<txid>` for the transaction header; recompute
-`SHA-256(base64url-decode(signature))`, base64url-encode it and require it to
-equal the identifier — that alone proves the header is the transaction the id
-names, using nothing but a hash; then, for a single-chunk transaction, hash the
-body against `data_root`, falling back for a multi-chunk transaction to
-comparing the body with the same path fetched from the second gateway. The
-header **must** come from a different gateway than the bytes, because a lying
-gateway would otherwise supply the `data_root` too. Prove it with a mock
-gateway returning correct-looking bytes for a tampered header, and a second
-returning tampered bytes for a valid header: both must fail closed, and the
-failure must be an Arweave-namespace failure, never a fall-through. Only then
-may the trust step change (AR-1, AR-U5).
+**What is left.** The header carries a `data_root`, authenticated, and nothing
+compares the bytes with it. Recommendation, in order: buffer the body when it is
+small enough (a threshold — 4 MB covers a manifest and most pages) and hash it
+against `data_root` for a single-chunk transaction; above the threshold, or for a
+multi-chunk transaction, compare the body with the same path fetched from the
+second gateway; then, and only if it is worth it, the chunk endpoint and the
+Merkle proof format for the general case. Prove it with a mock gateway returning
+tampered bytes for a valid header, which must fail closed as an Arweave-namespace
+failure and never as a fall-through — the mirror of the case
+`tests/arweave-header.test.js` already pins. The response header gains a `bytes`
+value at that point and not before, and only then may the trust step change
+(AR-1, AR-U5).
+
+**One thing to preserve.** The header request must keep coming from a gateway
+other than the one that served the bytes, for the same reason it does now: a
+lying gateway would supply a matching `data_root` too. When the body comparison
+is added, the *bytes* must come from the two hosts in the other order, or one
+operator answers for both halves of its own proof.
 
 ### AR-D2. `Config.arOptions` has no schema, default or validation
 

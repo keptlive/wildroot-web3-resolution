@@ -64,7 +64,7 @@ What N should be is §2.4.
 ---
 
 ### IC-2. ICANN wins a label that is also a Handshake TLD, and every other alt-root is Handshake's
-*`../../src/router.js:306-335`*
+*`../../src/classify-host.cjs:87-116`*
 
 **What.** Two rules, one decision procedure. A dotted name whose final label is
 in the IANA snapshot is an ICANN domain, even if the same string is a
@@ -266,9 +266,9 @@ standing is an uncertainty rather than a decision: §2.2.
 ---
 
 ### IC-9. The lookups that make the private path possible are not themselves private
-*`../../src/odoh-bridge.js`, `../../src/odoh.js`, `src/hns/resolver.js:360`, `:408`, `:903`*
+*`../../src/odoh-bridge.js`, `../../src/odoh.js`*
 
-**What.** Three classes of ICANN lookup escape the whole of SPEC §5:
+**What.** Two classes of ICANN lookup escape the whole of SPEC §5:
 
 1. **Bootstrap.** The bridge must resolve the relay and target hostnames
    (`odoh-relay.numa.rs`, `odoh.hns.one`) to open HTTPS connections to them.
@@ -276,65 +276,29 @@ standing is an uncertainty rather than a decision: §2.2.
    the engine's configured secure DNS and not through the bridge. The same is
    true of the DoH pool's hostnames in the non-bridged case.
 2. **Configuration refresh**, hourly, for the same reason.
-3. **Inside a Handshake resolution.** When a Handshake zone's nameserver is
-   itself an ICANN host, or a CNAME inside a Handshake zone points at one, the
-   resolver calls `dns.lookup()` directly (SPEC §8).
+
+A Handshake resolution's own ICANN lookups — a nameserver's name, a glue-less
+`NS` target, a `CNAME` target — are **not** in this list: they go through the
+resolver's injected `lookup`, which the browser sets to its own DoH/ODoH client
+in every mode (SPEC §8). The one thing about that injection which belongs
+beside the two entries above is its *library default*, and that is IC-16.
 
 **The standard says.** RFC 9230's privacy analysis assumes the client reaches
 the relay without disclosing the query; it says nothing about how the relay's
 own name is resolved. RFC 8484 §8.2 warns that a DoH client's bootstrap can
 itself be a disclosure.
 
-**Why.** The bridge cannot resolve its own upstream through itself, and the
-Handshake resolver needs an address for a nameserver whose name is ICANN's.
-Neither has a chicken-and-egg-free answer at the moment it is needed.
+**Why.** The bridge cannot resolve its own upstream through itself. There is no
+chicken-and-egg-free answer at the moment it is needed.
 
-**Consequence.** The first two disclose *which privacy infrastructure this
-browser uses* to the local network in the clear, once per session and once per
-hour. They do not disclose which sites are visited. The third discloses one
-ICANN name per Handshake resolution that needs it, in the clear — this is the
-least-protected DNS the browser performs, and its answer is unvalidated and
-unchecked against the question (though it *is* SSRF-guarded, unlike IC-13's
-case).
+**Consequence.** These disclose *which privacy infrastructure this browser
+uses* to the local network in the clear. What bounds it is that they are two
+fixed hostnames, asked once a session and once an hour: no name a user typed
+is in them, and there is nothing per navigation.
 
-**Status: OPEN**, and under-examined. Cases 1 and 2 are not hard: the relay and
-target addresses can be pinned in the configuration, or resolved through the
-engine once it is configured, which removes the per-session and per-hour
-disclosure entirely. Case 3 is harder and belongs to the Handshake chapter — a
-resolver that is asked for an ICANN nameserver's address has to ask somebody.
-We recommend doing 1 and 2, and documenting 3 rather than pretending it away.
-
----
-
-### IC-10. `summarize()` does not open the lock on a plaintext connection
-*spine SPEC §4.1 · `../../src/trust-path.js:492-508`*
-
-**What.** `summarize()` treats `none` and `unverified` alike as "weak", so an
-`http:` page and an `https:` page both aggregate to `partial` with the same
-sentence.
-
-**The standard says.** Our own spine, §4.1: a plaintext connection aggregates
-to **OPEN**. This is a deviation from this specification, not from anybody
-else's.
-
-**Why.** The rule exists in the address bar, where the lock is drawn: `secure`
-is false when the Connection step is `none` (`src/index.js:1512-1513`), so the
-padlock itself is right and an `http://` page never gets a closed lock. The
-security panel calls `summarize()` directly (`src/window.js:2766`) and gets the
-aggregate without that rule.
-
-**Consequence.** The panel lists the plaintext step but heads the page with the
-same verdict an HTTPS page gets. Two implementations of one rule, and only one
-of them has it. Nothing user-visible is wrong today, because the panel's
-rendering happens to agree; the model is what is wrong.
-
-**Status: OPEN.** The rule belongs in the aggregation, not in one renderer: a
-`Connection` step in state `none` should make `summarize` return a fifth
-verdict (`open`), and `src/index.js`'s derivation should then become
-`state !== 'open' && state !== 'failed'` and stop being a second
-implementation. Both renderers need a case for the new verdict, which is the
-point — today the third state of the spine's §4.1 exists in one renderer and
-not in the model. IC-D2.
+**Status: OPEN**, and not hard: the relay and target addresses can be pinned in
+the configuration, or resolved through the engine once it is configured, which
+removes the per-session and per-hour disclosure entirely.
 
 ---
 
@@ -377,7 +341,7 @@ constraints until the engine offers them.
 ---
 
 ### IC-12. Internationalized names cross the boundary through UTS-46, not IDNA2008
-*RFC 5890 / 5891, UTS #46 · `../../src/router.js:284-293`*
+*RFC 5890 / 5891, UTS #46 · `../../src/classify-host.cjs:68-76`*
 
 **What.** A Unicode host is converted to A-labels by handing it to `new URL()`
 and reading `hostname` back, which is UTS-46 as the WHATWG URL Standard
@@ -491,6 +455,41 @@ block, with the cost stated in the hint text, and a textarea for `dns.servers`;
 make `dns.mode` a `<select>` so the class of error disappears rather than being
 reported. The plumbing exists — `dns.mode` is already written through the
 settings preload. IC-D3.
+
+---
+
+### IC-16. The resolver's default `lookup` is the OS resolver, in the clear
+*`../../src/resolver.js:226` · SPEC §8*
+
+**What.** The three places a chain walk needs an ICANN host's address all go
+through one injected function, `HNSResolver`'s `lookup`. The browser passes its
+DoH/ODoH client, so nothing goes out in the clear. **The constructor's default
+does not**: with no `lookup` supplied it is
+`(host) => dns.lookup(host, { family: 4 })` — `getaddrinfo`, outside the whole
+of SPEC §5.
+
+**The standard says.** Nothing about a library's defaults. RFC 8484 §8.2 is the
+nearest: a client that can resolve privately and does not has disclosed the
+query.
+
+**Why.** The module has to run as a library under plain `node` — that is how
+its own test suite drives it — and a library cannot assume a DoH client. The
+default is the one that always works.
+
+**Consequence.** The protection is a property of the **composition**, not of
+the module. An integrator who takes `resolver.js` and omits one constructor
+argument discloses one ICANN name in the clear for every Handshake resolution
+that walks to an ICANN nameserver or follows a `CNAME` out of the zone.
+Nothing warns them, and the resolution's own trust reporting cannot tell the
+two apart — an address is the resolver's word either way, so the panel's step
+reads the same whether the lookup was encrypted or not.
+
+**Status: OPEN.** Two candidate fixes, and we prefer the first: make `lookup`
+**required** and let construction fail without it, so the decision is taken
+once and visibly; or keep the default and record on each resolution which
+transport the lookup used, so the trust step can say "in the clear" when it
+was. Either is better than a default whose safety depends on a caller reading
+a comment.
 
 ---
 
@@ -624,19 +623,6 @@ first to the second on a SERVFAIL as well as on a transport failure, how long
 it remembers a failing one — and only then change `planDnsTransport` to
 `servers = [bridge.template, ...servers]`. The measurement is also what §2.4
 needs, so it pays for itself twice.
-
-### IC-D2. Put the plaintext rule in the aggregation, not in one renderer
-
-The spine's §4.1 says a plaintext connection aggregates to OPEN. `summarize()`
-does not implement that; the address bar re-derives it and the security panel
-does not (IC-10). Nothing user-visible is wrong today, and that is exactly why
-it will stay wrong.
-
-**Recommendation.** Return a fifth verdict from `summarize()` when the
-`Connection` step is `none`, give both renderers a case for it, and reduce
-`src/index.js`'s `secure` derivation to a test on that verdict. The change is
-small; the reason to make it is that a rule implemented twice is a rule that
-will be implemented once.
 
 ### IC-D3. Put the obliviousness switch and the resolver pool in the settings page
 

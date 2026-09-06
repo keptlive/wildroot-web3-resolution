@@ -178,126 +178,6 @@ keep the AppView only as a last resort reported as unverified. See DI-D1.
 
 ---
 
-### DI-6. A second `did:web` reader, in `bsky.js`, diverges from the specified one
-
-**What.** `resolvePds` (`src/bsky.js`) builds the document URL as
-`` `https://${did.slice('did:web:'.length)}/.well-known/did.json` `` — the
-method-specific identifier spliced in verbatim. It never replaces `:` with `/`
-and never percent-decodes, and it applies no host guard.
-
-**The standard says.** The did:web method specification §3.2 gives the read
-algorithm: replace `:` with `/`, percent-decode a port's `%3A`, append
-`.well-known` only when there is no path, then `did.json`.
-`src/did-protocol.js` implements exactly that and is checked against the
-specification's published examples (SPEC §5.3).
-
-| DID | `did-protocol.js` fetches | `bsky.js` fetches |
-|---|---|---|
-| `did:web:example.com` | `https://example.com/.well-known/did.json` | same |
-| `did:web:example.com%3A3000` | `https://example.com:3000/.well-known/did.json` | `https://example.com%3A3000/.well-known/did.json` |
-| `did:web:example.com:user:alice` | `https://example.com/user/alice/did.json` | `https://example.com:user:alice/.well-known/did.json` |
-
-**Why.** Two independent implementations of the same three lines, written for
-two callers, neither aware of the other.
-
-**Consequence.** The divergence *is* the defect, over and above the wrong URLs:
-a DID that resolves one way for the identity panel and another way for the
-sign-in path is the class of inconsistency nobody can reproduce. `bsky.js` sets
-`redirect: 'error'` and a 10-second deadline, so the transport half is sound;
-what it lacks is the URL algorithm and the public-host guard that
-`did-protocol.js` applies before connecting. Pinned by
-`tests/atproto-identity.test.js` ("DI-6").
-
-**Status: OPEN.** Import `didWebUrl` and `isSafeDidWebHost` from
-`did-protocol.js` and delete the second reader. One builder, one guard, one
-place to fix. See DI-D2.
-
----
-
-### DI-7. The `#atproto_pds` service `type` is not checked
-
-**What.** The PDS is the `serviceEndpoint` of the first `service` entry whose
-`id` **ends with** `#atproto_pds`, accepted if it begins `https://`
-(`src/bsky.js`). The suffix match means an entry with id
-`https://elsewhere.example#atproto_pds` also matches.
-
-**The standard says.** The AT Protocol DID requirements fix both fields: the
-service `id` is `#atproto_pds` and its `type` is
-`AtprotoPersonalDataServer`.
-
-**Why.** The suffix match is deliberate — a service `id` may legitimately be
-written as a relative fragment or as an absolute URL with that fragment — and
-the `type` check was simply not added alongside it.
-
-**Consequence.** Small. The document is unverified for `did:plc` anyway (DI-2),
-and a document that can lie about the type can lie about the endpoint. It
-matters as a divergence from a specification a client is supposed to be strict
-about, and it would catch an honestly malformed document. Pinned by
-`tests/atproto-identity.test.js` ("DI-7").
-
-**Status: OPEN.** Check the `type` alongside the id suffix; one condition.
-
----
-
-### DI-8. `resolvePds` does not check the document's `id` against the DID asked for
-
-**What.** `resolvePds` (`src/bsky.js`) reads the PDS out of whatever document
-comes back, without comparing the document's `id` to the DID it asked for. The
-`did:` handler makes that comparison and refuses a mismatch with a 502 (SPEC
-§5.4); this reader does not make it at all.
-
-**The standard says.** W3C DID Core §7.1.3: a conforming resolver returns the
-DID document **for the input DID**. A document naming a different subject is
-not an answer to the question asked.
-
-**Why.** The check was added where DID resolution is the product (the `did:`
-handler) and not where it is a means to an end (finding a PDS to log in to).
-
-**Consequence.** A directory or a `did:web` host answering with somebody else's
-document hands back that document's PDS endpoint under the asked-for DID. The
-login that follows fails against the wrong host — loudly, which is the mitigation
-the code relies on elsewhere (DI-9) — but "where does this account live" is
-answered wrongly and silently for any caller that only reads the endpoint. It is
-a one-line check, made in the sibling module, missing here. Pinned by
-`tests/atproto-identity.test.js` ("DI-8").
-
-**Status: OPEN.** Compare the document's `id` and refuse a mismatch, as
-`did-protocol.js` does. See DI-D3.
-
----
-
-### DI-9. An unresolvable DID document silently becomes `bsky.social`
-
-**What.** `resolvePds` returns `{ did, pds: 'https://bsky.social' }` whenever
-the DID document cannot be fetched, cannot be parsed, names no `#atproto_pds`
-service, or names one whose endpoint is not `https://` — and for any DID method
-it does not support.
-
-**The standard says.** The AT Protocol DID resolution specification makes an
-unresolvable DID a resolution **failure**, not a default.
-
-**Why.** Stated in the code: *"wrong for self-hosters, correct for almost
-everyone, and `createSession` against the wrong host fails loudly rather than
-silently."*
-
-**Consequence.** The argument is sound for the path the function was written
-for — a login against the wrong PDS fails with an error the user sees — and it
-is precisely inverted for this product's audience. A self-hosted PDS is the
-thing this browser exists to make work; substituting the network's largest
-operator when the self-hoster's document is momentarily unreachable is the one
-substitution that should never be silent. And `resolvePds` is not only a login
-helper: anything asking "where does this account live" gets `bsky.social` as an
-answer indistinguishable from a resolved one. Pinned by
-`tests/atproto-identity.test.js` ("DI-9").
-
-**Status: OPEN.** Keep the fallback and make it legible —
-`{ did, pds: DEFAULT_PDS, assumed: true, reason }`. Callers signing in can
-ignore `assumed`; callers answering "where does this account live", and
-anything rendering it, must not. The change is additive and breaks nothing. See
-DI-D4.
-
----
-
 ### Experimental: identity anchors
 
 The two deviations below are in the **experimental** part of this chapter
@@ -500,6 +380,25 @@ worth writing down independently of what is behind it. And the list above is
 the actual state of the code, which is more useful to a reviewer than a
 document that waits until the state is flattering.
 
+### 2.8. Whether a labelled default PDS should exist at all
+
+A PDS lookup that cannot resolve returns `{ pds: 'https://bsky.social',
+assumed: true, reason }` (SPEC §6.2 rule 4). The AT Protocol DID specification
+says an unresolvable DID is a resolution failure, full stop, and we keep a
+default because the sign-in path is right for almost everyone and fails loudly
+when it is wrong.
+
+The label carries the weight: nothing can present the substitution as a
+resolution without ignoring a field that says otherwise. What we cannot settle
+is whether the default should exist at all. Against it: a value
+labelled "assumed" is still a value, and the failure mode of a caller that
+forgets to read one field is the failure mode we just fixed. For it: refusing
+outright turns a momentarily unreachable directory into "you cannot log in",
+for a network where one directory serves nearly every account.
+
+We think the labelled default is right for a client and wrong for a resolver,
+and this chapter is trying to be both.
+
 ---
 
 ## 3. Open design items
@@ -521,34 +420,6 @@ validating resolver, fall back to `GET https://<handle>/.well-known/atproto-did`
 verify bidirectionally against the DID document's `alsoKnownAs`, and keep the
 AppView only as a last resort, reported as unverified and distinguishable in
 the returned value. Highest impact in this chapter.
-
-### DI-D2. One `did:web` URL builder and one host guard, used by both readers
-
-`did-protocol.js` implements the method's read algorithm and refuses a private
-or reserved host before connecting; `resolvePds` in `bsky.js` splices the
-identifier into a URL and guards nothing (DI-6).
-
-**Recommendation.** Import `didWebUrl` and `isSafeDidWebHost` in `bsky.js` and
-delete the second reader. Cheap, and it retires a whole class of
-irreproducible inconsistency.
-
-### DI-D3. Check the DID document's `id` in `resolvePds`
-
-The `did:` handler refuses a document about a different subject; the PDS lookup
-does not make the comparison (DI-8).
-
-**Recommendation.** Compare `doc.id` to the DID that was asked for and treat a
-mismatch as an unresolvable document — which, with DI-D4 in place, is a legible
-state rather than a silent substitution. One line.
-
-### DI-D4. Stop `resolvePds` presenting an assumed PDS as a resolved one
-
-Every failure path returns `{ did, pds: 'https://bsky.social' }`,
-indistinguishable from a resolution (DI-9).
-
-**Recommendation.** Return `{ did, pds: DEFAULT_PDS, assumed: true, reason }`.
-Callers signing in ignore `assumed` and behave exactly as today; callers
-answering "where does this account live" must not. Additive, breaks nothing.
 
 ### DI-D5. Verify the `did:plc` operation log
 

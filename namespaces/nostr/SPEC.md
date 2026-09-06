@@ -191,16 +191,39 @@ are drawn here explicitly:
    with a Mastodon address and with an email address. An implementation
    **MUST NOT** guess. Wildroot's `social-model.js` classifies the ambiguous
    form as `fediverse-or-nip05` and resolves *both*, presenting whichever
-   answers; the omnibox classifier has no row for it at all and treats it as
-   neither (NO-1).
+   answers; the omnibox classifier has no row for it at all — a scheme-less
+   input carrying a single `@` is a search — and treats it as neither (NO-1).
 
-**A bare NIP-19 identifier SHOULD be classified as Nostr.** `npub1…`,
-`note1…`, `nprofile1…`, `nevent1…` and `naddr1…` are self-describing: the
+**A bare NIP-19 identifier is classified as Nostr.** `npub1…`, `note1…`,
+`nprofile1…`, `nevent1…`, `naddr1…` and `nsec1…` are self-describing: the
 human-readable part *is* the type, and a bech32 checksum makes a false positive
-a 1-in-2³⁰ event. The reference implementation's decoder accepts a bare
-identifier (§5.2) but its omnibox classifier does not route one — a pasted
-`npub1…` is a single label with no dot, so it goes to the Handshake chain as a
-name. **We do not meet our own SHOULD here.** See NO-1.
+a 1-in-2³⁰ event. A pasted identifier is the most common Nostr address there
+is, and almost nobody types the scheme, so an implementation **MUST** route one
+without requiring `nostr:`.
+
+The rule, as the shared classifier applies it (`../../src/router.js`
+`classify`, and Part II §6.1 for where it sits in the order):
+
+- the input **as a whole** must be one of the six prefixes followed by `1` and
+  a bech32 body — no path, no query, no trailing slash, no whitespace;
+- the identifier is then **DECODED**, and claimed only if the decode succeeds.
+  The checksum is what licenses the claim: a prefix test alone would take
+  `npub1shop`, a perfectly ordinary Handshake name, out of the bare-label rule
+  and send it to a relay. Gating on the checksum means a Handshake name that
+  merely begins `npub` stays a name;
+- `nsec` is the deliberate exception, and is claimed on its **prefix alone**.
+  Its decode is designed to fail (§5.3), so waiting for one would leave the
+  secret to the bare-label rule, which transmits it to a resolver *as a name*.
+  Routed to this namespace it reaches the refusal of §5.3 instead: an
+  implementation **MUST** route a bare `nsec` to the handler that refuses it,
+  and **MUST NOT** let it reach any name resolver.
+
+The classifier strips a trailing slash — the one the address bar appends —
+before matching, so `npub1…/` and `nsec1…/` are classified as the bare form
+is; an identifier followed by a path or query is not an identifier and falls
+through to the host rules. One consequence of the rule as written is recorded
+in [`DEVIATIONS.md`](DEVIATIONS.md): the `nsec` arm's prefix-only test makes a
+Handshake name beginning `nsec1…` unreachable (`NO-14`).
 
 ---
 
@@ -343,9 +366,15 @@ handler for that prefix. The reference implementation's error text is:
 
 and a test asserts both the "PRIVATE KEY" and the "not sent anywhere" halves,
 because the wording is the feature. NO-6 records why refusing by name is worth
-the small disclosure it makes, and NO-1 records the one path on which the
-promise does not yet hold: a bare `nsec` typed into the address bar does not
-reach this handler at all.
+the small disclosure it makes.
+
+The promise holds on **both** paths a secret can arrive on. A bare `nsec`
+typed into the address bar is classified into this namespace before any name
+rule sees it (§3), so it reaches this refusal rather than a chain lookup that
+would carry the secret to a resolver as a name. That is the reason the
+classifier claims an `nsec` on its prefix without waiting for a decode: the
+decode is *this* refusal, and it has to happen inside the namespace that can
+say what the string is.
 
 ### 5.4 The `nostr:` URI
 
@@ -360,9 +389,12 @@ The reference implementation additionally accepts:
   shape before the handler sees it, so refusing it would refuse our own
   browser's requests. NO-5.
 - a **bare** identifier with no scheme, which is what makes a pasted `npub1…`
-  usable if the classifier ever routes one (§3).
+  usable: the classifier routes one into this namespace (§3) and the parser
+  accepts it when it arrives.
 - a trailing `/`, `?…` or `#…`, which is stripped. Chromium appends a path to
   a bare authority; the identifier is the authority and the rest is noise.
+  The classifier tolerates the same trailing slash, so `nostr:npub1…/` and a
+  bare `npub1…/` typed into the address bar both reach this parser.
 
 Comparison is case-insensitive on the scheme (`NOSTR:` works) and the
 identifier is lower-cased per BIP-173.

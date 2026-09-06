@@ -164,6 +164,18 @@ differently — a `resolver(node)` that reverts rather than returning zero, a
 `dnsRecord` that returns records under a different owner name — would be
 resolved by this client in ways we have not tested.
 
+### OP-2.3. What the registry read does under an anonymizing proxy
+
+The `_op` read rides the embedder's proxied fetch, so it is private in the sense
+that matters — the RPC endpoint sees the proxy, not the user (SPEC §A.6). What we
+have not measured is whether it still *answers*: public JSON-RPC endpoints
+commonly rate-limit or refuse traffic from anonymizing-network exits, and this
+route's behaviour when every endpoint fails is to fall back to the top-level
+name's ordinary nameservers (OP-1, case 1). If that is what happens under a
+proxy, then the mode a user turns on for privacy is also the mode that quietly
+returns them to the seller's nameserver — which is the one outcome the route
+exists to avoid. It is a measurement, not an argument, and it has not been made.
+
 ### NT-2.1. The marker is a local invention, and its value depends on being shared
 
 Two things about the convention we are unsure of beyond NT-1:
@@ -190,6 +202,11 @@ implementation is injected, the module falls back to the platform's global
 fetch — which ignores the session's proxy settings. An embedder that forgets
 the injection gets a route that works and leaks the user's address to the RPC
 endpoint, with nothing to notice.
+
+This matters more than it reads: the route runs while anonymization is on and is
+not gated (SPEC §A.6), so the default is the one place where a mode the user
+turned on for privacy can be defeated by an omission in an embedder rather than
+by a decision anybody made.
 
 **Recommendation.** Require it: throw from the constructor when no `fetchImpl`
 is given, as the Arweave handler does. A library caller that genuinely wants

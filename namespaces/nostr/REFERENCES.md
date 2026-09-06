@@ -106,9 +106,15 @@ client uses the platform `fetch` with the implementation injectable for tests.
 Because the seam exists, no test replaces a global — the whole handler is
 driven against scripted, misbehaving relays.
 
-Two modules outside this directory are read. `tests/classification.test.js`
-imports `../../../src/router.js`, the same classifier the Handshake chapter
-uses, shared rather than forked because a divergent copy of a security-relevant
-classifier is the worse problem. `src/relay.js` imports
-`../../../src/safe-address.js`, the address guard the Handshake chapter applies
-to zone-supplied addresses, for the same reason a relay hint needs it (§10.4).
+Two modules outside this directory are read, and one reads back the other way.
+`tests/classification.test.js` imports `../../../src/router.js`, the same
+classifier the Handshake chapter uses, shared rather than forked because a
+divergent copy of a security-relevant classifier is the worse problem.
+`src/relay.js` imports `../../../src/safe-address.js`, the address guard the
+Handshake chapter applies to zone-supplied addresses, for the same reason a
+relay hint needs it (§10.4). In the other direction, `src/router.js` imports
+`decodeNip19` from `src/nip19.js` in this directory: the classifier decodes a
+bare identifier before claiming it (SPEC §3), so the routing decision depends
+on this chapter's checksum. Both modules are dependency-free of the browser, so
+the edge is clean, but it is a real one — the namespace boundary is decided
+with this chapter's decoder.

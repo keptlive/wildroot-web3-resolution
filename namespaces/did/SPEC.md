@@ -372,10 +372,14 @@ A hostname that *resolves* to a private address is not caught, because that
 needs a connect-time check; the limitation is stated here and in the browser's
 conformance record beside the ERC-3668 row that shares it.
 
-A second `did:web` reader exists in this tree — `resolvePds` in `src/bsky.js`,
-§6.2 — and implements neither the read algorithm nor the host guard. Two
-divergent readers of one method in one program is itself the finding
-(`../../DEVIATIONS.md` DI-6); an implementation MUST have one.
+**There is one `did:web` reader.** The other caller that needs a DID document
+— `resolvePds` in `src/bsky.js`, §6.2, which is looking for a PDS rather than
+publishing the document as a page — imports `didWebUrl` and `isSafeDidWebHost`
+from this module rather than building a URL of its own. An implementation MUST
+have one reader: two implementations of a three-line read algorithm in one
+program produce a DID that resolves one way for an identity panel and another
+way for a sign-in path, which is the class of inconsistency nobody can
+reproduce.
 
 ### 5.4 The response
 
@@ -455,6 +459,10 @@ is authentic. What the reference implementation establishes:
   redirect and a deadline (§5.3);
 - **nothing else.**
 
+Both hold for the PDS lookup of §6.2 as well: it reads a document through the
+same URL builder and the same host guard, and makes the same `id` comparison.
+The two callers establish the same things because they run the same code.
+
 Specifically it does **not**:
 
 - **verify the `did:plc` operation log** (§5.2), so a `did:plc` document is the
@@ -516,34 +524,51 @@ Given a DID, the reference implementation fetches the DID document and reads
 the PDS out of it:
 
 - `did:plc:…` → `GET https://plc.directory/<did>`
-- `did:web:…` → `GET https://<method-specific-id>/.well-known/did.json`
+- `did:web:…` → the URL `didWebUrl()` builds from the method-specific
+  identifier, by the read algorithm of §5.3 and through the host guard of
+  §5.3: a loopback, private, reserved or non-public host is never fetched
 - any other method → not resolved
 
-The fetch sets `redirect: 'error'` and a 10-second deadline. It does **not**
-apply the read algorithm of §5.3 or the host guard, which is
-`../../DEVIATIONS.md` DI-6: an implementation MUST use one `did:web` reader for
-both paths.
+The fetch sets `redirect: 'error'` and a 10-second deadline, so a redirect
+cannot become a second, unchecked choice of host and a hanging host cannot
+become a hanging sign-in.
 
-The PDS is the `serviceEndpoint` of the first `service` entry whose `id` **ends
-with** `#atproto_pds`, accepted only if it begins `https://`.
+Four rules decide whether what comes back is an answer, and an implementation
+**MUST** apply all four. Each is pinned in `tests/atproto-identity.test.js`:
 
-Three further deviations from the AT Protocol DID specification, all pinned in
-`tests/atproto-identity.test.js`:
+1. **The document must be about the DID asked for.** `doc.id` is compared to
+   the DID, and a document naming a different subject is not a resolution —
+   W3C DID Core §7.1.3. This is the same check the `did:` handler makes
+   (§5.4), made by the same rule here rather than left to the caller: without
+   it, a directory or a `did:web` host answering with somebody else's document
+   hands back that document's PDS under the asked-for DID.
+2. **The service is identified by `id` *and* `type`.** The PDS is the
+   `serviceEndpoint` of the first `service` entry whose `id` **ends with**
+   `#atproto_pds` and whose `type`, when present, is
+   `AtprotoPersonalDataServer`. The suffix match on `id` is deliberate — a
+   service `id` may legitimately be a relative fragment or an absolute URL
+   carrying that fragment — and the `type` is what the AT Protocol DID
+   requirements name alongside it.
+3. **The endpoint must be `https://`.** A plaintext or non-HTTP endpoint is
+   not accepted.
+4. **A fallback is never presented as a resolution.** On **every** path that
+   does not end in a PDS read out of a valid document — the host guard refused
+   it, the fetch failed, the document is not about this DID, it names no
+   `https` PDS, or the DID method is not supported — the return value is
+   `{ did, pds: DEFAULT_PDS, assumed: true, reason }`. `assumed` is the
+   distinct state; `reason` says which path it was, in words.
 
-- The service **`type`** (`AtprotoPersonalDataServer`) is not checked, only the
-  id suffix (`../../DEVIATIONS.md` DI-7).
-- The document's `id` is not compared to the DID asked for — the check §5.4
-  makes, missing here (`../../DEVIATIONS.md` DI-8).
-- **An unresolvable DID document does not fail. It becomes `bsky.social`**
-  (`../../DEVIATIONS.md` DI-9). The AT Protocol DID specification makes an
-  unresolvable DID a resolution failure. The implementation's comment argues
-  the substitution is "wrong for self-hosters, correct for almost everyone, and
-  `createSession` against the wrong host fails loudly rather than silently" —
-  true of the *login* path this function was written for, and precisely wrong
-  for the self-hosting users this browser exists to serve. An implementation of
-  this chapter MUST NOT substitute a default PDS silently; if it does so at
-  all, the substitution MUST be reported as a distinct state and MUST NOT be
-  presented as the account's PDS.
+Rule 4 is the one that needs stating as a rule. The AT Protocol DID
+specification makes an unresolvable DID a resolution **failure**, and this
+implementation keeps a default (`https://bsky.social`) for the sign-in path it
+was written for, where a wrong host fails loudly and the default is right for
+almost everyone. That argument does not survive contact with the question
+"where does this account live", which is the question a self-hoster's page is
+answering. So an implementation **MUST NOT** present a substituted PDS as the
+account's own: a caller signing in may ignore `assumed`, and a caller
+answering for the account, or rendering it, **MUST NOT**. Silently naming the
+network's largest operator when a self-hoster's document is momentarily
+unreachable is the one substitution that must never be silent.
 
 ### 6.3 `at://` is recognised and refused
 
@@ -888,10 +913,11 @@ implementation MUST treat the resulting URL as hostile input:
   choice of host made by the first one;
 - it MUST bound the request in time.
 
-The `did:` handler does all three. The PDS lookup in `src/bsky.js` does the
-last two and not the first, which is `../../DEVIATIONS.md` DI-6 — and the shape
-of finding that should be fixed structurally, with one shared builder and one
-shared guard, rather than case by case.
+Both readers do all three, and they do it with the **same** code: `didWebUrl`
+builds the URL and `isSafeDidWebHost` guards the host for the `did:` handler
+and for the PDS lookup alike. That is the structural form of the fix, and it is
+the form to insist on — a guard that has to be remembered at each call site is
+a guard that will be missed at one of them.
 
 A hostname that resolves to a private address remains uncaught by an
 address-literal test; catching it needs a check at connect time, and the same
@@ -993,6 +1019,7 @@ src/
   unimplemented-protocol.js  the fail-closed contract for at:/activitypub: (§7, §8)
   gate.js                    the anonymization gate for non-proxied handlers (§10.4)
   bsky.js                    the AT Protocol adapter; resolveHandle/resolvePds are §6
+                             (it imports did-protocol.js for the one did:web reader)
   xrpc.js                    its transport (imported by bsky.js)
   record.js                  the `_hns.<name>` control record (§9.1, experimental)
   receipt.js                 the claim and atproto binding receipts (§9.1, §9.3)
@@ -1011,6 +1038,9 @@ tree modulo import paths. A fix in one is provably the same fix in the other.
 **Two files reach past the scope line, and are kept whole rather than trimmed
 for that reason.** `bsky.js` is the entire Bluesky adapter, of which §6
 specifies two functions; `xrpc.js` is there only because `bsky.js` imports it.
+`bsky.js` also imports `did-protocol.js`, which is the point of §5.3's one
+reader — the dependency edge is what makes the single reader structural rather
+than a convention.
 Forking either to make the package tidier would break byte-identity, and a
 divergent copy of a security-relevant module is a worse problem than an
 over-broad dependency. `keys.js` and `nostr-event.js` are the signature

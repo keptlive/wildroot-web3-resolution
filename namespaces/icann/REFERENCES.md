@@ -29,9 +29,9 @@ the code that makes it.
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [RFC 6761](https://www.rfc-editor.org/rfc/rfc6761) | Special-Use Domain Names | §4 — `localhost` (§6.3: the **whole subtree**, so `app.localhost` too), `invalid`, `test` and `example` are never Handshake names, and none is in the IANA set. `../../src/reserved-names.cjs`, consulted at row 4 of `classifyHost` (`../../src/router.js:306-335`). |
+| [RFC 6761](https://www.rfc-editor.org/rfc/rfc6761) | Special-Use Domain Names | §4 — `localhost` (§6.3: the **whole subtree**, so `app.localhost` too), `invalid`, `test` and `example` are never Handshake names, and none is in the IANA set. `../../src/reserved-names.cjs`, consulted at row 4 of `classifyHost` (`../../src/classify-host.cjs:87-116`). |
 | [RFC 6762](https://www.rfc-editor.org/rfc/rfc6762) | Multicast DNS | §4 — `local` is mDNS's. Without the carve-out, every NAS, printer and Home Assistant name on a home network is sent to whoever registers the Handshake top-level name `local`. `../../src/reserved-names.cjs`. |
-| [RFC 7686](https://www.rfc-editor.org/rfc/rfc7686) | The `.onion` Special-Use Domain Name | §2.2 row 2 — `onion` is Tor's, never Handshake's and never ICANN's. Matched **before** the reserved list so a `.onion` host reaches the Tor namespace, and even a malformed one stays there: the query itself is the deanonymising event. `../../src/router.js:306-335`. |
+| [RFC 7686](https://www.rfc-editor.org/rfc/rfc7686) | The `.onion` Special-Use Domain Name | §2.2 row 2 — `onion` is Tor's, never Handshake's and never ICANN's. Matched **before** the reserved list so a `.onion` host reaches the Tor namespace, and even a malformed one stays there: the query itself is the deanonymising event. `../../src/classify-host.cjs:87-116`. |
 | [RFC 8375](https://www.rfc-editor.org/rfc/rfc8375) | Special-Use Domain `home.arpa.` | §4 — together with `arpa`. The same list carries `internal`, `home`, `lan`, `corp`, `intranet` and `private`, which no RFC reserves and which home routers and corporate networks actually use: a deliberate over-reach, `../../DEVIATIONS.md` IC-5. `../../src/reserved-names.cjs`. |
 
 ## DNS vocabulary, comparison and messages
@@ -39,9 +39,9 @@ the code that makes it.
 | Identifier | Title | Used for |
 |---|---|---|
 | [RFC 8499](https://www.rfc-editor.org/rfc/rfc8499) | DNS Terminology (obsoleted by [RFC 9499](https://www.rfc-editor.org/rfc/rfc9499)) | The vocabulary this chapter uses throughout. 8499 is cited to keep one vocabulary across the whole specification; nothing here depends on the differences. |
-| [RFC 4343](https://www.rfc-editor.org/rfc/rfc4343) | DNS Case Insensitivity Clarification | §2.3 — the final label is lowercased before it is compared against the snapshot, so `EXAMPLE.COM` and `example.com` land in the same namespace. `../../src/router.js:284-293`. |
+| [RFC 4343](https://www.rfc-editor.org/rfc/rfc4343) | DNS Case Insensitivity Clarification | §2.3 — the final label is lowercased before it is compared against the snapshot, so `EXAMPLE.COM` and `example.com` land in the same namespace. `../../src/classify-host.cjs:68-76`. |
 | [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123) §2.1 | Requirements for Internet Hosts — Application and Support | §2.4 — host label syntax, the shape every entry in the snapshot is asserted to have (a single label, `[a-z0-9-]`, optionally `xn--`-prefixed). `tests/icann-tld-snapshot.test.js`. |
-| [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035) §4.1 | Domain Names — Implementation and Specification | §5.3, §8 — the wire format of the query the loopback bridge forwards without interpreting, beyond reading the QNAME so the interface can be told which name was answered obliviously (`../../src/odoh-bridge.js`); and the question section that `assertAnswersTo` checks every answer against (`../../src/dns-query.js:342-349`), which `dns.lookup()` has no counterpart for. |
+| [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035) §4.1 | Domain Names — Implementation and Specification | §5.3, §8 — the wire format of the query the loopback bridge forwards without interpreting, beyond reading the QNAME so the interface can be told which name was answered obliviously (`../../src/odoh-bridge.js`); and the question section that `assertAnswersTo` checks every answer against (`../../src/dns-query.js:342`), including the ICANN lookups a Handshake walk needs, which go through the DoH/ODoH client (§8) — a check the `dns.lookup()` library default has no counterpart for. |
 
 ## Internationalized names
 
@@ -49,14 +49,14 @@ the code that makes it.
 |---|---|---|
 | [RFC 5890](https://www.rfc-editor.org/rfc/rfc5890) | IDNA: Definitions and Document Framework | §2.3 — the A-label/U-label vocabulary the boundary comparison is stated in. |
 | [RFC 5891](https://www.rfc-editor.org/rfc/rfc5891) | IDNA: Protocol | §2.3 — the lookup protocol we do **not** implement: a Unicode host must be an A-label before it is compared against the snapshot, and the conversion we use is the URL Standard's. `../../DEVIATIONS.md` IC-12. |
-| [UTS #46](https://www.unicode.org/reports/tr46/) | Unicode IDNA Compatibility Processing | §2.3 — what the WHATWG URL Standard actually requires, and therefore what we actually get. On this path the divergence from IDNA2008 can move a name **across the ICANN boundary**. `../../src/router.js:284-293`, `../../DEVIATIONS.md` IC-12. |
+| [UTS #46](https://www.unicode.org/reports/tr46/) | Unicode IDNA Compatibility Processing | §2.3 — what the WHATWG URL Standard actually requires, and therefore what we actually get. On this path the divergence from IDNA2008 can move a name **across the ICANN boundary**. `../../src/classify-host.cjs:68-76`, `../../DEVIATIONS.md` IC-12. |
 
 ## URL parsing — the classifier's input
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [WHATWG URL Standard §host parsing](https://url.spec.whatwg.org/#host-parsing) | URL Standard | §2.3 — every host reaching the classifier is normalised by the URL parser: lowercased, punycoded, port and trailing dot stripped. `../../src/router.js:271-293`, `src/hns/hns-host.js:85-98`. |
-| [WHATWG URL Standard — ends-in-a-number checker](https://url.spec.whatwg.org/#ends-in-a-number-checker) and [IPv4 parser](https://url.spec.whatwg.org/#concept-ipv4-parser) | URL Standard, IPv4 parsing | §2.2 row 5, §2.3 — why a host whose last label is all ASCII digits cannot be written in a URL, so `classifyHost` falls back to the raw label for the numeric case and `rewriteToHns` gives up entirely; and how an IP literal is recognised before the label count. `../../src/router.js:259-265`, `../../DEVIATIONS.md` IC-14. |
+| [WHATWG URL Standard §host parsing](https://url.spec.whatwg.org/#host-parsing) | URL Standard | §2.3 — every host reaching the classifier is normalised by the URL parser: lowercased, punycoded, port and trailing dot stripped. `../../src/classify-host.cjs:55-76`, `../../src/hns-host.js:85-98`. |
+| [WHATWG URL Standard — ends-in-a-number checker](https://url.spec.whatwg.org/#ends-in-a-number-checker) and [IPv4 parser](https://url.spec.whatwg.org/#concept-ipv4-parser) | URL Standard, IPv4 parsing | §2.2 row 5, §2.3 — why a host whose last label is all ASCII digits cannot be written in a URL, so `classifyHost` falls back to the raw label for the numeric case and `rewriteToHns` gives up entirely; and how an IP literal is recognised before the label count. `../../src/classify-host.cjs:42-48`, `../../DEVIATIONS.md` IC-14. |
 
 ## Encrypted DNS transport
 

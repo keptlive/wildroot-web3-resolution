@@ -244,33 +244,42 @@ see §2.3.
 
 ---
 
-### KY-8. A `gemini://` host is resolved outside every DNS protection the browser applies
+### KY-8. With IP Protection off, a `gemini://` host is resolved by the operating system
 
-**What.** The Gemini client passes the hostname to Node's `tls.connect()`,
-which resolves it with the operating system's resolver. It does not use the
-browser's DoH policy, its Oblivious DoH bridge, Chromium's secure-DNS setting,
-or the Handshake resolver.
+**What.** With protection off, the Gemini client passes the hostname to Node's
+`tls.connect()`, which resolves it with the operating system's resolver: not the
+browser's DoH policy, not its Oblivious DoH bridge, not Chromium's secure-DNS
+setting, and not the Handshake resolver. With protection **on** this does not
+happen — the handler dials through the device-local Tor by name and no local
+lookup is made (SPEC §K.6.1, §K.6.2) — so this deviation is exactly the
+protection-off case and nothing more.
 
 **The standard says.** RFC 8484 (DoH) and RFC 9230 (Oblivious DoH) are the
 transports the rest of this browser uses for exactly this lookup; the Gemini
 specification says only that the host is a DNS name.
 
 **Why.** Not a decision — a consequence of a client that opens its own socket.
+On the anonymized route the socket has to be built here anyway (a direct dial
+would leak the address), and whoever builds the socket chooses who resolves; on
+the plain route nobody builds one on the client's behalf, so `tls.connect()`
+keeps the choice.
 
 **Consequence.** In a browser that goes to considerable trouble to make name
-lookups oblivious, one scheme looks its hosts up in the clear: the router, the
-ISP and anyone on the path sees which capsule is being visited. A Gemini host
-that is a Handshake name does not resolve at all, which is a missing feature
-rather than a leak. The same is true of SSB's multiserver addresses and of
-hyperswarm's bootstrap, but those are peer addresses rather than user-chosen
-names, so the disclosure is less pointed.
+lookups oblivious, one scheme looks its hosts up in the clear in the mode most
+users are in: the router, the ISP and anyone on the path sees which capsule is
+being visited. A Gemini host that is a Handshake name does not resolve on either
+route, which is a missing feature rather than a leak. The same open-resolver
+disclosure applies to SSB's multiserver addresses and to hyperswarm's bootstrap,
+but those are peer addresses rather than user-chosen names, so it is less
+pointed.
 
-**Status: OPEN.** Resolve the host with the browser's own resolver and pass the
-resulting address to the client with `servername` still set to the name, so SNI
-and any future certificate pin stay keyed to the name rather than the address.
-That also opens the door to Gemini over Handshake names, which do not resolve
-today. It is the same piece of work as KY-4's privacy half; the engineering
-item is §3, **KY-D2**.
+**Status: OPEN**, and confined to one mode. The fix is the same shape as the
+one the anonymized route takes: resolve the host with the browser's own
+resolver and pass the resulting **address** to the client with `servername`
+still set to the name, so SNI and any future certificate pin (KY-D1) stay keyed
+to the name rather than the address. That also opens the door to Gemini over
+Handshake names, which do not resolve today. The engineering item is §3,
+**KY-D2**.
 
 ---
 
@@ -468,8 +477,31 @@ first sight of it.
 That is a real similarity and we think it earns the placement. But a reader
 looking for "the key-addressed chapter" finds one namespace in it that is
 neither key- nor content-addressed and that verifies nothing at all, and may
-reasonably think it belongs with the ICANN/DNS material. Nothing else in this
-chapter depends on it, so moving it costs nothing but the cross-references.
+reasonably think it belongs with the ICANN/DNS material. It is also the one
+namespace here that the anonymizing mode **routes** instead of refusing
+(§K.3.6), which is one more way in which it is not like its neighbours. Nothing
+else in this chapter depends on it, so moving it costs nothing but the
+cross-references.
+
+---
+
+### 2.7. What Tor's exit does with a Gemini host name, and whether it has been proven
+
+While IP Protection is on the host is sent to the SOCKS proxy as a domain name
+and resolved inside Tor (SPEC §K.6.2), which removes the local disclosure and
+moves it: the exit relay's resolver sees which capsule is being visited. That is
+the same trade every `.onion`-capable browser makes for clearnet hosts, and we
+believe it is right, but we have not thought about it as hard as Chapter 8 has
+thought about `.onion` — a capsule with a small readership and a single visitor
+is a thinner crowd to hide in than a web host.
+
+Nor has the route been driven against a live capsule through a real circuit:
+`tests/gemini-protocol.test.js` proves it against a stub SOCKS5 server that
+answers "connected" and never dials, which pins the *wire shape and the address
+type* and nothing about latency, exit-policy refusals, or what a capsule that
+blocks known exits does. Gemini servers are hobby infrastructure and some of
+them will refuse Tor; the honest statement is that the route is correct and
+unmeasured.
 
 ---
 
@@ -492,22 +524,24 @@ it lands, the trust step becomes "certificate matches the one first seen" and
 the scheme table's `verify` string changes with it — the two must move
 together.
 
-### KY-D2. Give both engines the browser's resolver
+### KY-D2. Give `hyper://` the browser's resolver
 
 `hyper-sdk` resolves DNSLink names from its own default DoH JSON endpoint
-because `hyperOptions` sets only `storage` (KY-4), and the Gemini client passes
-its host to Node's `tls.connect()` (KY-8). Two schemes therefore look names up
+because `hyperOptions` sets only `storage` (KY-4), so that scheme looks names up
 outside every DNS protection the rest of the browser applies.
 
-**Recommendation.** For `hyper://`, set `hyperOptions.dnsResolver` from the
-browser's own DoH configuration — a config change that removes the third-party
-disclosure without touching the engine. It does not add DNSSEC: the engine
-speaks the DoH JSON API, not RFC 8484 wire format, so a validating lookup would
-have to be performed by the browser's resolver before the SDK is constructed,
-which is a larger change worth costing separately. For Gemini, resolve the host
-with the browser's resolver and pass the address to `connect()` with
-`servername` still set to the name; that also makes Gemini over a Handshake
-name possible for the first time.
+**Recommendation.** Set `hyperOptions.dnsResolver` from the browser's own DoH
+configuration — a config change that removes the third-party disclosure without
+touching the engine. It does not add DNSSEC: the engine speaks the DoH JSON API,
+not RFC 8484 wire format, so a validating lookup would have to be performed by
+the browser's resolver before the SDK is constructed, which is a larger change
+worth costing separately.
+
+Gemini needs no part of this item for the mode that cannot tolerate the gap:
+while IP Protection is on, the host is resolved inside Tor and the socket is
+built by this handler (SPEC §K.6.2). What is left there is the protection-off
+route, which is KY-8's own recommendation and the same few lines at the same
+injection point — the socket is already constructible at it.
 
 ### KY-D3. Find out whether web content can reach `hyper://localhost/`
 
