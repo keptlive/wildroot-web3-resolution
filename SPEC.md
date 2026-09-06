@@ -255,6 +255,16 @@ For those five an implementation **MAY** offer two modes, and if it does:
   page (§4.1); the mode is a policy about the route. The disclosure the
   reference control carries is `DISCLOSURE` in `src/delivery-mode.js`, in
   full; the design is the browser's `docs/MODES.md`.
+- The route **SHOULD** be shown beside the verdict, in the same form: for
+  each hop, the route it took in the mode the page loaded under — `local`
+  (nothing left the computer), `oblivious` (a relay saw the address, a
+  target saw the question, neither both), `tor` (the far end saw a Tor
+  exit), `direct` (the far end saw this computer's address with the
+  question) or `refused` (not done in this mode, nothing sent instead) —
+  what the far end learned, and what the other mode does for that hop. The
+  reference is `src/route-path.js` (`hnsRoute`, `schemeRoute`,
+  `summarizeRoute`), the mirror of `src/trust-path.js`; the same page yields
+  the same hops in both modes and only the route column differs.
 
 ---
 

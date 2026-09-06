@@ -55,6 +55,7 @@ export const MAP = {
   'src/self-cert.js': 'src/hns/self-cert.js',
   'src/spv.js': 'src/hns/spv.js',
   'src/trust-path.js': 'src/hns/trust-path.js',
+  'src/route-path.js': 'src/hns/route-path.js',
   'namespaces/arweave/src/ar.js': 'src/hns/ar.js',
   'namespaces/did/src/bsky.js': 'src/bsky/bsky.js',
   'namespaces/did/src/did-protocol.js': 'src/protocols/did-protocol.js',

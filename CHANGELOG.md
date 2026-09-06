@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.0
+
+- **The route workup** (`src/route-path.js`, the mirror of
+  `src/trust-path.js`) — beside "what was verified", the lock now answers
+  "who saw what": for each hop the route it took in the mode the page loaded
+  under — `local`, `oblivious`, `tor`, `direct` or `refused` — what the far
+  end learned, and one sentence saying what the other mode does for that hop.
+  The same page yields the same hops in both modes and only the route column
+  differs (`tests/route-path.test.js`); the trust verdict never changes with
+  the mode. `SPEC.md` §4.2 names it.
+- **`sync`**: ar.js notes that the fetch handed in must really return the 3xx
+  on a manual redirect — Electron's `net.fetch` rejects, and the browser
+  hands in a `net.request`-based fetch (an application concern, not part of
+  this specification).
+
 ## 0.5.0
 
 - **IPv6 for Handshake names** (RFC 3596; Handshake chapter §6.5f, §6.4,
