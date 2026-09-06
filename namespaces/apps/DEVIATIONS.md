@@ -57,9 +57,9 @@ the argument that it is acceptable is a specific one: a process already on
 loopback can resolve the same name over public DoH and dial the same address by
 itself, so the tunnel confers no capability it lacked — while the port,
 Handshake-only and SSRF fences mean it confers rather *less* than a general
-proxy would. While IP Protection is on that connection is made through the
-user's own Tor client rather than directly, which is a route the local process
-could also have taken itself.
+proxy would. In Private mode that connection is made through the user's own
+Tor client rather than directly — or, while that Tor is blocked, not at all —
+which is a route the local process could also have taken itself.
 
 **Status: DELIBERATE.** The credential path is retained and tested
 (`tests/ws-proxy.test.js`, "OPTIONAL auth (future platform)") so that a platform
@@ -273,19 +273,20 @@ fences and the pin are the same on both routes — but a realtime application is
 the one kind of page for which "it works, slowly, forever" is a different
 product from "it works".
 
-### 2.3. Whether the PAC leaves loopback traffic reachable while IP Protection is on
+### 2.3. Whether the PAC leaves loopback traffic reachable in Private mode
 
 The privacy controller's own configuration carries
-`proxyBypassRules: '<-loopback>'` (browser `src/hns/anonymize.js:243-247`). The
-PAC decorator replaces the whole configuration with `{mode: 'pac_script', …}`
-(browser `src/index.js:1142-1145`), and the PAC has no loopback branch: with IP
-Protection on, its non-WebSocket answer for `http://127.0.0.1:<port>/` is the
-Tor SOCKS directive. Whether Chromium applies an implicit loopback bypass to a
-PAC-configured session is exactly the thing we could not establish from the
-specification or from a measurement. If it does not, then every in-process
-loopback service a page fetches (a content-gateway port, a media sidecar) is
-routed into Tor — which refuses it — for as long as both features are on. See
-AP-D1.
+`proxyBypassRules: '<-loopback>'` (`_defaultConfig` in
+`namespaces/tor/src/anonymize.js`). The PAC decorator replaces the whole
+configuration with `{mode: 'pac_script', …}` (browser `src/index.js`), and the
+PAC has no loopback branch: in Private mode, its non-WebSocket answer for
+`http://127.0.0.1:<port>/` is the anonymizer's SOCKS directive — the Tor port
+while routed, the blackhole port while blocked. Whether Chromium applies an
+implicit loopback bypass to a PAC-configured session is exactly the thing we
+could not establish from the specification or from a measurement. If it does
+not, then every in-process loopback service a page fetches (a content-gateway
+port, a media sidecar) is routed into Tor — which refuses it — for as long as
+Private mode and the tunnel are both on. See AP-D1.
 
 ### 2.4. Cookie behaviour on an `hns://` origin
 
@@ -399,8 +400,8 @@ so the change is in the discovery base and its test.
 ### AP-D8. Surface the tunnel's refusal reason
 
 Every fence answers a distinct HTTP status that the WebSocket API discards, so
-"this is not port 443", "IP Protection is on and there is no Tor circuit", "this
-name has no address", "this name resolves to a private address" and "the origin
+"this is not port 443", "Private mode, and the Tor client is not connected",
+"this name has no address", "this name resolves to a private address" and "the origin
 is down" are one untyped `error` event to the page and nothing at all to the
 user (`src/ws-proxy.js:264-274`).
 **Recommendation.** Record each refusal with its reason and the name, and show
@@ -415,8 +416,8 @@ Handshake host costs one resolution. **Recommendation.** A cap on live tunnels
 and a small per-name rate limit on resolutions, refusing with `503` beyond it.
 The risk today is bounded by the loopback bind, so this is hygiene rather than a
 hole — but it is the kind of hygiene that is much easier to add before the
-tunnel's dials are, while IP Protection is on, made through the user's own Tor
-circuit (SPEC §4.4 fence 4), where every accepted CONNECT costs circuit capacity
+tunnel's dials are, in Private mode, made through the user's own Tor circuit
+(SPEC §4.4 fence 4), where every accepted CONNECT costs circuit capacity
 as well as a resolution.
 
 ---

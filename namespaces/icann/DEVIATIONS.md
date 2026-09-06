@@ -178,10 +178,12 @@ who can answer for them.
 ### IC-6. `automatic` falls back to unencrypted system DNS
 *`../../src/dns-policy.js`, `src/config.js:348-357`*
 
-**What.** The default `dns.mode` is `automatic`: encrypted DNS to the
-configured resolvers, falling back to unencrypted system DNS when none answer.
-The plan reports this as `plaintextFallback: true` and the interface says it in
-words.
+**What.** In Fast mode — the configured plan — the default `dns.mode` is
+`automatic`: encrypted DNS to the configured resolvers, falling back to
+unencrypted system DNS when none answer. The plan reports this as
+`plaintextFallback: true` and the interface says it in words. In Private mode
+the block is replaced by `privateDns()` before it is read (SPEC §5.7), so the
+fallback does not exist there: `secure`, the bridge alone, or nothing.
 
 **The standard says.** RFC 8484 defines the DoH transport but not a fallback
 policy; RFC 8310 §8.2, on the analogous DoT case, distinguishes an opportunistic
@@ -193,11 +195,12 @@ profile.
 the network unusable. This is a genuine availability-versus-privacy trade and it
 is resolved in favour of availability by default.
 
-**Consequence.** An attacker who can make the configured resolvers unreachable
-can force every ICANN lookup into the clear — and, because the bridge replaces
-the pool (IC-7), needs only to reach the two relays to do it. `secure` mode
-exists, refuses plaintext even when that means resolving nothing at all, and is
-documented in the settings page in the user's own words.
+**Consequence.** In Fast mode an attacker who can make the configured resolvers
+unreachable can force every ICANN lookup into the clear — and, because the
+bridge replaces the pool (IC-7), needs only to reach the two relays to do it.
+`secure` mode exists, refuses plaintext even when that means resolving nothing
+at all, is documented in the settings page in the user's own words, and is what
+Private mode forces.
 
 **Status: DELIBERATE** as a default, and stated as a limitation everywhere it
 applies (SPEC §5.5, §9.2).
@@ -210,7 +213,9 @@ applies (SPEC §5.5, §9.2).
 **What.** When the loopback ODoH bridge starts, its template becomes the whole
 of `secureDnsServers`. The configured DoH pool is discarded for the life of the
 process, so the engine has exactly one secure resolver and, below it, whatever
-the mode permits.
+the mode permits. This is a Fast-mode question: in Private the pool is dropped
+by policy before the bridge is consulted (`privateDns()`, SPEC §5.7), so there
+the bridge is the only server whether or not it replaces anything.
 
 **The standard says.** Nothing requires either arrangement; RFC 8484 clients
 customarily hold a list. This is a deviation from what a reader of the
@@ -223,9 +228,10 @@ interface's per-name claim (SPEC §6.2) would become the only thing that could
 tell the two apart.
 
 **Consequence.** Turning obliviousness on changes the floor beneath a failed
-lookup from *encrypted* to *plaintext* in `automatic` mode, and to a total ICANN
-outage in `secure` mode. The second is the honest trade; the first is a
-downgrade the user did not ask for by asking for more privacy.
+lookup from *encrypted* to *plaintext* in Fast mode's `automatic`, and to a
+total ICANN outage in `secure` mode — configured, or forced by Private. The
+second is the honest trade; the first is a downgrade the user did not ask for
+by asking for more privacy.
 
 **Status: OPEN.** We think leading the pool with the bridge is strictly better
 on privacy and would take it — but only with a measurement first. What is
@@ -295,6 +301,12 @@ chicken-and-egg-free answer at the moment it is needed.
 uses* to the local network in the clear. What bounds it is that they are two
 fixed hostnames, asked once a session and once an hour: no name a user typed
 is in them, and there is nothing per navigation.
+
+Private mode does not change the lookups themselves (SPEC §5.7): the mode
+replaces what the engine is told. The connections that follow them — the
+bridge's relay leg and its config fetch — ride the session's proxied fetch
+(`OdohTransport({ fetchImpl })`), so in Private they leave through Tor and
+while BLOCKED they stop with everything else.
 
 **Status: OPEN**, and not hard: the relay and target addresses can be pinned in
 the configuration, or resolved through the engine once it is configured, which
@@ -450,11 +462,17 @@ three-valued enumeration is a typo waiting to happen — harmless now that the
 value is normalised and a bad one is reported (SPEC §5.2), but still a field
 that can be wrong.
 
+The Fast / Private switch (SPEC §5.7) is in the settings page and the Privacy
+menu, and it does not expose these two keys either. With `odoh.icann: false`
+Private mode resolves **no** ICANN name at all — the plan fails closed with no
+bridge — and nothing on the switch says so; only the Domain name step does,
+after the fact.
+
 **Status: OPEN.** Add a checkbox for `odoh.icann` in the same DNS privacy
-block, with the cost stated in the hint text, and a textarea for `dns.servers`;
-make `dns.mode` a `<select>` so the class of error disappears rather than being
-reported. The plumbing exists — `dns.mode` is already written through the
-settings preload. IC-D3.
+block, with the cost stated in the hint text — including that Private mode
+depends on it — and a textarea for `dns.servers`; make `dns.mode` a `<select>`
+so the class of error disappears rather than being reported. The plumbing
+exists — `dns.mode` is already written through the settings preload. IC-D3.
 
 ---
 
@@ -493,6 +511,7 @@ a comment.
 
 ---
 
+
 ## 2. Things we are not sure about
 
 These are the ones we most want challenged.
@@ -518,8 +537,8 @@ an unregistered path, which is a thing the working group might want to hear.
 
 ### 2.3. Whether replacing the resolver pool is the right failure ordering
 
-IC-7 means the fallback below a failed oblivious lookup is plaintext rather
-than DoH. Prepending the bridge to the pool instead would make the fallback
+In Fast mode, IC-7 means the fallback below a failed oblivious lookup is
+plaintext rather than DoH. Prepending the bridge to the pool instead would make the fallback
 encrypted-but-not-oblivious, which is strictly better on privacy — but it also
 means a *silent* downgrade from oblivious to non-oblivious that the engine
 performs without telling us, and the interface's per-name claim (SPEC §6.2)
@@ -534,9 +553,11 @@ measured whether a SERVFAIL response — which is what our bridge returns on
 failure, and which is a *successful* HTTP exchange — triggers the same fallback
 as a transport failure, nor how long the engine remembers a failing resolver.
 The bridge's failure policy was chosen on the assumption that it does. If it
-does not, a relay outage in `automatic` mode is a hard failure rather than a
-silent downgrade — which would be *better* for privacy and worse for
-availability, and either way we should know which one we shipped. The same
+does not, a relay outage in Fast mode's `automatic` is a hard failure rather
+than a silent downgrade — which would be *better* for privacy and worse for
+availability, and either way we should know which one we shipped. In Private
+mode the question does not arise: `secure` refuses every fallback, so a SERVFAIL
+from the bridge is a failed lookup whichever way the engine reads it. The same
 measurement answers what threshold IC-1's staleness check should use only by
 analogy; that one is a separate guess.
 
@@ -611,9 +632,10 @@ would resolve.
 
 ### IC-D1. Lead the resolver pool with the bridge instead of replacing it
 
-The bridge's template becomes the whole of `secureDnsServers`, so the floor
-beneath a failed oblivious lookup is plaintext rather than the configured DoH
-pool (IC-7). Prepending would keep an encrypted floor, at the cost of a silent
+The bridge's template becomes the whole of `secureDnsServers`, so in Fast
+mode's `automatic` the floor beneath a failed oblivious lookup is plaintext
+rather than the configured DoH pool (IC-7); Private mode has no floor by policy
+(SPEC §5.7). Prepending would keep an encrypted floor, at the cost of a silent
 oblivious-to-non-oblivious downgrade that only the interface's per-name claim
 could detect.
 
@@ -660,7 +682,9 @@ is the open question of what N should be.
    *policy* the browser's Electron composition layer calls at both of its
    gates, not an implementation of resolution. If you are implementing from
    this specification, the resolver is your platform's and §5 is a description
-   of what to tell it.
+   of what to tell it. The re-application of the plan on a mode switch
+   (`applyDnsPlan`, driven by the `DeliveryMode` controller's `change` event)
+   is part of that composition layer; its policy is SPEC §5.7.
 
 2. **The modules this chapter is about that live in the spine's `src/`.**
    `router.js`, `hns-host.js`, `icann-tlds.cjs`, `reserved-names.cjs`,

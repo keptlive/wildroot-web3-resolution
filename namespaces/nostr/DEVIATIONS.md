@@ -424,6 +424,79 @@ narrow it to a valid checksum.
 
 ---
 
+### NO-15. Private mode hides who is asking, not what is asked
+*SPEC §8.5, §10.3 · `../../DIVERGENCE.md` row 15 · `src/tor-websocket.js`, `src/nostr-protocol.js` (`relayClass`)*
+
+**What.** In Private mode every relay is dialled through the device-local Tor
+by name, so a relay sees a Tor exit's address and the local network never sees
+a relay's name. The relay still receives the filter — the key, the event id,
+the `d` tag — because that is the question, and NIP-01 has no way to ask it
+without saying it.
+
+**The standard says.** Nothing: NIP-01 defines no oblivious query, and no NIP
+does. The deviation is from this repository's own design rule (the browser's
+`docs/MODES.md`): make privacy and speed stop pulling apart before adding a
+mode. For Nostr the attempt fails by protocol, which is why row 15 survives as
+one of the five places a mode is for.
+
+**Why.** A relay is a store that answers the question it is asked. The
+both-sides options are all partial: our own relay sees the question but is
+ours (§2.4); caching an answer removes repeats, not the first ask; NIP-65
+(NO-3) changes which relays are asked, not what they learn.
+
+**Consequence.** The Private-mode disclosure to a relay is "someone, from a Tor
+exit, asked about this key at this moment". Across the four default relays and
+the hints, the same exit can ask all of them, because no SOCKS credential is
+sent and the circuits are the session's (Chapter 8, TO-3) — so the relays are
+linkable to one another through the exit as well as through the identical
+filter. The refusal page and the settings disclosure say the mode hides this
+device's address; neither says the question is hidden, and nothing in this
+chapter may.
+
+**Status: DELIBERATE**, and bounded. The recommendation is the pair that
+narrows the disclosure without a new protocol: cache an answer for the
+navigation, so following a link on a profile page does not re-ask every relay
+for the same profile; and read NIP-65 (NO-D4), so the relays asked are the
+author's rather than ours. Per-relay stream isolation is Chapter 8's item
+(TO-3), not this chapter's.
+
+---
+
+### NO-16. Two WebSocket implementations on two routes
+*SPEC §8.1, §8.5 · `src/relay.js`, `src/tor-websocket.js`*
+
+**What.** On the direct route the relay client uses the injected
+`WebSocketImpl` or the runtime's global `WebSocket`. On the Private route it
+uses the `ws` package, because the runtime's `WebSocket` accepts no transport
+and cannot be given a socket that came out of a SOCKS tunnel. Two clients, one
+relay protocol, one event surface (`onopen` / `onmessage` / `onerror` /
+`onclose`, `send`, `close`).
+
+**The standard says.** RFC 6455 is the wire protocol both implement; the
+WHATWG WebSockets Standard is the API the direct route uses. `ws` implements
+RFC 6455 and presents a compatible subset of the WHATWG surface; it is not the
+WHATWG interface.
+
+**Why.** There is no seam in the built-in client. The alternative — `ws` on
+both routes — would make the direct route depend on a package for something
+the platform provides, and would change the direct route to fix the private
+one.
+
+**Consequence.** A behaviour that differs between the two clients shows only
+in Private mode. The one known difference is handled — `ws` delivers a text
+frame to `onmessage` as a string, which is what `src/relay.js` reads — and the
+Tor route is driven end to end by the real relay client against a real
+`wss://` server (`tests/tor-websocket.test.js`), so the relay protocol is
+proven on both. Timeouts, close codes and error shapes are not compared between
+the two.
+
+**Status: DELIBERATE.** The recommendation is a conformance run: drive the
+scripted-relay suite of `tests/nostr-protocol.test.js` through the `ws` class
+as well as through the scripted `WebSocketImpl`, so a difference between the
+two clients is found by the suite rather than by a user in Private mode.
+
+---
+
 ## 2. Things we are not sure about
 
 These are the ones we would most like other implementers to argue with. Each
@@ -532,11 +605,16 @@ where the resolver learns the query and not who asked. Nostr has no analogue. A
 relay learns the key you asked about and your address, and the fan-out that
 makes answers better makes the disclosure wider.
 
-We do not have a design. Querying through a proxy moves the disclosure rather
-than removing it. Asking every relay for a superset and filtering locally is
-the classic answer and is prohibitively expensive here. Today we handle it by
-refusing to run at all when IP protection is on, which is honest and is not a
-solution.
+Private mode does the half that is possible: every relay is dialled through
+the device-local Tor by name (SPEC §8.5), so the relay sees an exit's address
+and the local network sees no relay name — and the relay still sees the
+question, because there is no way to ask it otherwise (NO-15). Asking every
+relay for a superset and filtering locally is the classic answer to the other
+half and is prohibitively expensive here. What we are not sure of is whether
+hiding the asker without hiding the question is worth what it costs the user —
+Tor's latency on every relay, and relays that refuse Tor exits — or whether the
+honest line for this namespace is that Private mode buys less here than
+anywhere else in the browser, and the page should say so.
 
 ### 2.8. Whether a refused relay hint should be silent
 
@@ -663,9 +741,13 @@ well the temptation is stronger and the answer is still no.
 4. **Electron.** Nothing here imports it. `src/nostr-protocol.js` uses only the
    global `Response`, and `src/relay.js` takes its WebSocket implementation
    from an injected seam or the global — so the handler runs, and is tested,
-   under plain `node --test`. The one Electron-shaped thing it is missing is
-   the IP-protection gate (`createNonProxiedGate`, SPEC §10.3), which wraps the
-   handler at registration time in the browser and is a composition concern.
+   under plain `node --test`. The Private-mode behaviour is inside the handler
+   (SPEC §8.5), behind three injected functions — `isAnonymized`, `torSocks`,
+   `torWebSocket`. What stays in the browser is the wiring of the first two to
+   the anonymizer's `isOn()` and `torSocks()` (`namespaces/tor/src/anonymize.js`)
+   and of the mode to `DeliveryMode` in `../../src/delivery-mode.js`, which is
+   a composition concern. `nostr:` is not behind the non-proxied gate of
+   Chapter 9 §K.3.6.
 
 5. **Everything the fan-out is not.** No caching, no connection reuse, no
    subscription that stays open, no streaming. A resolution opens sockets, asks

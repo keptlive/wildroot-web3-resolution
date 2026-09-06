@@ -25,12 +25,24 @@
 
 import { EventEmitter } from 'node:events'
 
-export const MODES = { OFF: 'off', TOR: 'tor' }
+// `blocked` is the fail-closed state: Private mode asked for Tor and there is
+// none, so the session is pointed at a proxy that answers nothing rather than
+// left direct. Nothing loads; nothing leaks; the note says which.
+export const MODES = { OFF: 'off', TOR: 'tor', BLOCKED: 'blocked' }
 
-// User-facing status text. Leads with the honest benefit ("hide your IP"),
-// never with the word "Tor", and always pairs it with the limitation.
-const NOTE_OFF = 'IP protection is off — connecting directly, so sites can see your IP address.'
-const NOTE_ON = 'IP protection is on — your traffic routes through Tor, so sites see a Tor exit IP, not yours. This hides your IP; it is not full anonymity (this browser does not yet resist fingerprinting the way Tor Browser does).'
+/**
+ * The proxy every session gets while BLOCKED: a loopback port nothing
+ * listens on, so every connection fails at once (ERR_PROXY_CONNECTION_FAILED)
+ * instead of going out directly. The same rule the PAC decorator folds in,
+ * so a wss:// to a Handshake name is blocked the same way.
+ */
+export const BLACKHOLE_RULES = 'socks5://127.0.0.1:9'
+
+// User-facing status text. Leads with the honest benefit ("hide your IP")
+// and the MODE the person chose (Settings › Content delivery), and always
+// pairs it with the limitation.
+const NOTE_OFF = 'Fast mode — IP protection is off: connecting directly, so sites can see your IP address.'
+const NOTE_ON = 'Private mode — your traffic routes through Tor, so sites see a Tor exit IP, not yours. This hides your IP; it is not full anonymity (this browser does not yet resist fingerprinting the way Tor Browser does).'
 // The connecting note is live now (it carries the real bootstrap percent), so
 // it is built per-tick by connectingNote() below rather than being a constant.
 // Live variant of the connecting note: the same honest promise, but carrying
@@ -39,11 +51,15 @@ const NOTE_ON = 'IP protection is on — your traffic routes through Tor, so sit
 function connectingNote (percent, phase) {
   const pct = Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(percent))) : 0
   const where = phase ? ` — ${phase}` : ''
-  return `Connecting to hide your IP… ${pct}%${where}. The first connection can take up to a minute. ` +
+  return `Private mode — connecting to hide your IP… ${pct}%${where}. The first connection can take up to a minute. ` +
     'Nothing loads until the tunnel is ready, so your real IP is not exposed while you wait.'
 }
 const NOTE_UNAVAILABLE = 'IP protection is unavailable — no Tor client is bundled or running, so staying on a direct connection.'
 const NOTE_FAILED = 'IP protection could not reach the Tor network — staying on a direct connection. Try turning it on again.'
+// The fail-closed counterparts (Private mode): nothing loads, and the note
+// says what to do about it.
+const NOTE_BLOCKED_UNAVAILABLE = 'Private mode cannot connect — no Tor client is bundled or running. Nothing loads until it can; switch to Fast in Settings › Content delivery to connect directly.'
+const NOTE_BLOCKED_FAILED = 'Private mode could not reach the Tor network. Nothing loads until it can — try again, or switch to Fast in Settings › Content delivery to connect directly.'
 
 const EXTERNAL_HOST = '127.0.0.1'
 const EXTERNAL_PORT = 9050
@@ -98,10 +114,15 @@ export function resolveProxy (mode, { torAvailable = false, torSocks = null } = 
  * status for the UI/menu.
  */
 export class AnonymizeController extends EventEmitter {
-  constructor ({ sessions, tor = null, proxyConfigFor = null } = {}) {
+  constructor ({ sessions, tor = null, proxyConfigFor = null, failClosed = false } = {}) {
     super()
     this.sessions = Array.isArray(sessions) ? sessions : [sessions].filter(Boolean)
     this.tor = tor // an optional TorNode
+    // Private mode's promise is "the page fails rather than falling back".
+    // With failClosed, a TOR request that cannot be met enters BLOCKED (the
+    // blackhole proxy) instead of OFF (direct). Off by default so the
+    // controller-only callers and the older tests keep the direct fallback.
+    this.failClosed = !!failClosed
     // Optional per-session decorator: given (session, rules, baseConfig) it
     // returns the proxy config actually applied. This is how hns:// WebSocket
     // routing composes with anonymization — the controller stays the SINGLE
@@ -147,11 +168,7 @@ export class AnonymizeController extends EventEmitter {
       if (this.tor) {
         const state = await this.tor.start()
         if (state === 'unavailable') {
-          this.mode = MODES.OFF
-          await this._applyRules(null)
-          this.status = { mode: MODES.OFF, rules: null, note: NOTE_UNAVAILABLE }
-          this.emit('change', this.status)
-          return this.status
+          return this._cannotRoute(NOTE_UNAVAILABLE, NOTE_BLOCKED_UNAVAILABLE)
         }
         // Route to the chosen SOCKS port NOW — even mid-bootstrap. Requests
         // wait for the circuit rather than escaping direct, so there is no
@@ -177,9 +194,10 @@ export class AnonymizeController extends EventEmitter {
       const torAvailable = await detectTor()
       const torSocks = torAvailable ? `socks5://${EXTERNAL_HOST}:${EXTERNAL_PORT}` : null
       const resolved = resolveProxy(MODES.TOR, { torAvailable, torSocks })
-      // Same rule: entering OFF closes the gate before re-routing; entering
-      // TOR routes before announcing.
-      if (resolved.mode === MODES.OFF) this.mode = MODES.OFF
+      if (resolved.mode === MODES.OFF) {
+        return this._cannotRoute(NOTE_UNAVAILABLE, NOTE_BLOCKED_UNAVAILABLE)
+      }
+      // Entering TOR routes before announcing.
       await this._applyRules(resolved.rules)
       this.mode = resolved.mode
       this.status = resolved
@@ -232,12 +250,29 @@ export class AnonymizeController extends EventEmitter {
         // failed or waited while connecting (BUG 2). Fires once per cycle.
         this.emit('tor-ready', this.status)
       } else {
-        this.mode = MODES.OFF
-        await this._applyRules(null)
-        this.status = { mode: MODES.OFF, rules: null, note: NOTE_FAILED, percent: 0, phase: '' }
-        this.emit('change', this.status)
+        await this._cannotRoute(NOTE_FAILED, NOTE_BLOCKED_FAILED)
       }
     })
+  }
+
+  /**
+   * TOR was asked for and cannot be had. Direct with an honest note by
+   * default; with failClosed, BLOCKED: the sessions are pointed at the
+   * blackhole so nothing loads and nothing leaks, and isOn() stays true so
+   * every gate that reads it keeps refusing.
+   */
+  async _cannotRoute (noteDirect, noteBlocked) {
+    if (this.failClosed) {
+      this.mode = MODES.BLOCKED
+      await this._applyRules(BLACKHOLE_RULES)
+      this.status = { mode: MODES.BLOCKED, rules: BLACKHOLE_RULES, note: noteBlocked, percent: 0, phase: '' }
+    } else {
+      this.mode = MODES.OFF
+      await this._applyRules(null)
+      this.status = { mode: MODES.OFF, rules: null, note: noteDirect, percent: 0, phase: '' }
+    }
+    this.emit('change', this.status)
+    return this.status
   }
 
   _defaultConfig (rules) {
@@ -265,7 +300,17 @@ export class AnonymizeController extends EventEmitter {
     await this._applyRules(this.mode === MODES.OFF ? null : this.status.rules)
   }
 
+  /** Is protection in force — routed through Tor, or blocked because it cannot be? Gates read this. */
   isOn () { return this.mode !== MODES.OFF }
+
+  /**
+   * The Tor SOCKS URL, only while traffic is actually routed through it. The
+   * raw-socket paths that dial through Tor themselves (the chain resolver's
+   * authoritative hop, the WebSocket tunnel, Gemini, Nostr) read this: while
+   * BLOCKED it is null, so each of them refuses rather than dialling the
+   * blackhole and reporting a network fault.
+   */
+  torSocks () { return this.mode === MODES.TOR ? (this.status && this.status.rules) || null : null }
 }
 
 /**

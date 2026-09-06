@@ -32,6 +32,20 @@ export function normalizeDnsMode (mode, onUnknown) {
 }
 
 /**
+ * The `dns` block as Private mode applies it (src/hns/delivery-mode.js):
+ * `secure`, and the oblivious bridge as the ONLY server. The configured pool
+ * is dropped — an encrypted-but-not-oblivious resolver still learns every
+ * name and the address asking — so with no bridge running the plan fails
+ * closed and ordinary web addresses do not resolve until it is. That is the
+ * mode's promise ("nothing is looked up in the clear: if a private lookup
+ * fails, the page fails") applied to ICANN names.
+ * @param {{mode?: string, servers?: string[]}} [dns]
+ */
+export function privateDns (dns = {}) {
+  return { ...dns, mode: 'secure', servers: [] }
+}
+
+/**
  * Should the oblivious loopback bridge be started — and, equivalently, should
  * a loopback certificate be minted and its key handed to the engine as
  * trusted for any host? ONE predicate for both gates: a key the engine
@@ -65,8 +79,14 @@ export function wantsObliviousBridge ({ dns = {}, odoh = {} } = {}) {
  *   plaintextFallback: boolean}}
  *   `configure` is whether `app.configureHostResolver` is called at all; when
  *   it is false the engine keeps its default, which is system DNS.
+ * @param {boolean} [args.privateMode] Private mode (delivery-mode.js): the
+ *   block is replaced by privateDns() first
  */
-export function planDnsTransport ({ dns = {}, odoh = {}, bridge = null } = {}) {
+export function planDnsTransport ({ dns = {}, odoh = {}, bridge = null, privateMode = false } = {}) {
+  // Private mode rewrites the block before anything else reads it, so every
+  // fact below (configure, failClosed, plaintextFallback) is computed for the
+  // configuration the engine is actually given.
+  if (privateMode) dns = privateDns(dns)
   const mode = normalizeDnsMode(dns.mode)
   let servers = Array.isArray(dns.servers) ? dns.servers.filter((s) => typeof s === 'string' && s) : []
   let oblivious = false

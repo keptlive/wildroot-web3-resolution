@@ -141,3 +141,94 @@ test('every endpoint failing is UNREACHABLE, not "unregistered"', async () => {
   assert.equal(out.kind, 'unreachable', JSON.stringify(out))
   assert.match(out.reason, /down/)
 })
+
+// ---------------------------------------------------------------- Private mode
+// Row 3 of the divergence inventory: in Private mode a Handshake name is
+// looked up obliviously or not at all. The plain-DoH fallback below the
+// oblivious transport is the ONE place a relay outage used to cost privacy
+// instead of availability; `strictOblivious` makes it cost availability and
+// say so.
+
+/** A fake oblivious transport that answers from the same wire fixture a plain endpoint would. */
+function fakeOdoh (map, { fail = null } = {}) {
+  const inner = stubWireFetch(map)
+  const asked = []
+  return {
+    label: 'odoh.test',
+    asked,
+    async query (wire) {
+      asked.push(wire)
+      if (fail) throw new Error(fail)
+      const param = Buffer.from(wire).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+      const res = await inner(`https://odoh.test/dns-query?dns=${param}`)
+      return { answer: Buffer.from(await res.arrayBuffer()), via: 'relay.test' }
+    }
+  }
+}
+
+test('strict: an oblivious answer is used exactly as before, and no plain endpoint is asked', async () => {
+  const plain = []
+  const r = new DoHResolver({
+    endpoints: ['https://plain.example/dns-query'],
+    fetchImpl: async (url) => { plain.push(url); throw new Error('must not be asked') },
+    odoh: fakeOdoh({ 'name.14898:TXT': [{ type: TYPES.TXT, data: 'ipfs=bafkreigph5cub32tn4ph2au3izioyxnr37lvthzdug4xlmhlbnxj7h3mqu' }] }),
+    strictOblivious: true
+  })
+  const out = await r.resolve('name.14898')
+  assert.equal(out.kind, 'ipfs')
+  assert.equal(out.oblivious, true)
+  assert.deepEqual(plain, [], 'Private mode never falls back to plain DoH')
+})
+
+test('strict: when the oblivious transport fails, the name is UNREACHABLE and no plain query left the machine', async () => {
+  const plain = []
+  const r = new DoHResolver({
+    endpoints: ['https://plain.example/dns-query'],
+    fetchImpl: async (url) => { plain.push(url); return stubWireFetch({ 'name.14898:TXT': [{ type: TYPES.TXT, data: 'ipfs=bafkreigph5cub32tn4ph2au3izioyxnr37lvthzdug4xlmhlbnxj7h3mqu' }] })(url) },
+    odoh: fakeOdoh({}, { fail: 'relay unreachable' }),
+    strictOblivious: () => true // the live predicate form the browser passes
+  })
+  const out = await r.resolve('name.14898')
+  assert.equal(out.kind, 'unreachable', JSON.stringify(out))
+  assert.match(out.reason, /private lookup failed/)
+  assert.match(out.reason, /relay unreachable/)
+  assert.match(out.reason, /no unprotected lookup was made/)
+  assert.deepEqual(plain, [], 'the plain endpoint that WOULD have answered was never asked')
+})
+
+test('strict with no oblivious transport configured refuses rather than resolving in the clear', async () => {
+  const plain = []
+  const r = new DoHResolver({ fetchImpl: async (url) => { plain.push(url); throw new Error('nope') }, strictOblivious: true })
+  const out = await r.resolve('name.14898')
+  assert.equal(out.kind, 'unreachable')
+  assert.match(out.reason, /no oblivious resolver is configured/)
+  assert.deepEqual(plain, [])
+})
+
+test('not strict (Fast): the same relay failure falls back to plain DoH, as it always did', async () => {
+  const r = new DoHResolver({
+    endpoints: ['https://plain.example/dns-query'],
+    fetchImpl: stubWireFetch({ 'name.14898:TXT': [{ type: TYPES.TXT, data: 'ipfs=bafkreigph5cub32tn4ph2au3izioyxnr37lvthzdug4xlmhlbnxj7h3mqu' }] }),
+    odoh: fakeOdoh({}, { fail: 'relay unreachable' }),
+    strictOblivious: () => false
+  })
+  const out = await r.resolve('name.14898')
+  assert.equal(out.kind, 'ipfs')
+  assert.notEqual(out.oblivious, true)
+})
+
+test('a TXT that answered followed by an A lookup that could not be asked is UNREACHABLE, never unregistered', async () => {
+  // The one-transport case Private mode makes common: the relay carried the
+  // TXT question and then dropped; the name has not been shown to be absent.
+  let asked = 0
+  const inner = stubWireFetch({})
+  const fetchImpl = async (url, opts) => {
+    asked++
+    if (asked > 1) throw new Error('relay dropped')
+    return inner(url, opts)
+  }
+  const r = new DoHResolver({ endpoints: ['https://one.example/dns-query'], fetchImpl })
+  const out = await r.resolve('friend.14898')
+  assert.equal(out.kind, 'unreachable', JSON.stringify(out))
+  assert.match(out.reason, /relay dropped/)
+})

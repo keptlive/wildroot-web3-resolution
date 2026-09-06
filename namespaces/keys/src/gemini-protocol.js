@@ -21,6 +21,7 @@ import { Readable } from 'node:stream'
 import fetchToHandler from './fetch-to-handler.js'
 import { safeStatus } from '../../../src/safe-status.js'
 import { socksDialer } from '../../../src/socks-dial.js'
+import { privateRefusal } from '../../../src/delivery-mode.js'
 
 const GEMINI_PORT = 1965
 
@@ -64,8 +65,14 @@ export default async function createHandler (options = {}) {
       const tlsOpt = { rejectUnauthorized: false }
       if (isAnonymized()) {
         const socks = torSocks()
-        if (!socks) throw Object.assign(new Error('Gemini is refused while anonymization is on and no Tor port is available'), { status: 503 })
         const u = new URL(url)
+        // Private mode with no Tor to hand: refused in the same words as every
+        // other refusal (src/hns/delivery-mode.js) — the mode, nothing sent,
+        // the switch.
+        if (!socks) {
+          const copy = privateRefusal('site', { host: u.hostname })
+          throw Object.assign(new Error(`${copy.title}. ${copy.detail}`), { status: 503 })
+        }
         // The socket is dialled through Tor by NAME, so the OS resolver is
         // never asked; TLS then runs over it with the hostname for SNI.
         tlsOpt.socket = await socksDialer(socks)(u.hostname, Number(u.port) || GEMINI_PORT)

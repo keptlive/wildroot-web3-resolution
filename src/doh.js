@@ -39,13 +39,37 @@ function b64url (buf) {
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
+/**
+ * The error a strict (Private mode) lookup ends in. `private` marks it so the
+ * page that shows it can say which promise was kept.
+ * @param {string} why
+ */
+function privateLookupFailure (why) {
+  const err = new Error(`the private lookup failed (${why}) and no unprotected lookup was made`)
+  err.private = true
+  return err
+}
+
 export class DoHResolver {
-  constructor ({ endpoints = DEFAULT_DOH, timeout = 6000, fetchImpl, odoh = null } = {}) {
+  constructor ({ endpoints = DEFAULT_DOH, timeout = 6000, fetchImpl, odoh = null, strictOblivious = false } = {}) {
     this.endpoints = endpoints
     this.timeout = timeout
     this.fetchImpl = fetchImpl || ((...a) => globalThis.fetch(...a))
     /** Oblivious transport (src/hns/odoh.js), tried before plain DoH. */
     this.odoh = odoh
+    /**
+     * Private mode (src/hns/delivery-mode.js, row 3 of the divergence
+     * inventory): a boolean or a live predicate. While true, a name is looked
+     * up obliviously or not at all — the plain-DoH fallback below is never
+     * taken, and the failure says so in words rather than resolving in the
+     * clear. Read per query, so a mode switch applies to the next lookup.
+     */
+    this.strictOblivious = strictOblivious
+  }
+
+  /** Is the plain-DoH fallback refused right now? */
+  _strict () {
+    return typeof this.strictOblivious === 'function' ? !!this.strictOblivious() : !!this.strictOblivious
   }
 
   /**
@@ -71,6 +95,10 @@ export class DoHResolver {
     const parse = (buf) => assertAnswersTo(parseAnswers(buf), name, TYPES[typeName])
     let lastErr = null
     let emptyNoerror = null
+    const strict = this._strict()
+    if (strict && !this.odoh) {
+      throw privateLookupFailure('no oblivious resolver is configured')
+    }
 
     // Oblivious first: same answer semantics as a plain endpoint (weak
     // empty-NOERROR is remembered but double-checked downstream, SERVFAIL
@@ -108,7 +136,7 @@ export class DoHResolver {
             }
           } catch {}
           emptyNoerror = parsed
-          this._log(name, typeName, label, `${outcome} — weak, checking plain DoH`)
+          this._log(name, typeName, label, `${outcome} — weak, ${strict ? 'not confirmed (Private mode: no plain lookup)' : 'checking plain DoH'}`)
         } else if (parsed.rcode !== 0 && parsed.rcode !== 3) {
           lastErr = new Error(`ODoH rcode ${parsed.rcode}`)
           this._log(name, typeName, label, outcome)
@@ -121,8 +149,17 @@ export class DoHResolver {
       } catch (err) {
         lastErr = err
         this._log(name, typeName, label,
-          `FAILED (${err.message || err}) — falling back to plain DoH`)
+          `FAILED (${err.message || err}) — ${strict ? 'no fallback (Private mode)' : 'falling back to plain DoH'}`)
       }
+    }
+    if (strict) {
+      // Row 3: the fallback exists because the relays are few and can all
+      // fail; in Private mode that outage costs availability, never privacy.
+      // Whatever the oblivious path could not settle is reported as a
+      // private-lookup failure, and no plain query leaves this machine.
+      throw privateLookupFailure(lastErr
+        ? (lastErr.message || String(lastErr))
+        : 'the oblivious answer could not be confirmed')
     }
     for (const base of this.endpoints) {
       let outcome
@@ -303,13 +340,13 @@ export class DoHResolver {
       aErr = err
     }
     if (!a) {
-      // BOTH lookups failed to REACH anyone. That is not "no such name" — it
-      // used to be, and a DoH outage (or a captive network) told people their
-      // friend's site did not exist. txtRecords() has always drawn this line;
-      // the browsing path did not.
-      if (!txt) {
-        return { kind: 'unreachable', reason: (aErr && aErr.message) || 'no DoH endpoint answered' }
-      }
+      // The A lookup could not be ASKED. That is not "no such name" — a DoH
+      // outage (or a captive network) used to tell people their friend's site
+      // did not exist — and it is not one whether or not the TXT lookup a
+      // moment earlier got through: an answer that could not be had is
+      // `unreachable`, never `unregistered`. In Private mode, where a single
+      // oblivious transport is the only one, this is the common failure.
+      return { kind: 'unreachable', reason: (aErr && aErr.message) || 'no DoH endpoint answered' }
     }
     const addr = ((a && a.answers) || []).find(
       (r) => r.type === TYPES.A && IPV4_RE.test(String(r.address)))

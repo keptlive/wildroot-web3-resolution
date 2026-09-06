@@ -19,7 +19,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import createArHandler, { AR_GATEWAYS } from '../src/ar.js'
+import createArHandler, { AR_GATEWAYS, sandboxLabel, sameScopeRedirect } from '../src/ar.js'
 
 const TX = 'W-9rj7LCX-1kRs8Edf4UmJvzCHYBCnZN_13dh0Y7xq8'
 
@@ -145,4 +145,45 @@ test('a path cannot escape the txid, whichever gateway answers', async () => {
   await handler(new Request(`ar://${TX}/../secret`))
   assert.ok(asked.startsWith(`https://arweave.net/${TX}/`), asked)
   assert.ok(!asked.includes('..'), asked)
+})
+
+// ---------------------------------------------------------------- redirects
+// A gateway redirect is followed within the SAME gateway and the SAME
+// transaction, one hop. arweave.net's real shape is a 302 into a
+// per-transaction SANDBOX subdomain, `https://<base32(txid)>.arweave.net/
+// <txid>[/path]`, so each transaction is its own origin: same gateway (a
+// subdomain of it), same txid (still the first path segment) — followed.
+
+test('a sandbox-subdomain redirect for the same transaction is followed; another host, txid or scheme is refused', async () => {
+  const { createHash } = await import('node:crypto')
+  const sig = Buffer.alloc(512, 3)
+  const id = createHash('sha256').update(sig).digest().toString('base64url')
+  const label = sandboxLabel(id)
+  assert.match(label, /^[a-z2-7]{52}$/, 'a 32-byte id sandboxes to 52 base32 characters')
+  const seen = []
+  const fetchImpl = async (url) => {
+    seen.push(url)
+    if (/\/tx\//.test(url)) return new Response(JSON.stringify({ signature: sig.toString('base64url') }), { status: 200, headers: { 'content-type': 'application/json' } })
+    if (url === `https://g.example/${id}`) return new Response('', { status: 302, headers: { location: `https://${label}.g.example/${id}` } })
+    return new Response('PNG', { status: 200, headers: { 'content-type': 'image/png' } })
+  }
+  const { handler } = createArHandler({ gateways: ['https://g.example', 'https://h.example'], fetchImpl, verifyHeader: true })
+  const res = await handler(new Request(`ar://${id}`))
+  assert.equal(res.status, 200)
+  assert.equal(await res.text(), 'PNG')
+  assert.equal(res.headers.get('X-Arweave-Verified'), 'header', 'the header check ran against the other gateway after the sandbox hop')
+  assert.deepEqual(seen.slice(0, 2), [`https://g.example/${id}`, `https://${label}.g.example/${id}`])
+
+  const base = `https://g.example/${id}`
+  assert.equal(sameScopeRedirect(`https://${label}.g.example/${id}/a/b`, base, id), `https://${label}.g.example/${id}/a/b`)
+  assert.equal(sameScopeRedirect(`/${id}/index.html`, base, id), `https://g.example/${id}/index.html`)
+  assert.equal(sameScopeRedirect(`https://${label}.evil.example/${id}`, base, id), null, 'a subdomain of another host')
+  assert.equal(sameScopeRedirect(`https://notg.example/${id}`, base, id), null, 'a host that merely ends with the gateway name')
+  assert.equal(sameScopeRedirect(`https://${label}.g.example/OTHER${id.slice(5)}`, base, id), null, 'another transaction')
+  assert.equal(sameScopeRedirect(`http://${label}.g.example/${id}`, base, id), null, 'not https')
+
+  const bounce = async (url) => new Response('', { status: 302, headers: { location: `https://evil.example/${id}` } })
+  const refused = await createArHandler({ gateway: 'https://g.example', fetchImpl: bounce }).handler(new Request(`ar://${id}`))
+  assert.equal(refused.status, 502)
+  assert.equal(refused.headers.get('location'), null, 'the redirect is never handed to the renderer')
 })

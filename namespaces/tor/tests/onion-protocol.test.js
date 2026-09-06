@@ -62,7 +62,8 @@ test('Tor OFF: interstitial, no fetch, with the fingerprinting caveat', async ()
   const res = await handler(new Request(`onion://${ONION}/`))
   assert.equal(fetched, 0, 'nothing hit the network while Tor was off')
   const body = await res.text()
-  assert.match(body, /IP Protection/i)
+  assert.match(body, /Private mode/)
+  assert.match(body, /Settings › Content delivery/)
   assert.match(body, /Privacy/i) // tells the user how to turn it on
   assert.match(body, /hosted relay/i) // device-local only
   assert.match(body, /fingerprint/i)

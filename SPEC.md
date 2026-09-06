@@ -1,6 +1,6 @@
 # Web3 name resolution — a specification
 
-**Version:** 0.3 (draft for public comment)
+**Version:** 0.4 (draft for public comment)
 **Status:** Describes the behaviour of the reference implementation in this
 repository, which ships in the Wildroot browser. Not endorsed by any standards
 body. Normative statements describe what an implementation must do *to
@@ -220,6 +220,41 @@ reference implementation's aggregation is `summarize()` in
 `unknown` — and every scheme row in the registry carries the verdict it can at
 best reach (`trust`: trustless, trusted, open, refused, builtin), which
 `tests/lock-semantics.test.js` holds the panel to.
+
+### 4.2 Modes: Fast and Private
+
+Privacy and speed pull apart in five places across the namespaces this
+document specifies ([`DIVERGENCE.md`](DIVERGENCE.md) rows 3, 7, 10, 15 and
+19); everywhere else the private path is also the fast one, by construction.
+For those five an implementation **MAY** offer two modes, and if it does:
+
+- There **MUST** be exactly **one** control. IP Protection (the session proxy
+  through the device-local Tor) and every other private path move together;
+  two controls would let a person believe they were private while one of them
+  was off. The reference control is `DeliveryMode` in
+  `src/delivery-mode.js`, whose `policyFor(mode)` is the single table every
+  consumer reads.
+- **Private** MUST: route every session fetch through the device-local Tor,
+  and **fail closed** when Tor cannot be had — the sessions are pointed at a
+  loopback port nothing listens on (`BLACKHOLE_RULES`,
+  `namespaces/tor/src/anonymize.js`), never a direct connection; look a
+  Handshake name up over DoH obliviously or not at all (Chapter 1 §9,
+  `DoHResolver({ strictOblivious })`); look an ICANN name up through the
+  oblivious bridge only, nothing plaintext (Chapter 2, `privateDns()`); dial
+  a Handshake site, a relay and the WebSocket tunnel through Tor with their
+  chain proof and pins unchanged (`src/dane-connect.js`,
+  `namespaces/nostr/src/tor-websocket.js`, Chapter 11 §4.4); refuse hyper,
+  SSB and BitTorrent discovery with the reason on the page (Chapter 9), and
+  serve a Handshake name that publishes a stated origin from that origin
+  (Chapter 3 §8).
+- **Fast** is the configured behaviour of each chapter with the mode absent.
+- Every refusal or failure a mode causes **MUST** name the mode, say what was
+  not done (nothing was sent; no unprotected lookup was made), not blame the
+  site, and point at the control — one builder, `privateRefusal()`.
+- A mode **MUST NOT** change a trust verdict. A verdict is a fact about the
+  page (§4.1); the mode is a policy about the route. The disclosure the
+  reference control carries is `DISCLOSURE` in `src/delivery-mode.js`, in
+  full; the design is the browser's `docs/MODES.md`.
 
 ---
 

@@ -320,9 +320,9 @@ constrain any implementation, not just this one.
   `login` event does not fire — so the challenge is never answered and every
   socket dies.
 
-The reference implementation therefore **ships with no credential**
-(browser `src/protocols/index.js:255-261` constructs the tunnel with a resolver
-and an anonymization predicate and nothing else), and the credential check is
+The reference implementation therefore **ships with no credential** (the
+browser constructs the tunnel with a resolver and the anonymizer's `isOn` and
+`torSocks`, and no credential), and the credential check is
 retained but inert (`src/ws-proxy.js:217`, `:300-303`): a well-formed
 `{user, pass}` still enforces `Proxy-Authorization: Basic` in constant time, so
 a future platform that *can* authenticate a `wss://` proxy re-enables the gate
@@ -388,13 +388,13 @@ its `A` record at `127.0.0.1` or `169.254.169.254`; without this fence a page
 could make the browser dial the user's own network from inside. *Pinned by:*
 "FENCE 3", which uses the real guard.
 
-**(4) The Tor rule: dial through it, or refuse.** While IP Protection is on, a
-direct dial from the browser process would disclose the user's real address to
-the origin while the user believes it is hidden, so the tunnel **MUST NOT** dial
+**(4) The Tor rule: dial through it, or refuse.** In Private mode, a direct
+dial from the browser process would disclose the user's real address to the
+origin while the user believes it is hidden, so the tunnel **MUST NOT** dial
 directly in that state. With the device-local Tor's SOCKS port to hand it dials
 the upstream **through** it (`torSocks` → `socksDialer`,
-`../../src/socks-dial.js`, RFC 1928; `src/ws-proxy.js:327-332`); with no Tor
-port it **MUST** refuse `403` (`:330`), before the name is resolved. *Reason:*
+`../../src/socks-dial.js`, RFC 1928 — the fence-4 branch of `_handle`); with
+no Tor port it **MUST** refuse `403`, before the name is resolved. *Reason:*
 the route of the socket is the only thing that changes. The tunnel still
 resolves the name itself, so the chain proof, the trust steps of §6 and the SSRF
 fence are exactly what they are on the direct route, and the certificate the
@@ -413,6 +413,26 @@ pipe. Two sub-rules are what make that true rather than hoped for:
   socket rides Tor while its lookups do not has moved the disclosure, not
   removed it.
 
+The tunnel's two inputs for this fence are the anonymizer's `isOn()` and
+`torSocks()` (`namespaces/tor/src/anonymize.js`), and together they name the
+three states a CONNECT can meet. The mode is **Settings › Content delivery ›
+Mode**, one control whose policy table is `policyFor()` in
+`../../src/delivery-mode.js`:
+
+| Mode | Anonymizer | `isAnonymized()` | `torSocks()` | The tunnel |
+|---|---|---|---|---|
+| Fast | `off` | false | — | dials the resolved address directly |
+| Private, Tor connected | `tor` | true | the SOCKS URL | dials the resolved address through the SOCKS port, by address |
+| Private, blocked | `blocked` | true | `null` | refuses `403` before resolving |
+
+The third state is the anonymizer's fail-closed answer to a Tor that cannot be
+had — no client bundled or running, or one that could not reach the network.
+In it every session's proxy is `BLACKHOLE_RULES`, a loopback port nothing
+listens on, so the page that opened the socket is itself loading nothing
+through the session; the tunnel, which the session proxy does not cover,
+refuses on its own because `torSocks()` is `null`. Neither Private state ever
+produces a direct dial, which is the whole of the rule.
+
 *Pinned by:* "with IP Protection on, the dial goes THROUGH the Tor SOCKS port
 when there is one, and is refused when there is not", which asserts that the
 SOCKS server was asked for the resolved address **by address and never by
@@ -423,9 +443,9 @@ resolved and nothing is dialed.
 target validated; the port; the Tor decision; the Handshake-only check;
 resolution; the SSRF guard; the dial (`src/ws-proxy.js:282-373`). The three
 gates that can be decided without touching the network are decided first, and
-the port is first of those, so a refused port costs no lookup and an anonymized
-request with no Tor circuit produces no network activity of any kind — not even
-a name lookup.
+the port is first of those, so a refused port costs no lookup and a
+Private-mode request with no Tor circuit produces no network activity of any
+kind — not even a name lookup.
 
 There is one further rule that is not a fence but a failure mode: when
 resolution yields no dialable address — an unregistered name, or a name whose
@@ -467,8 +487,9 @@ exactly when the final label is not an ICANN top-level domain.
 **The decision (`FindProxyForURL`, `:58-63`).** A URL whose scheme is `wss:` or
 `ws:` goes to `PROXY 127.0.0.1:<port>` when the host is Handshake and `DIRECT`
 otherwise. **Every other URL returns the base directive** — which is the
-anonymizer's own current directive (`DIRECT`, or `SOCKS5 <host:port>` when IP
-Protection is on, `rulesToPacDirective`, `:29-33`). So page loads, search,
+anonymizer's own current directive (`DIRECT` in Fast mode; `SOCKS5 <host:port>`
+in Private mode — the Tor port while routed, the blackhole port while blocked —
+`rulesToPacDirective`). So page loads, search,
 DNS-over-HTTPS and every protocol fetch keep the routing the privacy controller
 chose, and only ws/wss-to-Handshake is diverted.
 
@@ -816,8 +837,8 @@ is sent (Chapter 8, TO-3).
 
 There is no **OPEN** state for this path, and that is the point: a `failed`
 certificate step, an absent pin, a non-public address, a port that is not 443,
-or an anonymized session with no Tor circuit all end with no socket rather than
-with a degraded one. An implementation **MUST NOT** offer the user a way to
+or a Private-mode session whose Tor is blocked all end with no socket rather
+than with a degraded one. An implementation **MUST NOT** offer the user a way to
 proceed past any of them.
 
 The application-level sign-in of §5 adds no step to the *connection's* trust
@@ -904,9 +925,9 @@ named would give any page the reach to probe every permitted port of every
 address a Handshake name resolves to, and would carry a splice no DANE pin
 covers.
 
-**The anonymized route is a change of socket, not of trust.** With IP Protection
-on, the upstream is dialled through the device-local Tor (§4.4 fence 4), which
-means a local process on loopback can, while that mode is on, cause a connection
+**The anonymized route is a change of socket, not of trust.** In Private
+mode, the upstream is dialled through the device-local Tor (§4.4 fence 4),
+which means a local process on loopback can, in that mode, cause a connection
 to be made through the user's own Tor client to the public address of a
 Handshake name. It gains no reach it did not already have — the port, the
 Handshake-only rule and the SSRF guard all still apply, and the name is

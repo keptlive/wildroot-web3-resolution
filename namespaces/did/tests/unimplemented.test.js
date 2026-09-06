@@ -74,7 +74,7 @@ test('a request whose url cannot even be read still answers 501, never throws', 
 
 // ------------------------------------------------------ the IP-Protection gate
 
-test('a handler that opens its own transport is refused while anonymization is on', async () => {
+test('a handler that opens its own transport is refused in Private mode', async () => {
   // The gate covers handlers that do NOT ride the proxied Electron session —
   // p2p overlays that dial peers directly, and main-process handlers holding
   // a raw socket. `did:` is NOT one of them: it takes the proxied session
@@ -95,7 +95,7 @@ test('a handler that opens its own transport is refused while anonymization is o
   // goes straight into Chromium's reason-phrase lookup.
   assert.equal(res.status, 503)
   assert.equal(ran, 1, 'the handler never ran')
-  assert.match(await res.text(), /Hyper is disabled while anonymization is on/)
+  assert.match(await res.text(), /Hyper is refused in Private mode/)
 })
 
 test('the did: handler resolves under anonymization, on the transport it was given', async () => {

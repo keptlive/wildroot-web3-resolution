@@ -959,18 +959,29 @@ can log it:
   it — another reason §6.1's gap costs more than it looks.
 
 Because the `did:` handler's transport is **injected** (§5.4), the browser
-gives it the proxied session fetch, so DID resolution rides the user's
-anonymizing proxy and stays available while IP Protection is on. That is the
-posture an implementation SHOULD adopt, and it is why `did:` needs no gate.
+gives it the proxied session fetch, so DID resolution rides the session's route
+— direct in Fast mode, through the device-local Tor in Private mode (Settings ›
+Content delivery › Mode, `../../src/delivery-mode.js`) — and stays available in
+both. That is the posture an implementation SHOULD adopt, and it is why `did:`
+needs no gate: the same code, the same verdicts, a different socket.
 
 The rule the gate encodes is still normative for anything that cannot be
 proxied: a handler that opens its own transport — a p2p overlay dialling peers,
-a raw socket in the main process — MUST refuse rather than resolve while an
-anonymizing mode is on, because it would reveal the real address. The reference
-implementation's `createNonProxiedGate` answers **503** with a plain
-explanation and does not run the handler. The status code matters — some
-engines treat an unknown HTTP status from a protocol handler as a fatal
-condition — so a gate MUST use a status the engine knows.
+a raw socket in the main process — MUST refuse rather than resolve in Private
+mode, because it would reveal the real address. The reference implementation's
+`createNonProxiedGate` (`src/gate.js`, the module Chapter 9 §K.3.6 specifies)
+answers **503** `text/plain` and does not run the handler. The page is built by
+`privateRefusal('p2p', { label })`: *"<label> is refused in Private mode"*,
+then the reason — the peers of a peer-to-peer network learn the address of
+whoever asks, and that path cannot be routed through the private connection —
+then *"nothing was asked"*, then the pointer at Settings › Content delivery.
+The status code matters — some engines treat an unknown HTTP status from a
+protocol handler as a fatal condition — so a gate MUST use a status the engine
+knows.
+
+*(`tests/unimplemented.test.js`: "a handler that opens its own transport is
+refused in Private mode", and "the did: handler resolves under anonymization,
+on the transport it was given" — the proof that `did:` needs no gate.)*
 
 The recognised-but-unresolved handlers (§8) need no gate either: they make no
 request under any condition.
@@ -1017,7 +1028,7 @@ REFERENCES.md    what it is built on
 src/
   did-protocol.js            the did: handler — did:plc, did:web (§5)
   unimplemented-protocol.js  the fail-closed contract for at:/activitypub: (§7, §8)
-  gate.js                    the anonymization gate for non-proxied handlers (§10.4)
+  gate.js                    the Private-mode gate for non-proxied handlers (§10.4)
   bsky.js                    the AT Protocol adapter; resolveHandle/resolvePds are §6
                              (it imports did-protocol.js for the one did:web reader)
   xrpc.js                    its transport (imported by bsky.js)

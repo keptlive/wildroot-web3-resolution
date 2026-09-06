@@ -251,6 +251,19 @@ Where an implementation's presentation layer can render `partial` in the same
 colour as `trustless`, that is a bug in the presentation layer and should be
 pinned by a test.
 
+**The delivery mode does not enter this table.** An implementation that offers
+the Fast and Private modes of `../../SPEC.md` §4.2 **MUST NOT** let the mode
+change a verdict: a page that is TRUSTLESS in Fast is TRUSTLESS in Private, and
+a page that is TRUSTED over DoH is TRUSTED over oblivious DoH through Tor. The
+mode decides the **route** — which sockets are opened and which lookups are
+refused (§8.1, §9.3, §10.2) — and a verdict is a fact about what that route
+produced. Where the mode refuses or fails a page there is no verdict to give:
+the reference implementation records a `failed` state whose single step is
+labelled `Private mode`, with the control (*Settings › Content delivery*) as
+its source and the page's own words as its detail (`privateFailure` in the
+`hns://` handler), so the panel and the page say the same thing and neither
+names the site as the cause.
+
 ---
 
 ## 5. The `hns://` URL form
@@ -684,6 +697,12 @@ the persisted chain, or from scratch for a node running entirely in memory — a
 resolution rides DoH until the node reaches the tip again, exactly as it does at
 launch (§11.5, `HS-16`).
 
+**The site connection takes the same dialler.** The authoritative hop is not
+this chapter's only raw socket: the connection to an A-record site (§8) is
+opened from the same process, outside any session proxy, and it takes the same
+`dial` — `connectDane({ dial })` and `connectPlain({ dial })` in
+`../../src/dane-connect.js` — by address. §8.1 specifies it.
+
 ---
 
 ## 7. HIP-5 `_op`: on-chain resolution — Chapter 10
@@ -765,6 +784,57 @@ A mismatch whose reported SPKI equals the *current* published pin means the
 zone rotated its key before its TLSA; that is a correct refusal, and the
 certificate's `notBefore` is the thing to check before hunting a resolver bug.
 
+### 8.1 The route: direct, or through the device-local Tor, by address
+
+The pin is checked on **one** TLS handshake — the one the request is written
+to — and the connection is never pooled: a reused keep-alive socket could carry
+a request past a verification that ran on a different handshake. The reference
+implementation builds that socket in one place, `connectDane()` in
+`../../src/dane-connect.js`: TLS is layered over a raw socket, `servername` is
+the Handshake name, PKIX verification is off (trust is DANE, not WebPKI), and on
+`secureConnect` the peer certificate is handed to `verifyDane()` against the
+zone's TLSA before the socket is handed back; any state but `verified` destroys
+the socket. The plaintext counterpart, for a zone that has proven it publishes
+no pin (*Absence*, above), is `connectPlain()`: the same route choice, nothing
+to pin.
+
+The **route** is the one thing about that socket that varies, and it is
+injected exactly as the authoritative hop's is (§6.11): a `dial(address, port)`
+that returns the raw socket, or `null` for a direct TCP connection. In Private
+mode (`../../SPEC.md` §4.2) the reference implementation passes the SOCKS5
+dialler of `../../src/socks-dial.js`, pointed at the device-local Tor's port,
+and:
+
+- the dial is **by address** — the chain has already resolved the name, so the
+  CONNECT request carries the IPv4 address as ATYP `0x01` (RFC 1928 §4) and
+  **Tor learns an IP and no name**;
+- the server name in the ClientHello is still the Handshake name — it is what
+  the site needs to select its certificate, and it is what the exit sees
+  (§11.6, on ECH);
+- the pin check is **identical on both routes**, by construction: `verifyDane()`
+  sees the certificate the same way whether the bytes under it arrived directly
+  or through the tunnel, and a pin that fails through Tor fails exactly as it
+  fails directly (`tests/dane-connect.test.js`: *"through Tor: the same pin
+  check rides the SOCKS tunnel, and the proxy is handed the ADDRESS, not the
+  name"*, *"through Tor: a mismatched pin is refused on the tunnel exactly as
+  it is directly"*, *"connectPlain: direct, or through the same dialer"*).
+
+An implementation that offers Private mode **MUST NOT** dial an A-record site
+directly while the mode is on, and **MUST NOT** trade the pin for the route:
+both hold at once, or the page is refused. When protection is on and there is no
+Tor port to dial through — the anonymizer is BLOCKED (Chapter 8 §7.6) and
+reports no SOCKS URL — the reference implementation refuses the page **before
+any socket is opened**: nothing is sent to the site, directly or otherwise. The
+refusal is `privateRefusal('site')` (`../../src/delivery-mode.js`): it names
+the mode, says the site is served from its own server and that Private reaches
+a server only through the Tor client on this device, says nothing was sent,
+does not blame the site, and points at the control. The same rule covers the
+plaintext case: a zone that allows HTTP is dialled through the same `dial`, or
+not at all.
+
+In Fast mode `dial` is `null` and the connection is direct; the site sees the
+user's address, as the mode's disclosure says.
+
 ---
 
 ## 9. Transport: DoH and Oblivious DoH
@@ -775,6 +845,8 @@ When the chain path is unavailable — no local node, node not synced, or an
 infrastructure failure — an implementation MAY fall back to DNS-over-HTTPS
 against resolvers that understand Handshake names (RFC 8484, wire format, GET
 with `?dns=<base64url>`; POST is rejected by several Handshake DoH servers).
+Which transports that fallback may use depends on the mode (§9.3): oblivious
+first in both modes, and plain DoH beneath it in **Fast only**.
 
 Everything resolved this way:
 
@@ -833,12 +905,80 @@ looks like — and confirming it over *plain* DoH would leak the name in the
 common case, defeating the transport in exactly the situation it was chosen
 for. It is confirmed obliviously instead: a second independent oblivious answer
 agreeing on empty stands, and plain DoH is involved only when the confirmation
-*transport* fails.
+*transport* fails — in Fast mode. In Private mode a confirmation whose
+transport fails leaves the name `unreachable` (§9.3): a weak empty answer that
+cannot be confirmed obliviously is not confirmed at all.
 
 For the same honesty reason: a bridge that presents ODoH to a browser engine's
 own DNS stack (as `../../src/odoh-bridge.js` does, a loopback HTTPS endpoint on
 a per-launch secret path with a self-signed certificate) MUST bind to loopback
 only and MUST reject cross-site requests.
+
+### 9.3 Private mode: obliviously, or not at all
+
+Row 3 of `../../DIVERGENCE.md`. The plain-DoH fallback of §9.1 exists because
+the oblivious relays are few and can all fail, and taking it discloses the name
+— to the resolver, and to the path — for exactly the lookup the oblivious
+transport was chosen to hide. That is the one place on this chapter's DoH path
+where privacy and availability cannot both be had, and it is what the Private
+mode of `../../SPEC.md` §4.2 decides.
+
+`DoHResolver` takes `strictOblivious` — a boolean, or a live predicate read
+**per query**, so a mode switch applies to the next lookup without a restart
+(`_strict()`, `../../src/doh.js`). While it holds:
+
+- a Handshake name over DoH is looked up **obliviously or not at all**. The
+  oblivious transport is tried exactly as in Fast; the plain-DoH fallback
+  below it **MUST NOT** be taken, for any query — `TXT`, the DNSLink `TXT`,
+  `A` or `TLSA`;
+- a weak empty-NOERROR is confirmed obliviously (§9.2); if the confirmation
+  transport fails, the answer is not confirmed and the query fails;
+- with no oblivious transport configured at all, the resolver refuses rather
+  than resolving in the clear;
+- every such failure is `privateLookupFailure`: an error reading *"the private
+  lookup failed (…) and no unprotected lookup was made"*, carrying the
+  underlying reason — the relay error, the rcode, or *"the oblivious answer
+  could not be confirmed"* — and marked `private`, so a caller can tell the
+  browser keeping its promise from a network fault. `resolve()` and
+  `txtRecords()` report it as `{ kind: 'unreachable', reason }` (§6.9): the
+  browser could not *ask*, which is not *"there is no such name"* (§6.1). A
+  synced chain's `unregistered` is unaffected — the mode changes what happens
+  when the chain path is unavailable, not what the chain said.
+
+`tests/doh.test.js` pins the four cases: *"strict: an oblivious answer is used
+exactly as before, and no plain endpoint is asked"*, *"strict: when the
+oblivious transport fails, the name is UNREACHABLE and no plain query left the
+machine"*, *"strict with no oblivious transport configured refuses rather than
+resolving in the clear"*, and *"not strict (Fast): the same relay failure falls
+back to plain DoH, as it always did"*.
+
+**What the page and the trust state say.** An `unreachable` produced this way
+is the browser keeping its promise, not a fault of the site, and an
+implementation **MUST** say so. The reference `hns://` handler turns it into a
+page built by `privateRefusal('lookup')` (`../../src/delivery-mode.js`), which:
+names the mode; says the private lookup failed, with the reason, and that this
+browser did not fall back to an unprotected one; says **nothing is known about
+the site itself — it may be perfectly fine**; and points at the control
+(*"Switch to Fast in Settings › Content delivery to look it up directly"*). The
+trust state it records is `failed` with a single step labelled `Private mode`,
+whose source is the control and whose detail is the page's words
+(`privateLookupPage`, `privateFailure`), so the panel says what the page says
+and neither blames the site. It **MUST NOT** be rendered as the zone's failure,
+as `unregistered`, or as a generic resolution error. The same page is produced
+when the chain path throws and the oblivious fallback cannot answer (§9.1's
+third state), and when a chain-path resolution itself comes back `unreachable`
+while the mode is on.
+
+**Fast mode** is §9.1 and §9.2 as written: oblivious first, plain DoH beneath
+it. Its cost is the disclosure the mode's own wording states — when the relays
+fail, the resolver at `query.hns.one` (then the community resolvers) learns the
+name and the address asking, and the path sees the connection to it; the trust
+state names the endpoint that answered, so the panel shows which transport
+carried a given page (§9.2).
+
+A mode never changes what a DoH answer is *worth*: an answer carried
+obliviously or plainly is `unverified` either way, on the resolver's word (§4).
+The mode decides whether the plain transport may be used at all.
 
 ---
 
@@ -956,6 +1096,54 @@ migration path work in the outward direction, and it is also what makes a
 conflict a real possibility: a publisher that moves one record and not the other
 gets a refusal rather than a coin toss (§6.9), which is the behaviour to design
 a publish flow against.
+
+### 10.2 Content pointers in Private mode
+
+This chapter ends at the pointer (§1.1); how the bytes are fetched is Chapter 3's
+and Chapter 9's. But the Private mode of `../../SPEC.md` §4.2 decides, **at the
+pointer**, whether a fetch is attempted at all, and the reference `hns://`
+handler enforces that decision at this boundary, so it is stated here.
+
+**`ipfs=` (and a DNSLink `/ipfs/`).** Finding a CID's providers means asking
+strangers over libp2p — a DHT walk and Bitswap sessions from the local node —
+which no HTTP proxy covers and which discloses the user's address and the CID to
+whoever answers (`../../DIVERGENCE.md` rows 8, 9 and 19). In Private mode the
+reference implementation **does not make that lookup**. A name is served if,
+and only if, its **whole archive** can be had from a **stated origin** without
+routing: a `car=` origin the name publishes beside its pointer (Chapter 3 §8),
+or a `<label>.pinthis` name, whose gateway *is* its origin. The handler asks its
+origin warmer for the whole archive — no range, no sub-path
+(`warmFromOrigin(host, cid, { origin })`): the CAR is fetched from the origin
+over the **proxied session fetch**, so the origin sees a Tor exit and not the
+user; it is verified **block by block** against the CID on import; and the local
+node then serves it from its own disk, making no routing query for a DAG it
+holds whole. Anything less than the whole archive is refused: a name with no
+stated origin, an archive above the private fetch limit, a failed fetch, a node
+that is not running, or origin fetching turned off in Settings. The refusal is
+`privateRefusal('ipfs')`, with the reason: it names the mode, says the content
+is found by asking strangers directly over a path Private cannot route, that
+asking would reveal this device's address so it was not asked, that a name
+which also publishes a stated origin loads from that origin in Private mode,
+and points at the control. The trust state is `failed` with the `Private mode`
+step (§9.3). In Fast mode the same name is served through the node with routing
+on, and the origin fetch is an optimisation rather than a condition.
+
+**`bt=` and `hyper=`.** A swarm's peers learn the address of whoever asks, by
+design, and the UDP transports of DHT discovery do not traverse Tor at all (row
+19). In Private mode these pointers are **refused**, with
+`privateRefusal('p2p')`: the mode, the protocol by name, that nothing was asked,
+that a name which also publishes a stated origin loads from that origin in
+Private mode, and the control. There is no proxied form of either engine that
+is the same engine, and an implementation **MUST NOT** substitute a weaker one
+silently.
+
+**`ar=`** rides the proxied session fetch to a gateway (Chapter 4) and is
+unaffected by the mode beyond the route.
+
+Nothing here alters a pointer's trust (§4, §10): a CID served from a stated
+origin is content-addressed and its Content step is `verified` exactly as it is
+from the swarm. The mode decides whether the bytes are *sought*; the pointer
+decides what they are worth once found.
 
 ---
 
@@ -1090,9 +1278,20 @@ is the cost `HS-16` records. See `../../DEVIATIONS.md` (Chapter 1, §2.5).
   directly.
 - The weaker-trust-for-no-leak trade is therefore made only when one of those
   halves is missing: no proxy port, or a node not (yet) running through it, in
-  which case the DoH path over the proxied fetch answers and the interface must
-  state which the user got. An implementation that has no such dialler has no
-  third option and MUST take that trade rather than resolve directly.
+  which case the DoH path over the proxied fetch answers — obliviously only, in
+  Private mode (§9.3) — and the interface must state which the user got. An
+  implementation that has no such dialler has no third option and MUST take
+  that trade rather than resolve directly.
+- **The mode is a policy about the route, never about the verdict**
+  (`../../SPEC.md` §4.2, §4.1 above). In Private mode each of this chapter's
+  egress kinds is either carried through the device-local Tor with its proof
+  and pin unchanged — the authoritative hop and the node's peers (§6.11), the
+  A-record site by address (§8.1) — or not made at all: the plain-DoH fallback
+  (§9.3), the peer-to-peer content lookups (§10.2). Every refusal or failure
+  the mode causes names the mode, says what was not done, does not blame the
+  site, and points at the control — one builder, `privateRefusal()` in
+  `../../src/delivery-mode.js`. In Fast mode every path is the direct one, and
+  the disclosures of this list are the ones the mode's wording states.
 - Every HTTPS egress this stack makes on the user's behalf — the DoH lookup,
   the oblivious relay leg, and the registry read of Chapter 10 — MUST be made
   through an injected fetch that the embedder can point at its proxied session.
@@ -1100,4 +1299,5 @@ is the cost `HS-16` records. See `../../DEVIATIONS.md` (Chapter 1, §2.5).
   unproxied while anonymization is on, and does so silently, because it works.
 - ODoH's guarantee is not what the RFC describes at current relay scale (§9.2).
 - Without ECH (`HS-3`) the server name is in the ClientHello regardless, so an
-  oblivious DNS lookup does not by itself hide which Handshake site was visited.
+  oblivious DNS lookup does not by itself hide which Handshake site was visited,
+  and the Tor exit of §8.1 sees the same server name.

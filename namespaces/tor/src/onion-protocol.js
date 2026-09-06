@@ -229,16 +229,16 @@ function forwardHeaders (request) {
 }
 
 /**
- * The "turn on IP Protection" interstitial, with the fingerprinting caveat.
+ * The "choose Private mode" interstitial, with the fingerprinting caveat.
  * @param {string} host
  */
 function interstitial (host) {
-  return htmlResponse(200, 'Turn on IP Protection to reach this .onion service',
+  return htmlResponse(200, 'Choose Private mode to reach this .onion service',
     `<p>This browser reaches <code>${escapeHtml(host)}</code> <b>only</b> through the Tor client
         running on your own device — never through a hosted relay. That path is off right now.</p>
-     <p><b>To open it:</b> use the <b>Privacy</b> menu and choose
-        <b>IP&nbsp;Protection: On (via&nbsp;Tor)</b>, then reload this page. The first
-        connection can take up to a minute while the circuit is built.</p>
+     <p><b>To open it:</b> choose <b>Private</b> under <b>Mode</b> in Settings › Content delivery
+        (or <b>Mode: Private (via&nbsp;Tor)</b> in the <b>Privacy</b> menu), then reload this page.
+        The first connection can take up to a minute while the circuit is built.</p>
      <p class="warn"><b>One honest caveat:</b> reaching .onion here hides your IP, but this browser does
         not resist fingerprinting the way Tor Browser does — so this is not full anonymity.</p>`)
 }

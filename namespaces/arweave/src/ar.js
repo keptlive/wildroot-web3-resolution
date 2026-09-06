@@ -93,15 +93,46 @@ function isSafeSegment (segment) {
 }
 
 /**
- * Where a gateway redirect may go: the SAME gateway, the SAME transaction,
- * one hop. Anything else is refused — a `location` handed back to the
- * renderer would restore the open redirect that `redirect: 'manual'` closes.
+ * The sandbox label a gateway serves a transaction under: arweave.net (and
+ * every ar.io gateway) answers `GET /<txid>` with a 302 to
+ * `https://<base32(txid bytes)>.<gateway>/<txid>[/path]`, so that each
+ * transaction gets its own origin in the renderer. Base32 per RFC 4648 §6,
+ * lowercase, unpadded — 52 characters for a 32-byte id.
+ * @param {string} txid the canonical base64url id
  */
-function sameScopeRedirect (location, base, txid) {
+export function sandboxLabel (txid) {
+  const bytes = Buffer.from(String(txid), 'base64url')
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz234567'
+  let bits = 0
+  let acc = 0
+  let out = ''
+  for (const b of bytes) {
+    acc = (acc << 8) | b
+    bits += 8
+    while (bits >= 5) {
+      bits -= 5
+      out += alphabet[(acc >> bits) & 31]
+    }
+  }
+  if (bits > 0) out += alphabet[(acc << (5 - bits)) & 31]
+  return out
+}
+
+/**
+ * Where a gateway redirect may go: the SAME gateway — its own host, or a
+ * subdomain of it, which is how a gateway sandboxes a transaction into its
+ * own origin (sandboxLabel) — the SAME transaction (the txid stays the first
+ * path segment), https, one hop. Anything else is refused — a `location`
+ * handed back to the renderer would restore the open redirect that
+ * `redirect: 'manual'` closes.
+ */
+export function sameScopeRedirect (location, base, txid) {
   let target
   try { target = new URL(String(location), base) } catch { return null }
   const from = new URL(base)
-  if (target.protocol !== 'https:' || target.host !== from.host) return null
+  if (target.protocol !== 'https:') return null
+  const sameGateway = target.host === from.host || target.hostname.endsWith('.' + from.hostname)
+  if (!sameGateway) return null
   const first = target.pathname.split('/').filter(Boolean)[0]
   if (first !== txid) return null
   return target.href

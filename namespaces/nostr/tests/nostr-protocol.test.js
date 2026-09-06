@@ -326,3 +326,47 @@ test('a malformed kind:0 is an absent profile, not an error', async () => {
   assert.equal(res.status, 200)
   assert.match(await res.text(), /Unnamed profile/)
 })
+
+// ---------------------------------------------------------------- Private mode
+// Row 15 of the divergence inventory: with protection on, the relays are
+// dialled through the device-local Tor (the WebSocketImpl seam takes the
+// SOCKS-capable class); with protection on and NO Tor port, the request is
+// refused in words rather than dialled directly.
+
+test('Private mode with a Tor port: the Tor-dialling class is built for that port and used for the relays', async () => {
+  const built = []
+  const dialled = []
+  const res = await withRelay(undefined, `nostr:${NPUB}`, {
+    isAnonymized: () => true,
+    torSocks: () => 'socks5://127.0.0.1:41000',
+    torWebSocket: (socks) => { built.push(socks); return scriptRelay([], dialled) }
+  })
+  assert.equal(res.status, 404, 'the scripted relay answered with nothing, so: not found')
+  assert.deepEqual(built, ['socks5://127.0.0.1:41000'], 'one class, for the anonymizer\'s port')
+  assert.ok(dialled.length > 0, 'the relays were dialled through it')
+})
+
+test('Private mode with NO Tor port: refused before any relay is dialled, and the page says which switch', async () => {
+  const dialled = []
+  const res = await withRelay(scriptRelay([], dialled), `nostr:${NPUB}`, {
+    isAnonymized: () => true,
+    torSocks: () => null
+  })
+  assert.equal(res.status, 503)
+  const body = await res.text()
+  assert.match(body, /Relays are not asked in Private mode/)
+  assert.match(body, /Nothing was asked/)
+  assert.match(body, /Settings › Content delivery/)
+  assert.deepEqual(dialled, [], 'no relay saw the question')
+})
+
+test('Fast mode: the injected WebSocketImpl is used and the Tor builder is never called', async () => {
+  const built = []
+  const res = await withRelay(scriptRelay([]), `nostr:${NPUB}`, {
+    isAnonymized: () => false,
+    torSocks: () => 'socks5://127.0.0.1:41000',
+    torWebSocket: (socks) => { built.push(socks); return scriptRelay([]) }
+  })
+  assert.equal(res.status, 404)
+  assert.deepEqual(built, [])
+})

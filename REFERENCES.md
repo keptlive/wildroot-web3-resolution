@@ -11,7 +11,7 @@ another — and that column is the point of the file.
 
 ## Index
 
-271 identifiers.
+276 identifiers.
 
 | Identifier | Title | Cited in |
 |---|---|---|
@@ -21,9 +21,11 @@ another — and that column is the point of the file.
 | [`../../namespaces/router/SPEC.md`](../router/SPEC.md) | The router chapter of this specification | Chapter 2 |
 | [`../../SPEC.md`](../../SPEC.md) | The integrated specification — the spine | Chapter 8 |
 | `../../SPEC.md` §3, §4 | The spine: namespace selection and trust states | Chapter 4 |
+| [`../../SPEC.md` §4.2](../../SPEC.md) | The Fast / Private switch | Chapter 1, Chapter 2, Chapter 8 |
 | `../../SPEC.md` §6 | The spine: the resolution algorithm | Chapter 4 |
 | `../../SPEC.md` §7 | The spine: HIP-5 `_op` on-chain resolution | Chapter 4 |
 | `../../SPEC.md` §10 | The spine: content pointers | Chapter 4 |
+| `../../src/delivery-mode.js` | The one switch — Settings › Content delivery › Mode | Chapter 6, Chapter 7, Chapter 9, Chapter 11 |
 | [@adraffy/ens-normalize](https://github.com/adraffy/ens-normalize.js) | ens-normalize.js | Chapter 5 |
 | [`@noble/curves`](https://github.com/paulmillr/noble-curves) | Audited elliptic-curve implementations | Chapter 6, Chapter 7 |
 | [ANS-104](https://github.com/ArweaveTeam/arweave-standards/blob/master/ans/ANS-104.md) | Bundled Data v2.0.0 (Arweave Standards) | Chapter 4 |
@@ -46,7 +48,7 @@ another — and that column is the point of the file.
 | [BIP-173](https://github.com/bitcoin/bips/blob/master/bip-0173.mediawiki) | Base32 address format for native v0-16 witness outputs (Bech32) | Part II, Chapter 6 |
 | [BIP-340](https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki) | Schnorr Signatures for secp256k1 | Part II, Chapter 6, Chapter 7, Chapter 11 |
 | `browser docs/HANDSHAKE-APPS-MEDIATOR.md` | Wildroot, the mediator as built | Chapter 11 |
-| `browser docs/MODES.md` | Wildroot, *the Private / Fast design* | Chapter 11 |
+| `browser docs/MODES.md` | Wildroot, *Private mode and Fast mode* | Chapter 11 |
 | `browser docs/WEBSOCKETS.md` | Wildroot, *WebSockets for Handshake apps (`wss://<name>`)* — the tunnel as built | Chapter 11 |
 | [Chromium proxy documentation](https://chromium.googlesource.com/chromium/src/+/HEAD/net/docs/proxy.md) | Chromium, `net/docs/proxy.md` — proxy resolution, PAC evaluation, proxy bypass rules | Chapter 11 |
 | [Chromium URL / scheme registry](https://chromium.googlesource.com/chromium/src/+/main/url/) | Chromium `url` library | Part II, Chapter 10 |
@@ -61,6 +63,7 @@ another — and that column is the point of the file.
 | [DNSCrypt public ODoH server list](https://github.com/DNSCrypt/dnscrypt-resolvers) | DNSCrypt resolver lists | Chapter 2 |
 | [DNSLink](https://dnslink.dev/) | DNSLink specification | Part II, Chapter 1, Chapter 3, Chapter 9 |
 | [docs.ar.io](https://docs.ar.io/) | ar.io gateway and network documentation | Chapter 4 |
+| `docs/MODES.md` (browser) | Wildroot, *Private mode and Fast mode* | Chapter 6 |
 | `docs/RESOLUTION-ROUTER.md`, `docs/TORRENT-DESIGN.md`, `docs/Protocols.md`, `docs/Fetch-Hyper.md`, `docs/Fetch-Gemini.md`, `docs/MODES.md` | Wildroot browser design documents | Chapter 9 |
 | `docs/SOCIAL-MULTIPROTOCOL.md` | Wildroot design record — multi-protocol social identity | Chapter 7 |
 | [draft-ietf-dnsop-deleg](https://datatracker.ietf.org/doc/draft-ietf-dnsop-deleg/) | Extensible delegation for DNS | Chapter 1 |
@@ -164,7 +167,7 @@ another — and that column is the point of the file.
 | [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123) | Requirements for Internet Hosts — Application and Support | Part II, Chapter 6, Chapter 7, Chapter 10 |
 | [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123) §2.1 | Requirements for Internet Hosts — Application and Support | Chapter 2 |
 | [RFC 1918](https://www.rfc-editor.org/rfc/rfc1918) | Address Allocation for Private Internets | Chapter 2 |
-| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS protocol version 5 | Chapter 1, Chapter 8, Chapter 9, Chapter 11 |
+| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS protocol version 5 | Chapter 1, Chapter 6, Chapter 8, Chapter 9, Chapter 11 |
 | [RFC 1929](https://www.rfc-editor.org/rfc/rfc1929) | Username/Password Authentication for SOCKS V5 | Chapter 8, Chapter 11 |
 | [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) | Key words for use in RFCs to Indicate Requirement Levels | Chapter 2, Chapter 7, Chapter 11 |
 | [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) · [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174) | Key words for use in RFCs | Chapter 6 |
@@ -196,6 +199,7 @@ another — and that column is the point of the file.
 | [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) | HMAC-based extract-and-expand key derivation function (HKDF) | Chapter 1, Chapter 2 |
 | [RFC 5890](https://www.rfc-editor.org/rfc/rfc5890) | IDNA2008: Definitions and Document Framework | Part II, Chapter 1, Chapter 2, Chapter 6 |
 | [RFC 5891](https://www.rfc-editor.org/rfc/rfc5891) | IDNA2008: Protocol | Part II, Chapter 1, Chapter 2 |
+| [RFC 6066](https://www.rfc-editor.org/rfc/rfc6066) | Transport Layer Security (TLS) Extensions: Extension Definitions — §3, Server Name Indication | Chapter 6 |
 | [RFC 6125](https://www.rfc-editor.org/rfc/rfc6125) | Representation and Verification of Domain-Based Application Service Identity in PKIX | Chapter 9 |
 | [RFC 6265](https://www.rfc-editor.org/rfc/rfc6265) | HTTP State Management Mechanism | Chapter 8 |
 | [RFC 6454](https://www.rfc-editor.org/rfc/rfc6454) | The Web Origin Concept | Chapter 11 |
@@ -285,6 +289,7 @@ another — and that column is the point of the file.
 | [WHATWG URL Standard — ends-in-a-number checker](https://url.spec.whatwg.org/#ends-in-a-number-checker) and [IPv4 parser](https://url.spec.whatwg.org/#concept-ipv4-parser) | URL Standard, IPv4 parsing | Chapter 2 |
 | [WHATWG URL Standard §host parsing](https://url.spec.whatwg.org/#host-parsing) | URL Standard | Chapter 2 |
 | [WHATWG WebSockets](https://websockets.spec.whatwg.org/) | WebSockets Standard (the `WebSocket` interface) | Chapter 6 |
+| [`ws`](https://github.com/websockets/ws) | WebSocket client and server for Node.js | Chapter 6 |
 | [z-base-32](https://philzimmermann.com/docs/human-oriented-base-32-encoding.txt) | Human-oriented base-32 encoding (Zooko O'Whielacronx) | Chapter 9 |
 
 ---
@@ -394,7 +399,7 @@ reference implementation.
 | [RFC 4343](https://www.rfc-editor.org/rfc/rfc4343) | DNS case insensitivity clarification | Owner names are compared case-insensitively and trailing-dot-stripped wherever a comparison happens, including the question-section check of §6.10. `../../src/resolver.js`, `../../src/dns-query.js`, `../../src/nsec.js`, `../../src/dnssec.js` |
 | [RFC 6891](https://www.rfc-editor.org/rfc/rfc6891) | Extension mechanisms for DNS (EDNS(0)) | The OPT pseudo-record of §6.5, emitted solely to carry the DO bit. **Partial**: not read back, no large-UDP advertisement (UDP is never used), no extended RCODEs. `../../src/dns-query.js` — see HS-11 |
 | [RFC 7766](https://www.rfc-editor.org/rfc/rfc7766) | DNS transport over TCP | Queries in §6 go over **TCP always**, which is why the truncation (TC) rule is moot here by construction rather than unhandled. `../../src/dns-query.js` |
-| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS protocol version 5 | §6.11: the `dial` seam. A CONNECT request (`no authentication` method only) to a device-local SOCKS port carries the authoritative TCP query of §6.5 while an anonymizing proxy is on, so the chain proof and the DNSSEC validation are kept rather than traded away. A dotted quad goes out as ATYP `0x01`; anything else as ATYP `0x03`, a domain name, resolved by the proxy and never locally. Which proxy, and what it is worth, is Chapter 8. `../../src/socks-dial.js`, `../../src/dns-query.js` (`query`'s `dial` option) |
+| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS protocol version 5 | §6.11: the `dial` seam. A CONNECT request (`no authentication` method only) to a device-local SOCKS port carries the authoritative TCP query of §6.5 while an anonymizing proxy is on, so the chain proof and the DNSSEC validation are kept rather than traded away. A dotted quad goes out as ATYP `0x01`; anything else as ATYP `0x03`, a domain name, resolved by the proxy and never locally. §8.1: in Private mode the same dialler carries the A-record site's TLS socket, **by address** (ATYP `0x01`), so Tor learns an IP and no name while the DANE pin is checked on that handshake. Which proxy, and what it is worth, is Chapter 8. `../../src/socks-dial.js`, `../../src/dns-query.js` (`query`'s `dial` option), `../../src/dane-connect.js` (`connectDane`'s and `connectPlain`'s `dial`) |
 | [RFC 8499](https://www.rfc-editor.org/rfc/rfc8499) | DNS terminology | The vocabulary of §2: *authoritative server*, *zone cut*, *delegation*, *referral*, *NODATA*, *validating resolver*, *insecure delegation*, *bailiwick*. §2 |
 | [RFC 3596](https://www.rfc-editor.org/rfc/rfc3596) | DNS extensions to support IPv6 (AAAA) | **Not implemented.** Listed because its absence is a documented gap: §6.5f reads only `A`. HS-2 |
 | [RFC 8914](https://www.rfc-editor.org/rfc/rfc8914) | Extended DNS Errors | **Not implemented.** Would improve the failure reporting of §6.9 and §11.1. HS-11 |
@@ -423,18 +428,18 @@ reference implementation.
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [RFC 6698](https://www.rfc-editor.org/rfc/rfc6698) | The DNS-based authentication of named entities (DANE) transport layer security protocol: TLSA | §8: the TLSA record and its four parameters. One profile is implemented — usage 3 (DANE-EE), selector 1 (SPKI), matching type 1 (SHA-256). §3 gives the owner-name form `_<port>._tcp.<host>`; `_443._tcp` is always used (HS-6). `../../src/dane.js`, `../../src/resolver.js` |
-| [RFC 7671](https://www.rfc-editor.org/rfc/rfc7671) | The DANE protocol: updates and operational guidance | §8: §4.1 unusable TLSA records (deviation, HS-5), §5.1 DANE-EE ignores PKIX expiry (followed deliberately), §7.2 the TLSA base domain across a CNAME, §8.1 operator key rotation and what a client does on a mismatch (HS-12). `../../src/dane.js`, `../../src/resolver.js` |
+| [RFC 6698](https://www.rfc-editor.org/rfc/rfc6698) | The DNS-based authentication of named entities (DANE) transport layer security protocol: TLSA | §8: the TLSA record and its four parameters. One profile is implemented — usage 3 (DANE-EE), selector 1 (SPKI), matching type 1 (SHA-256). §3 gives the owner-name form `_<port>._tcp.<host>`; `_443._tcp` is always used (HS-6). The check is the same on both routes of §8.1 — direct, or through the device-local Tor by address — because `connectDane` hands `verifyDane` the peer certificate of whichever socket carried the handshake. `../../src/dane.js`, `../../src/resolver.js`, `../../src/dane-connect.js` |
+| [RFC 7671](https://www.rfc-editor.org/rfc/rfc7671) | The DANE protocol: updates and operational guidance | §8: §4.1 unusable TLSA records (deviation, HS-5), §5.1 DANE-EE ignores PKIX expiry (followed deliberately), §7.2 the TLSA base domain across a CNAME, §8.1 operator key rotation and what a client does on a mismatch (HS-12). The pin is applied on the one handshake the request rides, whichever route carried it (this chapter's §8.1), and the socket is never pooled. `../../src/dane.js`, `../../src/resolver.js`, `../../src/dane-connect.js` |
 | [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280) | Internet X.509 public key infrastructure certificate and CRL profile | §8, only to **parse** a certificate and extract its SubjectPublicKeyInfo for hashing. No chain is built and no CA is consulted on the `hns://` path — that is the point of DANE-EE. `../../src/dane.js` (Node `X509Certificate`) |
-| [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446) | The transport layer security (TLS) protocol version 1.3 | §8: the transport an `hns://` fetch runs over, terminated by Node's TLS stack; the peer certificate it yields is what the pin is checked against. The composition layer (DEVIATIONS §4), not `../../src/` |
+| [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446) | The transport layer security (TLS) protocol version 1.3 | §8, §8.1: the transport an `hns://` fetch runs over, terminated by Node's TLS stack; the peer certificate it yields is what the pin is checked against. `connectDane` sets `servername` to the Handshake name, turns PKIX verification off, and layers the handshake over a direct socket or the SOCKS tunnel alike. `../../src/dane-connect.js`; the request written over it is the composition layer's (DEVIATIONS §4) |
 | [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110) | HTTP semantics | §8: the application protocol carried over that connection, and the semantics of the status codes the resolution layer reports. The composition layer |
 
 ### Encrypted DNS transport
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [RFC 8484](https://www.rfc-editor.org/rfc/rfc8484) | DNS queries over HTTPS (DoH) | §9.1: wire-format DoH, GET with `?dns=<base64url>` and `application/dns-message`; §4.1 is why the message id is fixed at zero and the question section is the only binding (§6.10). Several Handshake DoH servers reject POST, which is why GET is used. `../../src/doh.js` |
-| [RFC 9230](https://www.rfc-editor.org/rfc/rfc9230) | Oblivious DNS over HTTPS | §9.2: §6 the message format and HPKE parameters, §6.3 the response AEAD key derivation from the HPKE exporter secret plus a target-chosen nonce, and the ODoH configuration record. `../../src/odoh.js`, `../../src/odoh-bridge.js` |
+| [RFC 8484](https://www.rfc-editor.org/rfc/rfc8484) | DNS queries over HTTPS (DoH) | §9.1: wire-format DoH, GET with `?dns=<base64url>` and `application/dns-message`; §4.1 is why the message id is fixed at zero and the question section is the only binding (§6.10). Several Handshake DoH servers reject POST, which is why GET is used. §9.3: the plain transport is used in Fast mode only; in Private it is never taken (`DoHResolver`'s `strictOblivious`). `../../src/doh.js` |
+| [RFC 9230](https://www.rfc-editor.org/rfc/rfc9230) | Oblivious DNS over HTTPS | §9.2: §6 the message format and HPKE parameters, §6.3 the response AEAD key derivation from the HPKE exporter secret plus a target-chosen nonce, and the ODoH configuration record. §9.3: in Private mode the only transport a Handshake name may take over DoH. `../../src/odoh.js`, `../../src/odoh-bridge.js` |
 | [RFC 9180](https://www.rfc-editor.org/rfc/rfc9180) | Hybrid public key encryption | §9.2: the construction ODoH is built on — X25519-HKDF-SHA256 / HKDF-SHA256 / AES-128-GCM, over WebCrypto. `../../src/odoh.js` |
 | [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) | HMAC-based extract-and-expand key derivation function (HKDF) | §9.2: §2.2/§2.3 extract-and-expand over WebCrypto HMAC-SHA256, for the ODoH response key and nonce. `../../src/odoh.js` |
 | [RFC 9462](https://www.rfc-editor.org/rfc/rfc9462) | Discovery of designated resolvers | **Not implemented**; an available upgrade not taken. HS-11 |
@@ -490,6 +495,7 @@ reference implementation.
 | [DNSLink](https://dnslink.dev/) | The `_dnslink.<name> TXT dnslink=/ipfs/<cid>` convention | §10.1: the **second pointer source**, and the reason a site published for kubo, IPFS Companion or Brave opens here unchanged. Defines the `_dnslink.` owner prefix, the `dnslink=/<namespace>/<address>[/path]` value grammar and the one-value-per-name rule this implementation reads it by; only `/ipfs/` and `/ipns/` are pointers here. Read on both routes, under the same DNSSEC and proven-absence rules as the pointer at the name (§6.5d–e), and written at publish beside `ipfs=`. `../../src/pointers.js` (`parseDnslink`, `dnslinkPointerFrom`, `mergePointers`, `dnslinkValue`, `dnslinkOwner`), `../../src/resolver.js` (`_fromZone`), `../../src/doh.js` |
 | [IANA root zone database](https://data.iana.org/TLD/tlds-alpha-by-domain.txt) | Delegated top-level domains | §3: the ICANN snapshot that decides ICANN-vs-Handshake for every name, checked against the live list by a network test in the browser tree. `../../src/icann-tlds.cjs` |
 | [RFC 9498](https://www.rfc-editor.org/rfc/rfc9498) | The GNU Name System | §3, §9.10: namespace precedence — resolve in the alternative namespace when its suffix matches, and do not continue into DNS on failure. Adopted as a normative rule because it is the only place this is written down in an RFC. `../../src/router.js` |
+| [`SPEC.md` §4.2](SPEC.md) | The Fast / Private switch | §4.1, §8.1, §9.3, §10.2, §11.6: the one control whose policy table (`policyFor`) this chapter's consumers read — `strictOblivious` for the DoH resolver, the route for the site socket and the pointer decisions — and the one builder of every mode-caused page, `privateRefusal('lookup' \| 'site' \| 'ipfs' \| 'p2p')`. The disclosure the control carries is `DISCLOSURE`, in full. `../../src/delivery-mode.js`, `../../tests/delivery-mode.test.js` |
 
 
 ---
@@ -566,7 +572,7 @@ the code that makes it.
 | [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) | HMAC-based Extract-and-Expand Key Derivation Function (HKDF) | §5.3 — §2.2/§2.3 extract-and-expand for the ODoH key id, response key and nonce. `../../src/odoh.js:73-84`, `:117-120`. |
 | [RFC 8615](https://www.rfc-editor.org/rfc/rfc8615) | Well-Known Uniform Resource Identifiers | §5.3 — the registry `/.well-known/odohconfigs` is, as far as we can establish, **not** in. `DEVIATIONS.md` IC-8 and §2. |
 | [RFC 7858](https://www.rfc-editor.org/rfc/rfc7858) | DNS over TLS (DoT) | §5.1 — **not used, and not usable**: the engine accepts only RFC 8484 https templates, so DoT is not an option however configured. Listed because its absence is a constraint we inherited, not one we chose. `DEVIATIONS.md` IC-11. |
-| [RFC 8310](https://www.rfc-editor.org/rfc/rfc8310) | Usage Profiles for DNS over TLS and DTLS | §5.2, §5.5 — §8.2's opportunistic-versus-strict distinction is the vocabulary `automatic` and `secure` implement. `DEVIATIONS.md` IC-6. |
+| [RFC 8310](https://www.rfc-editor.org/rfc/rfc8310) | Usage Profiles for DNS over TLS and DTLS | §5.2, §5.5, §5.7 — §8.2's opportunistic-versus-strict distinction is the vocabulary `automatic` and `secure` implement. `automatic` is the Fast-mode plan; Private is always the strict profile, with the oblivious bridge as its only server. `DEVIATIONS.md` IC-6. |
 | [RFC 9462](https://www.rfc-editor.org/rfc/rfc9462) | Discovery of Designated Resolvers | §5.1, §7.4 — **not implemented.** The resolver list is configuration and is never discovered. Listed because it is the standard's own answer to "the network's resolver may be the right one", and we have not taken it. `DEVIATIONS.md` IC-11. |
 | [RFC 9460](https://www.rfc-editor.org/rfc/rfc9460) | Service Binding and Parameter Specification via the DNS (SVCB and HTTPS RRs) | §7.4 — type 65 is parsed by `../../src/dns-query.js` and never queried, here or anywhere. `DEVIATIONS.md` IC-11. |
 | [RFC 9848](https://www.rfc-editor.org/rfc/rfc9848) | TLS Encrypted Client Hello | §9.4 — unreachable without a queried SVCB record, and blocked on the runtime exposing no ECH option. Relevant here because without it the server name is in the ClientHello, so an oblivious DNS lookup does not by itself hide which site was visited. |
@@ -605,10 +611,11 @@ the code that makes it.
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [`app.configureHostResolver`](https://www.electronjs.org/docs/latest/api/app#appconfigurehostresolveroptions) | Electron API documentation | §5.1, §5.4 — the one call that changes what an ICANN lookup does: `secureDnsMode` (`off` / `automatic` / `secure`) and `secureDnsServers` (RFC 8484 https templates only). Everything in §5 is a policy for choosing its two arguments. `src/dns-policy.js`, `src/index.js:500`. |
+| [`app.configureHostResolver`](https://www.electronjs.org/docs/latest/api/app#appconfigurehostresolveroptions) | Electron API documentation | §5.1, §5.4 — the one call that changes what an ICANN lookup does: `secureDnsMode` (`off` / `automatic` / `secure`) and `secureDnsServers` (RFC 8484 https templates only). Everything in §5 is a policy for choosing its two arguments. Called again on every mode switch (§5.7): Private gives it `secure` with the bridge's template alone, or `secure` with an empty list; a return to a plan that configures nothing sets `off` explicitly. `src/dns-policy.js` (`planDnsTransport`, `privateDns`), the browser's `applyDnsPlan`. |
 | `--ignore-certificate-errors-spki-list` | Chromium command-line switch (documented in Chromium's own source; there is no specification) | §5.3, §9.3 — how the loopback bridge's certificate is trusted. It makes the engine accept that public key **for any host**, which is why the key is generated in memory per launch, never written to disk, and minted only when `wantsObliviousBridge()` is true. `src/index.js:259-265`, `../../src/self-cert.js`. |
 | `odoh-relay.numa.rs`, `odoh-relay.edgecompute.app` | The deployed public ODoH relays | §9.4 — the reason RFC 9230's non-collusion assumption does not hold at current scale: two public relays exist worldwide and one is run by a target operator. The code stays; the privacy claim does not. `src/config.js:376-408`. |
 | [DNSCrypt public ODoH server list](https://github.com/DNSCrypt/dnscrypt-resolvers) | DNSCrypt resolver lists | §5.3 — why the second relay is kept in the configuration although it does not currently carry our traffic: it allowlists targets, and will start working for `odoh.hns.one` once that target is on this list, so that day needs no release. `src/config.js:402-407`. |
+| [`SPEC.md` §4.2](SPEC.md) | The Fast / Private switch | §5.7, §9.4 — the one control whose policy table (`policyFor`) decides `icannDns`: `secure` in Private, the configured `dns.mode` in Fast; and the controller (`DeliveryMode`) whose `change` event re-applies the plan. `../../src/delivery-mode.js`, `../../tests/delivery-mode.test.js`. |
 | [`../../namespaces/router/SPEC.md`](namespaces/router/SPEC.md) | The router chapter of this specification | §2.1, §3 — laws **L1** (an explicit scheme selects the protocol, always) and **L2** (no silent cross-namespace fallback), which are what make "ICANN first" a *boundary* rather than a preference, and the `X-Resolution-Namespace` header that proves a failure stayed inside its namespace. `../../src/router.js`. |
 
 
@@ -746,7 +753,7 @@ uncertainty.
 |---|---|---|
 | [ANS-104](https://github.com/ArweaveTeam/arweave-standards/blob/master/ans/ANS-104.md) | Bundled Data v2.0.0 (Arweave Standards) | The identifier derivation, verbatim: *"The id of the DataItem, is the SHA256 digest of this signature."* The same rule a transaction id follows, which is why a 43-character identifier may name **either** a transaction or a bundled data item and this implementation cannot tell them apart (SPEC §3.1, §3.3), and — read the other way round — the rule the header check **computes**: `SHA-256(base64url-decode(signature))` must equal the identifier, or the transaction a gateway showed us is not the one the identifier names (SPEC §9.1.1 — `src/ar.js` `headerMatchesId`, `tests/arweave-header.test.js`). Nothing here parses a bundle. |
 | [github.com/ArweaveTeam/arweave](https://github.com/ArweaveTeam/arweave) + [docs.arweave.org](https://docs.arweave.org/) | Arweave reference implementation and developer documentation — the transaction format, the `GET /tx/<id>` header endpoint, `data_root`, and the signature the id is a digest of | Cited for both halves of §9. **Done:** `SHA-256(signature) == id` is recomputed against a header fetched from `GET <other gateway>/tx/<txid>` (SPEC §9.1.1). **Not done:** the bytes are never checked against the `data_root` that header carries, and no chunk proof is fetched or verified — which is why the row in `../../src/router.js` `SCHEME_TABLE` still says `status: 'partial'`. SPEC §9.2; `DEVIATIONS.md` AR-1, AR-D1. |
-| [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) | The Base16, Base32, and Base64 Data Encodings | §5 (base64url, the URL and filename safe alphabet) is the identifier encoding: 32 bytes unpadded is 43 characters of `A-Z a-z 0-9 - _`. §3.5 (canonical encoding — non-alphabet bits must be zero) is the rule that makes exactly one of those 43-character strings the identifier. SPEC §3.2, §3.3 — `../../src/pointers.js` `isCanonicalTxid` and `ARTX_RE`, read by `src/ar.js`. The same encoding is decoded and re-encoded on both sides of the header check (the signature in, the digest out), so the comparison is between two canonical 43-character strings and not between two byte buffers — SPEC §9.1.1. |
+| [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) | The Base16, Base32, and Base64 Data Encodings | §5 (base64url, the URL and filename safe alphabet) is the identifier encoding: 32 bytes unpadded is 43 characters of `A-Z a-z 0-9 - _`. §3.5 (canonical encoding — non-alphabet bits must be zero) is the rule that makes exactly one of those 43-character strings the identifier. SPEC §3.2, §3.3 — `../../src/pointers.js` `isCanonicalTxid` and `ARTX_RE`, read by `src/ar.js`. The same encoding is decoded and re-encoded on both sides of the header check (the signature in, the digest out), so the comparison is between two canonical 43-character strings and not between two byte buffers — SPEC §9.1.1. §6 (base32, lowercase and unpadded) is the sandbox label a gateway redirects a transaction to (`sandboxLabel()`, SPEC §6.3) — accepted as the same gateway, with the identifier in the path as the load-bearing check. |
 | [FIPS 180-4](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf) | NIST, Secure Hash Standard (SHA-256) | The one cryptographic primitive this chapter computes. An Arweave identifier is the SHA-256 digest of the transaction's signature, so the header check is a single `node:crypto` `createHash('sha256')` and no Arweave library is involved. SPEC §9.1.1 — `src/ar.js` `headerMatchesId`. |
 
 ### Path manifests
@@ -923,13 +930,15 @@ this summary of it.
 | Identifier | Title | Used for |
 |---|---|---|
 | [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md) | Basic protocol flow description | **§6, §8 and §9.3**: the event object and its seven fields; the canonical serialisation `[0, pubkey, created_at, kind, tags, content]` whose SHA-256 is the event id; the BIP-340 signature over that id; the wire protocol `REQ` / `EVENT` / `EOSE` / `CLOSED` / `CLOSE` / `NOTICE`; the filter grammar (`ids`, `authors`, `kinds`, `#<letter>`, `since`, `until`, `limit`) that `matchesFilter` enforces against every returned event; kind 0 as profile metadata and kind 1 as a text note; replaceable and addressable events. `src/event.js`, `src/relay.js`, `src/nostr-protocol.js` |
-| [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455) | The WebSocket Protocol | **§8.1**: the relay transport, always over TLS. **§10.4** is the rule that a relay *hint* must be `wss://` and nothing else. `src/relay.js` |
-| [WHATWG WebSockets](https://websockets.spec.whatwg.org/) | WebSockets Standard (the `WebSocket` interface) | **§8.1**: the API, as distinct from RFC 6455's wire protocol — `onopen`/`onmessage`/`onerror`/`onclose`, `send`, `close`. Taken from an injected `WebSocketImpl` or `globalThis.WebSocket`, never from the `ws` package, which exists in the browser's tree only as somebody else's transitive dependency. A runtime without either is reported, never silently resolved as zero results. `src/relay.js` |
+| [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455) | The WebSocket Protocol | **§8.1**: the relay transport, always over TLS. **§8.5**: on the Private route the client is the `ws` package — an RFC 6455 client that takes an agent, which is what lets its socket come out of a SOCKS tunnel — and anything but `wss://` is refused before a socket exists. **§10.4** is the rule that a relay *hint* must be `wss://` and nothing else. `src/relay.js`, `src/tor-websocket.js` |
+| [WHATWG WebSockets](https://websockets.spec.whatwg.org/) | WebSockets Standard (the `WebSocket` interface) | **§8.1**: the API on the direct route, as distinct from RFC 6455's wire protocol — `onopen`/`onmessage`/`onerror`/`onclose`, `send`, `close` — taken from an injected `WebSocketImpl` or `globalThis.WebSocket`. The Private route's `ws` class presents the same surface, which is what lets `src/relay.js` drive both without knowing which it holds (§8.5, NO-16). A runtime without either is reported, never silently resolved as zero results. `src/relay.js` |
+| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS Protocol Version 5 | **§8.5**: the Private route. The Tor-dialling class is a SOCKS5 client of the device-local Tor, offering only the "no authentication" method (§3) and sending the relay's hostname as address type `0x03` `DOMAINNAME` (§4), so the name is resolved inside Tor and the operating system's resolver is never asked — the test asserts the address type on the wire. RFC 1929's username/password method is not used, so relays share the session's circuits (Chapter 8, TO-3). `src/tor-websocket.js` via `socksDialer`, `../../src/socks-dial.js` — shared with the Handshake resolver's authoritative hop, the WebSocket tunnel of Chapter 11 and `gemini://` of Chapter 9 |
+| [RFC 6066](https://www.rfc-editor.org/rfc/rfc6066) | Transport Layer Security (TLS) Extensions: Extension Definitions — §3, Server Name Indication | **§8.5**: TLS on the Private route runs over a socket the client did not open, so the server name cannot be inferred from a hostname it resolved; `TorAgent` passes the relay's hostname as `servername` explicitly, and the test asserts the relay was offered it. `src/tor-websocket.js` |
 | [RFC 8259](https://www.rfc-editor.org/rfc/rfc8259) | The JavaScript Object Notation (JSON) Data Interchange Format | **§6.1, §8.1, §9.2, §10.6**: three separate documents, each from a different source and each parsed defensively — the relay's wire frames, a kind:0's `content` (a nested JSON document chosen by a stranger), and the NIP-05 well-known document — plus the *serialisation* the event id is taken over, where reliance on the host's `JSON.stringify` matching NIP-01's escaping table is an assumption (NO-10). `src/relay.js`, `src/nostr-protocol.js`, `src/nip05.js`, `src/event.js` |
 | [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110) | HTTP Semantics | **§7.1** for the NIP-05 `GET` and the redirect NIP-05 forbids following; **§9.4** for the status codes the handler emits, including 502 for "no relay was reached" as distinct from 404 for "a relay answered and had nothing". `src/nip05.js`, `src/nostr-protocol.js` |
 | [Fetch Standard](https://fetch.spec.whatwg.org/) | Fetch — `redirect: "error"` | **§7.1**: the mechanism by which NIP-05's no-redirect rule is enforced rather than merely intended. `src/nip05.js` |
-| [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446) | The Transport Layer Security (TLS) Protocol Version 1.3 | **§7.3**: the transport the NIP-05 well-known document arrives over, and half of what "NIP-05 verified" is worth. The host's TLS stack |
-| [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280) | Internet X.509 Public Key Infrastructure Certificate and CRL Profile | **§7.3**: the trust model of that hop — a public CA vouched for the domain. This is what "NIP-05 verified" means and all it means; the DANE pinning of the Handshake chapter does not apply to it (NO-12). |
+| [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446) | The Transport Layer Security (TLS) Protocol Version 1.3 | **§7.3**: the transport the NIP-05 well-known document arrives over, and half of what "NIP-05 verified" is worth. The host's TLS stack. **§8.5**: on the Private route, Node's TLS layered over the SOCKS socket, with verification unchanged from the direct route. `src/tor-websocket.js` |
+| [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280) | Internet X.509 Public Key Infrastructure Certificate and CRL Profile | **§7.3**: the trust model of that hop — a public CA vouched for the domain. This is what "NIP-05 verified" means and all it means; the DANE pinning of the Handshake chapter does not apply to it (NO-12). Also the trust model of a relay's certificate on both routes (§8.5): the Tor route changes who sees the address, not who vouches for the relay. |
 
 ### Cryptography
 
@@ -968,6 +977,9 @@ Listed because each absence is a documented gap rather than an oversight.
 | [`@noble/curves`](https://github.com/paulmillr/noble-curves) | Audited elliptic-curve implementations | **§6.2**: the BIP-340 implementation. Dependency-light and already in the browser's tree, which is the honest reason Nostr was cheap to add at all. `src/event.js`, and every test file, which mint their own key material rather than carrying fixtures |
 | [nostr-tools `normalizeURL`](https://github.com/nbd-wtf/nostr-tools) | Relay-URL canonicalisation | **§9.1 step 3**: the canonicalisation everyone else follows — host lower-cased, a bare path collapsed, fragment dropped — so `wss://nos.lol` and `wss://nos.lol/` are one relay, one socket, and one row in the relay report. `normalizeRelayUrl` in `src/relay.js` |
 | [The NIPs repository](https://github.com/nostr-protocol/nips) | Nostr Implementation Possibilities | Read for what is and is not settled. Its lack of a versioning or errata process is itself a fact an implementer needs — see the note at the top of this file. |
+| [`ws`](https://github.com/websockets/ws) | WebSocket client and server for Node.js | **§8.5**: the client on the Private route, chosen because it takes an `agent` and the runtime's `WebSocket` does not. A declared dependency of this repository (`^8.18.2`); the browser carries 7.x, and the class is written for both — each hands a text frame to `onmessage` as a string. Only `src/tor-websocket.js` imports it; the direct route never touches it (NO-16). Also the relay server `tests/tor-websocket.test.js` stands up |
+| `../../src/delivery-mode.js` | The one switch — Settings › Content delivery › Mode | **§8.5**: `policyFor()` is the policy table this handler's `nostrThroughTor` row comes from; `privateRefusal('relay')` is the wording of the 503 page and `SWITCH_HINT` its last sentence. `src/nostr-protocol.js` |
+| `docs/MODES.md` (browser) | Wildroot, *Private mode and Fast mode* | **§8.5**: the design of the switch, and the table naming row 15 — Nostr relay queries — as one of the five divergences that need a mode at all. `../../DIVERGENCE.md` row 15 is the inventory entry. Not extracted |
 
 ---
 
@@ -977,31 +989,41 @@ Listed because each absence is a documented gap rather than an oversight.
 node --test namespaces/nostr/tests/*.test.js     # from the repository root
 ```
 
-**67 tests, deterministic, no network.** Requirements: Node ≥ 20 (for the
-global `Response` and `fetch` these modules use in place of dependencies) and
-`@noble/curves`, installed at the repository root. `@noble/hashes` is present
-at the root and is **not** used here: `src/event.js` takes SHA-256 from
+**73 tests, deterministic, no network.** Requirements: Node ≥ 20 (for the
+global `Response` and `fetch` these modules use in place of dependencies),
+`@noble/curves` and `ws`, installed at the repository root. `@noble/hashes` is
+present at the root and is **not** used here: `src/event.js` takes SHA-256 from
 `node:crypto` and says why in a comment.
 
-Nothing else is needed. No Electron, no `ws`, no bech32 library, no
-`nostr-tools`: the bech32 decoder is local (NO-4), the relay client takes its
-WebSocket from the injected `WebSocketImpl` seam or the global, and the NIP-05
-client uses the platform `fetch` with the implementation injectable for tests.
-Because the seam exists, no test replaces a global — the whole handler is
-driven against scripted, misbehaving relays.
+`ws` is needed by `src/tor-websocket.js` and by the relay server
+`tests/tor-websocket.test.js` stands up. Nothing else is: no Electron, no
+bech32 library, no `nostr-tools`. The bech32 decoder is local (NO-4), the
+direct-route relay client takes its WebSocket from the injected `WebSocketImpl`
+seam or the global, and the NIP-05 client uses the platform `fetch` with the
+implementation injectable for tests. Because the seam exists, no test replaces
+a global — the whole handler is driven against scripted, misbehaving relays.
+"No network" includes the Tor route: `tests/tor-websocket.test.js` runs a real
+`wss://` relay behind a SOCKS5 server, both on loopback, with a certificate
+from `../../src/self-cert.js`.
 
-Two modules outside this directory are read, and one reads back the other way.
-`tests/classification.test.js` imports `../../../src/router.js`, the same
+Four modules outside this directory are read, and one reads back the other
+way. `tests/classification.test.js` imports `../../../src/router.js`, the same
 classifier the Handshake chapter uses, shared rather than forked because a
 divergent copy of a security-relevant classifier is the worse problem.
 `src/relay.js` imports `../../../src/safe-address.js`, the address guard the
 Handshake chapter applies to zone-supplied addresses, for the same reason a
-relay hint needs it (§10.4). In the other direction, `src/router.js` imports
+relay hint needs it (§10.4). `src/tor-websocket.js` imports
+`../../../src/socks-dial.js`, the SOCKS5 dialer the Handshake resolver's
+authoritative hop, the WebSocket tunnel and Gemini share, so every raw-socket
+path that goes through Tor speaks to it through one implementation.
+`src/nostr-protocol.js` imports `privateRefusal` from
+`../../../src/delivery-mode.js`, so its refusal page says what every other
+Private-mode page says. In the other direction, `src/router.js` imports
 `decodeNip19` from `src/nip19.js` in this directory: the classifier decodes a
 bare identifier before claiming it (SPEC §3), so the routing decision depends
-on this chapter's checksum. Both modules are dependency-free of the browser, so
-the edge is clean, but it is a real one — the namespace boundary is decided
-with this chapter's decoder.
+on this chapter's checksum. All of these modules are dependency-free of the
+browser, so the edges are clean, but they are real — the namespace boundary is
+decided with this chapter's decoder.
 
 
 ---
@@ -1090,6 +1112,7 @@ imports, fetches or parses any of them.
 |---|---|---|
 | [`@noble/curves`](https://github.com/paulmillr/noble-curves) | noble-curves — audited elliptic curve cryptography | §9.1 the secp256k1/BIP-340 implementation every receipt signature and verification goes through. The only runtime dependency this chapter adds beyond the shared modules and the platform. — `src/keys.js`, `src/nostr-event.js` |
 | [`plc.directory`](https://plc.directory) | The did:plc directory service | §5.2 the default `did:plc` resolver, configurable via `plcDirectory` so a mirror or a self-hosted directory is a supported deployment and a test can drive every path with no network. — `src/did-protocol.js` |
+| `../../src/delivery-mode.js` | The one switch — Settings › Content delivery › Mode | §10.4 `privateRefusal('p2p', …)`, the words the non-proxied gate answers with. `did:` itself reads nothing from it: it rides the proxied fetch and resolves in both modes. — `src/gate.js` |
 | `docs/SOCIAL-MULTIPROTOCOL.md` | Wildroot design record — multi-protocol social identity | §9.4 the decision `did:web:<name>.hns.one`, its accepted cost, and the still-open question of whether `did:plc` should be the default instead (`DEVIATIONS.md` §2.5). — not extracted |
 
 
@@ -1146,8 +1169,8 @@ paths written `src/…` and `tests/…` are this chapter's, under `namespaces/to
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS Protocol Version 5 | §6.4 and R6, the transport the whole design rests on, and specifically §4: address type `0x03` (`DOMAINNAME`). Sending the `.onion` *hostname* to the proxy — rather than resolving it and sending an address — is the mechanism by which RFC 7686's no-DNS rule is satisfied at the wire level. `src/anonymize.js:243-258` (the `socks5://` proxy rule), `src/onion-protocol.js:136-176`. §7.5 cites it a second time for the three main-process paths that dial this controller's port for themselves rather than through the session: the protocol is spoken directly by `../../src/socks-dial.js` — the greeting with the "no authentication" method of §3, a CONNECT command, and `ATYP` IPv4 for a resolved address or `0x03` for a host that must be resolved inside Tor. §5 (the reply, whose own address type the client must parse to know where the framing ends) is implemented there too. |
-| [RFC 1929](https://www.rfc-editor.org/rfc/rfc1929) | Username/Password Authentication for SOCKS V5 | **Cited for what we do not do.** Tor overloads SOCKS username/password for stream isolation, so distinct credentials per origin put each site on its own circuit. We send none — not on the session proxy, which has no hook for it, and not on the three direct dialers of §7.5, which could pass one and do not — so everything shares circuits within the session. DEVIATIONS TO-3 and TO-D1. |
+| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS Protocol Version 5 | §6.4 and R6, the transport the whole design rests on, and specifically §4: address type `0x03` (`DOMAINNAME`). Sending the `.onion` *hostname* to the proxy — rather than resolving it and sending an address — is the mechanism by which RFC 7686's no-DNS rule is satisfied at the wire level. `src/anonymize.js:243-258` (the `socks5://` proxy rule), `src/onion-protocol.js:136-176`. §7.5 cites it a second time for the five main-process paths that dial this controller's port for themselves rather than through the session: the protocol is spoken directly by `../../src/socks-dial.js` — the greeting with the "no authentication" method of §3, a CONNECT command, and `ATYP` IPv4 for a resolved address (the Handshake authoritative hop, an A-record `hns://` site's DANE-pinned socket, the `wss://` tunnel) or `0x03` for a host that must be resolved inside Tor (a Gemini capsule, a Nostr relay). §5 (the reply, whose own address type the client must parse to know where the framing ends) is implemented there too. |
+| [RFC 1929](https://www.rfc-editor.org/rfc/rfc1929) | Username/Password Authentication for SOCKS V5 | **Cited for what we do not do.** Tor overloads SOCKS username/password for stream isolation, so distinct credentials per origin put each site on its own circuit. We send none — not on the session proxy, which has no hook for it, and not on the five direct dialers of §7.5, which could pass one and do not — so everything shares circuits within the session. DEVIATIONS TO-3 and TO-D1. |
 | [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110) | HTTP Semantics | §6.4–§6.7, the protocol spoken **inside** the tunnel, in plain HTTP. §13 conditional requests and §14 `Range` are among the forwarded request headers; §15 is the status codes the handler returns and passes through; §15.4 is the redirect semantics of §6.5, including §15.4.4: a same-service 301/302/303 after a request with a body is followed with a GET and no body, 307/308 keep the method. There is no TLS in this path, which is why the lock is open (§8). `src/onion-protocol.js:136-205`. |
 | [RFC 6265](https://www.rfc-editor.org/rfc/rfc6265) | HTTP State Management Mechanism | §6.4 and §6.6, cited for a negative that matters: neither `Cookie` (request) nor `Set-Cookie` (response) crosses this handler's allow-lists. Whether the underlying session-bound fetch attaches the session cookie jar of its own accord is **not established** — DEVIATIONS TO-4. `src/onion-protocol.js:182-190`, `:209-219`. |
 | [RFC 6797](https://www.rfc-editor.org/rfc/rfc6797) | HTTP Strict Transport Security (HSTS) | §6.6, cited for a deliberate exclusion: `Strict-Transport-Security` is the one service header **not** passed through, because there is no TLS inside the tunnel and forwarding it would poison HSTS state for the `onion://` origin. `src/onion-protocol.js:182-190`. |
@@ -1168,7 +1191,7 @@ paths written `src/…` and `tests/…` are this chapter's, under `namespaces/to
 |---|---|---|
 | [WHATWG URL](https://url.spec.whatwg.org/) | URL Standard | §5, what a *standard* scheme means — a real origin, host parsing, same-origin policy — and the parser `parseOnionUrl` uses to split host, port and path and to drop the fragment. `onion:` is not one of the *special* schemes, which is why a query-only URL has an empty path. `src/onion-protocol.js:54-79`; the scheme registration is in the browser's `main.cjs`, not in this package. |
 | [protocol.registerSchemesAsPrivileged](https://www.electronjs.org/docs/latest/api/protocol#protocolregisterschemesasprivilegedcustomschemes) | Electron API — privileged scheme registration | §5 and §8, the `standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, allowServiceWorkers: false` registration that gives `onion://` a real, persistent, per-host origin so real web applications do not crash on an opaque one. `secure: true` is a **capability** decision, not a trust claim. The browser's `src/main.cjs` — **not extracted**, see DEVIATIONS §4. |
-| [session.setProxy](https://www.electronjs.org/docs/latest/api/session#sessetproxyconfig) | Electron API — session proxy configuration, `proxyBypassRules` | §7.5, how the Tor SOCKS endpoint becomes the session's proxy for *everything*, with proxy-side name resolution. `<-loopback>` **subtracts** the implicit loopback bypass, so even `127.0.0.1` rides the tunnel rather than going around it. `src/anonymize.js:243-258`. |
+| [session.setProxy](https://www.electronjs.org/docs/latest/api/session#sessetproxyconfig) | Electron API — session proxy configuration, `proxyBypassRules` | §7.5, how the Tor SOCKS endpoint becomes the session's proxy for *everything*, with proxy-side name resolution. `<-loopback>` **subtracts** the implicit loopback bypass, so even `127.0.0.1` rides the tunnel rather than going around it. While BLOCKED (§7.6) the same call points every session at `BLACKHOLE_RULES`, `socks5://127.0.0.1:9` — a loopback port nothing listens on — so a Tor that cannot be had never becomes a direct connection. `src/anonymize.js:243-258`, `_cannotRoute`. |
 | [net.fetch](https://www.electronjs.org/docs/latest/api/net#netfetchinput-init) | Electron API — `net.fetch` | §6.4, the session-bound fetch the handler is given, which rides the session proxy. Injected as `fetchImpl`, so every test in this package drives the handler with a stub and no Electron is imported anywhere. `src/onion-protocol.js:100-107`; wired in the browser's `src/protocols/index.js`. |
 
 ### Cross-references into the spine
@@ -1176,6 +1199,7 @@ paths written `src/…` and `tests/…` are this chapter's, under `namespaces/to
 | Identifier | Title | Used for |
 |---|---|---|
 | [`SPEC.md`](SPEC.md) | The integrated specification — the spine | §3, the classifier contract this chapter specialises, and the two laws: an explicit scheme selects the protocol, and a failure never crosses a namespace boundary. §8, the trust-state model the open onion lock maps onto. |
+| [`SPEC.md` §4.2](SPEC.md) | The Fast / Private switch | §2, §7.3, §7.6 — the one control that drives this controller: `DeliveryMode.set('private')` flips the mode and then calls `setMode('tor')`; `set('fast')` calls `setMode('off')` and then flips; `policyFor(mode).ipProtection` is the value passed. The browser constructs the controller with `failClosed`, which is what makes BLOCKED reachable. `../../src/delivery-mode.js`, `../../tests/delivery-mode.test.js`. |
 | [`DEVIATIONS.md`](DEVIATIONS.md) | Deviations and open questions | The `TO-` entries this chapter cites, and the Handshake chapter's numeric-TLD convention referred to in §2.6. |
 
 
@@ -1262,14 +1286,15 @@ The BEPs are indexed at
 | [RFC 5246](https://www.rfc-editor.org/rfc/rfc5246) | The Transport Layer Security (TLS) Protocol Version 1.2 | The floor the client sets (`minVersion: 'TLSv1.2'`), which is the Gemini specification's own minimum. SPEC §K.6.2 |
 | [RFC 7301](https://www.rfc-editor.org/rfc/rfc7301) | TLS Application-Layer Protocol Negotiation Extension | The `gemini` ALPN identifier the client offers. The negotiated identifier is not enforced (`verifyAlpnId: () => true`). SPEC §K.6.2; `DEVIATIONS.md` KY-1 |
 | [RFC 6125](https://www.rfc-editor.org/rfc/rfc6125) | Representation and Verification of Domain-Based Application Service Identity in PKIX | Cited for what is **not** done: no identity check of any kind is performed on a Gemini server certificate, name or otherwise (`rejectUnauthorized: false`, no store, no comparison). `DEVIATIONS.md` KY-1 |
-| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS Protocol Version 5 | **§K.6.2** — how a Gemini request survives IP Protection instead of being refused: the handler is a SOCKS5 client of the device-local Tor, offering only the "no authentication" method (§3) and sending the capsule's host as address type `0x03` `DOMAINNAME` (§4), so the name is resolved inside Tor and the operating system's resolver is never asked. `../../src/socks-dial.js` (`socksDialer`, shared with the Handshake resolver's authoritative hop and the WebSocket tunnel of Chapter 11), consumed at `src/gemini-protocol.js:64-73`. RFC 1929's username/password method is **not** used, so nothing isolates one capsule's circuit from another's (Chapter 8, TO-3). |
+| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS Protocol Version 5 | **§K.6.2** — how a Gemini request survives Private mode instead of being refused: the handler is a SOCKS5 client of the device-local Tor, offering only the "no authentication" method (§3) and sending the capsule's host as address type `0x03` `DOMAINNAME` (§4), so the name is resolved inside Tor and the operating system's resolver is never asked. `../../src/socks-dial.js` (`socksDialer`, shared with the Handshake resolver's authoritative hop, the WebSocket tunnel of Chapter 11 and the Nostr relays of Chapter 6), consumed in `src/gemini-protocol.js` where the socket is built. RFC 1929's username/password method is **not** used, so nothing isolates one capsule's circuit from another's (Chapter 8, TO-3). |
 
 ### Not a standard, but load-bearing
 
 | Identifier | Title | Used for |
 |---|---|---|
 | [`protocol.registerSchemesAsPrivileged`](https://www.electronjs.org/docs/latest/api/protocol#protocolregisterschemesasprivilegedcustomschemes) | Electron — custom scheme privileges | What `standard: true, secure: true` buys and costs: a real tuple origin, service workers, `fetch`/CORS, streaming — and URL canonicalisation, including host lowercasing. The mechanism SPEC §K.3.4 reasons about, the reason `ar://` is deliberately low-privilege while `hyper://` is not, and the reason a Gemini cross-host redirect must move the address bar (SPEC §K.6.3). `src/main.cjs` in the Wildroot tree |
-| `net::GetHttpReasonPhrase()` | Chromium — `ElectronURLLoaderFactory::StartLoading` status handling | Why a status a handler returns must be one Chromium defines: an unknown code `NOTREACHED`s in the loader. This is why the IP-Protection refusal is **503** — both the gate's refusal of the three peer-to-peer namespaces and Gemini's refusal when there is no Tor port to dial — and why a Gemini status is passed through `safeStatus()`. SPEC §K.3.6, §K.6.2, §K.6.4 — `src/gate.js`, `../../src/safe-status.js` |
+| `net::GetHttpReasonPhrase()` | Chromium — `ElectronURLLoaderFactory::StartLoading` status handling | Why a status a handler returns must be one Chromium defines: an unknown code `NOTREACHED`s in the loader. This is why the Private-mode refusal is **503** — both the gate's refusal of the three peer-to-peer namespaces and Gemini's refusal when there is no Tor port to dial — and why a Gemini status is passed through `safeStatus()`. SPEC §K.3.6, §K.6.2, §K.6.4 — `src/gate.js`, `../../src/safe-status.js` |
+| `../../src/delivery-mode.js` | The one switch — Settings › Content delivery › Mode | `policyFor()`, whose `p2pDiscovery` row is what §K.3.6 enforces; `privateRefusal('p2p', { label })`, the words the gate answers with; `SWITCH_HINT`, its last sentence. `../../DIVERGENCE.md` row 19 is the inventory entry. SPEC §K.3.6 — `src/gate.js` |
 | `docs/RESOLUTION-ROUTER.md`, `docs/TORRENT-DESIGN.md`, `docs/Protocols.md`, `docs/Fetch-Hyper.md`, `docs/Fetch-Gemini.md`, `docs/MODES.md` | Wildroot browser design documents | The design documents this chapter is checked against, and the place the retrieval behaviour it excludes (piece selection, `Range` handling, streaming) is specified. `docs/MODES.md` is the Private/Fast design that decides which namespaces here are refused and which are routed (SPEC §K.3.6). SPEC §K.1, §K.4, §K.6, §K.7 |
 
 
@@ -1356,7 +1381,7 @@ extracted into this repository (SPEC.md, "Paths").
 | [RFC 9112](https://www.rfc-editor.org/rfc/rfc9112) | HTTP/1.1 (message syntax and routing) | **§4.2** — the request-line and field-line grammar the head parser accepts, the CRLF CRLF terminator it reads to, and the `Connection: close` framing of a refusal (`readHead`, `parseConnectHead`, `_refuse`; `src/ws-proxy.js:115-159`, `:247-257`). The 8 KiB bound on a head is this implementation's, not the RFC's. |
 | [RFC 7235](https://www.rfc-editor.org/rfc/rfc7235) | HTTP/1.1: Authentication | **§4.3** — the challenge/credentials framework RFC 9110 §11 now carries, cited because the implementation's retained credential path speaks it verbatim (`Proxy-Authenticate: Basic realm="…"`, `src/ws-proxy.js:284-285`). *Cited for what we do not do.* |
 | [RFC 7617](https://www.rfc-editor.org/rfc/rfc7617) | The 'Basic' HTTP Authentication Scheme | **§4.3** — the `Basic <base64(user:pass)>` encoding the retained gate parses and compares in constant time (`basicCredential`, `src/ws-proxy.js:175-179`; `safeEqual`, `:88-97`). |
-| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS Protocol Version 5 | Cited twice, for opposite reasons. **§4.3**, *for what we do not do*: the first implementation of this tunnel was a SOCKS5 CONNECT *server*. Chromium's SOCKS5 client offers only the "no authentication" method, so a proxy demanding anything else fails in the greeting — the reason the tunnel speaks HTTP CONNECT instead, and a stray SOCKS greeting arriving at it is answered as a malformed head (`tests/ws-proxy.test.js`). **§4.4 fence 4**, *for what we do*: the tunnel is a SOCKS5 *client* of the device-local Tor while IP Protection is on. The greeting offers only "no authentication", the command is CONNECT, and the resolved address is sent as one of §4's address types (`ATYP` IPv4 or IPv6) so no name reaches the proxy — `socksDialer`, `../../src/socks-dial.js`, shared with the resolver's authoritative hop (Chapter 1) and with `gemini://` (Chapter 9). Chapter 8 §7.5 owns the circuit it dials into. |
+| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS Protocol Version 5 | Cited twice, for opposite reasons. **§4.3**, *for what we do not do*: the first implementation of this tunnel was a SOCKS5 CONNECT *server*. Chromium's SOCKS5 client offers only the "no authentication" method, so a proxy demanding anything else fails in the greeting — the reason the tunnel speaks HTTP CONNECT instead, and a stray SOCKS greeting arriving at it is answered as a malformed head (`tests/ws-proxy.test.js`). **§4.4 fence 4**, *for what we do*: the tunnel is a SOCKS5 *client* of the device-local Tor in Private mode. The greeting offers only "no authentication", the command is CONNECT, and the resolved address is sent as one of §4's address types (`ATYP` IPv4 or IPv6) so no name reaches the proxy — `socksDialer`, `../../src/socks-dial.js`, shared with the resolver's authoritative hop (Chapter 1) and with `gemini://` (Chapter 9). Chapter 8 §7.5 owns the circuit it dials into. |
 | [RFC 1929](https://www.rfc-editor.org/rfc/rfc1929) | Username/Password Authentication for SOCKS V5 | **§4.3**, *cited for what we do not do*: the authentication method the first implementation required and Chromium does not implement at all. Named in the module header (`src/ws-proxy.js:25-30`). |
 | [RFC 8441](https://www.rfc-editor.org/rfc/rfc8441) | Bootstrapping WebSockets with HTTP/2 | **§7**, *cited for what we do not do*: extended CONNECT is the mechanism by which a WebSocket could survive an HTTP/2 hop. It is not deployed on the reference path, which is why an h2 front end turns a WebSocket handshake into a plain `GET` and a `404`. |
 | [RFC 9113](https://www.rfc-editor.org/rfc/rfc9113) | HTTP/2 | **§7** — the fact behind that trap: HTTP/2 does not use the `Upgrade` mechanism, so an `Upgrade: websocket` request cannot exist on an h2 connection. Diagnosis in §7 is `curl --http1.1` versus the default, and ALPN inspection per SNI. |
@@ -1400,7 +1425,8 @@ extracted into this repository (SPEC.md, "Paths").
 | Identifier | Title | Used for |
 |---|---|---|
 | `browser docs/WEBSOCKETS.md` | Wildroot, *WebSockets for Handshake apps (`wss://<name>`)* — the tunnel as built | **§4** in full: the constraint, the CONNECT mechanism, why not SOCKS5, the five fences with the port rule and the Tor route, the certificate gate, and the postmortem of the release that shipped and never connected once. It is the document this chapter's §4 is the specification of, and where the file-by-file map of the reference wiring lives. |
-| `browser docs/MODES.md` | Wildroot, *the Private / Fast design* | **§4.4 fence 4** — what "IP Protection on" is a mode *of*, and therefore what the anonymized route of the tunnel belongs to. Chapter 8 owns the circuit itself. |
+| `browser docs/MODES.md` | Wildroot, *Private mode and Fast mode* | **§4.4 fence 4** — the design of the one control, Settings › Content delivery › Mode, whose Private side routes the tunnel's upstream dial through Tor and whose fail-closed anonymizer produces the blocked state fence 4 refuses. Chapter 8 owns the circuit itself. |
+| `../../src/delivery-mode.js` | The one switch — Settings › Content delivery › Mode | **§4.4 fence 4** — `policyFor()`, the policy table whose `ipProtection` row (`tor` or `off`) the anonymizer is driven to by `DeliveryMode`; the tunnel reads the anonymizer's `isOn()` and `torSocks()`, never a flag of its own. `namespaces/tor/src/anonymize.js` is where `BLACKHOLE_RULES` and the blocked state live. |
 | `browser docs/HANDSHAKE-APPS-MEDIATOR.md` | Wildroot, the mediator as built | **§5** — the capability surface, the manifest store and the consent copy this chapter's §5 specifies the behaviour of (`browser src/apps/app-store.js`). |
 
 ### Specification conventions

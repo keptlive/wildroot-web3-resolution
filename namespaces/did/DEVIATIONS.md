@@ -490,5 +490,6 @@ is the DID document / here is the PDS / here is the key".
 Node standard library and the shared modules of `../../src/`:
 **`@noble/curves`**, for BIP-340 over secp256k1, reached through `src/keys.js`
 and `src/nostr-event.js`. `src/did-protocol.js`, `src/unimplemented-protocol.js`,
-`src/gate.js`, `src/bsky.js` and `src/xrpc.js` need nothing beyond `fetch`,
-`Response`, `URL` and `AbortSignal` from the platform.
+`src/bsky.js` and `src/xrpc.js` need nothing beyond `fetch`, `Response`, `URL`
+and `AbortSignal` from the platform; `src/gate.js` adds only the shared
+`../../src/delivery-mode.js`, for the words its refusal carries.

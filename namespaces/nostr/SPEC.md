@@ -37,7 +37,7 @@ of this specification, not appendices to it.**
 5. [Identifiers: NIP-19 and the `nostr:` URI](#5-identifiers-nip-19-and-the-nostr-uri)
 6. [Event verification](#6-event-verification)
 7. [NIP-05: a name to a key](#7-nip-05-a-name-to-a-key)
-8. [Relay selection and the query](#8-relay-selection-and-the-query)
+8. [Relay selection and the query](#8-relay-selection-and-the-query) — including [**Private mode**](#85-private-mode-relays-are-dialled-through-tor-or-not-at-all)
 9. [The resolution algorithm](#9-the-resolution-algorithm)
 10. [Security considerations](#10-security-considerations)
 
@@ -258,6 +258,12 @@ A Nostr resolution produces these steps, in order:
    step **MUST** name the domain that asserted it, or say that the domain was
    never asked (§7).
 
+The route the relay sockets take — direct in Fast mode, through the
+device-local Tor in Private mode (§8.5) — changes none of these steps. The
+mode is a policy about the route; the steps are facts about the answer, and an
+implementation **MUST NOT** score one differently because the sockets rode a
+proxy.
+
 ### 4.1 Aggregating to a lock
 
 **A Nostr resolution MUST NOT produce a closed lock.** Step 4 is permanently
@@ -273,7 +279,8 @@ implementation renders it as a collapsible "Where this came from" report on
 every page, including error pages, listing each relay, whether it was reached,
 its event count or its error, every relay hint that was refused and why, and
 every event that was discarded — as unverifiable, or as not an answer — and
-why.
+why. The one page without that report is the Private-mode refusal of §8.5,
+which asks no relay and says so in words instead.
 
 **In the reference implementation the trust panel carries this as two steps.**
 `schemeSteps()` in the browser's `src/hns/trust-path.js` gives a `nostr:` page
@@ -597,7 +604,9 @@ silently resolved as zero events (§9.4).
 the default. That is what lets the whole handler — status codes, escaping,
 hint refusal, answer binding — be driven against scripted, misbehaving relays
 under plain `node --test` without touching the network and without any test
-mutating a global that another test depends on.
+mutating a global that another test depends on. In Private mode the same seam
+is filled per request with a class that dials through Tor, and when no Tor is
+to hand the request is refused before the seam is reached (§8.5).
 
 ### 8.2 Which relays
 
@@ -683,6 +692,115 @@ in a system with no proof of absence at all (§10.1) the distinction between
 "nobody answered" and "everybody who answered had nothing" is the only part of
 that question a client can answer honestly.
 
+### 8.5 Private mode: relays are dialled through Tor, or not at all
+
+The browser has one privacy control — **Settings › Content delivery › Mode:
+Fast / Private** — and its policy table is `policyFor()` in
+`../../src/delivery-mode.js`. The Nostr row of that table is
+`nostrThroughTor`: false in Fast, true in Private. Row 15 of the repository's
+`../../DIVERGENCE.md` is why this namespace needs a row at all. A relay must
+see the question to answer it — there is no oblivious NIP-01, nothing
+comparable to the ODoH path the Handshake chapter uses for DNS — so the
+**question** (which key, which event, which filter) is disclosed to every
+relay asked, in both modes. What Private mode hides is the **asker**: the
+relay sees a Tor exit's address instead of the user's, and the relay's name is
+never put into a local DNS query.
+
+**How the handler chooses.** `createHandler` takes three injected functions
+beside `WebSocketImpl`: `isAnonymized` (is protection in force), `torSocks`
+(the device-local Tor's `socks5://` URL while traffic is routed through it,
+else `null`) and `torWebSocket` (the class builder, `torWebSocketClass` by
+default). `relayClass()` picks the WebSocket class for **this request**:
+
+| Mode | `torSocks()` | The class used for every relay |
+|---|---|---|
+| Fast | — | the injected `WebSocketImpl`, or the global (§8.1) |
+| Private, Tor routed | a SOCKS URL | `torWebSocketClass(socks)` — built once per SOCKS URL and reused while the port is the same |
+| Private, Tor not connected | `null` | none: the request is **refused** (below) |
+
+The choice is made after the identifier parses and before any relay hint is
+checked or any socket opened, so a refusal costs no lookup and dials nothing.
+
+**The Tor-dialling class** (`src/tor-websocket.js`). Node's built-in
+`WebSocket` accepts no transport — there is no way to hand it a socket or an
+agent — so the class is the `ws` client with an `https.Agent` (`TorAgent`)
+whose `createConnection` is:
+
+1. a SOCKS5 CONNECT to the relay **by name** — RFC 1928 address type `0x03`
+   `DOMAINNAME` (`socksDialer`, `../../src/socks-dial.js`) — so the relay's
+   hostname is resolved inside Tor and the operating system's resolver is
+   never asked; then
+2. TLS over that socket with the relay's hostname as the server name (RFC 6066
+   SNI) and **ordinary WebPKI verification** — the browser passes no TLS
+   options, so the relay's certificate is checked exactly as on the direct
+   route; a test passes a loopback certificate and nothing else.
+
+Only `wss://` is dialled: the constructor refuses any other scheme before a
+socket exists. Inside Tor a plaintext hop is readable at the exit, and the hint
+guard of §10.4 refuses `ws://` anyway. The class presents the event surface
+`src/relay.js` drives — `onopen` / `onmessage` / `onerror` / `onclose`, `send`,
+`close` — and `ws` hands a text frame to `onmessage` as a string, so the relay
+client sees the same `msg.data` on both routes. No SOCKS credential is sent, so
+every relay in the session shares Tor circuits with everything else routed
+through it (Chapter 8, TO-3).
+
+**The refusal.** With protection in force and no Tor port to hand — the
+anonymizer runs fail-closed, so a Tor that cannot be had leaves every session
+pointed at a loopback port nothing listens on rather than connecting directly —
+the handler answers **503** with a page built by `privateRefusal('relay')` from
+`../../src/delivery-mode.js`, under the same content-security policy as every
+other page (§10.6):
+
+> **Relays are not asked in Private mode without the Tor client**
+>
+> This address is answered by relays, and Private mode asks a relay only
+> through the Tor client on this device, which is not connected right now.
+> Nothing was asked. Switch to Fast in Settings › Content delivery to ask them
+> directly.
+
+It names the mode, says what was not done, does not blame the address, and
+points at the one control — the shape every Private-mode refusal in this
+repository has (`SWITCH_HINT`). It is the one page without a relay report
+(§4.1): there is nothing to report, and the page says so. 503 and not an
+invented status, because a protocol handler's status goes straight into
+Chromium's reason-phrase lookup, which `NOTREACHED`s on a code it does not
+know. Because the refusal lives inside the handler, `nostr:` is **not** behind
+the non-proxied gate that refuses the peer-to-peer namespaces (Chapter 9
+§K.3.6); it is routed, and refuses only when the route is missing.
+
+**What the route does not change.** A relay that blocks Tor exits is a relay
+that did not answer: it is reported as unreachable in the relay report and, if
+no relay answers, the page is the 502 of §8.4 — never a 404. The trust states
+of §4 are the same in both modes, the lock stays open in both, and the relay
+report names the same relays; the mode decides the route and nothing else. The
+fan-out trade of §10.3 — more relays, a better answer, a wider disclosure of
+the question — is also unchanged.
+
+Normative, for an implementation that offers a private mode:
+
+- it **MUST** dial each relay through the anonymizing proxy **by name**, and
+  **MUST NOT** resolve the relay's hostname locally first;
+- it **MUST** set the TLS server name explicitly, because TLS runs over a
+  socket the client did not open, and **MUST** verify the relay's certificate
+  as it does on the direct route — the proxy is a route, not a trust anchor;
+- it **MUST** refuse, in words that name the mode and the control, when the
+  proxy is not available, and **MUST NOT** fall back to a direct dial;
+- it **MUST NOT** dial a plaintext relay through the proxy;
+- it **MUST NOT** report the answer or the trust state differently because the
+  sockets rode the proxy, and **MUST NOT** describe the mode as hiding the
+  question from the relay.
+
+*(`tests/tor-websocket.test.js`: "a relay is dialled through the SOCKS port BY
+NAME, TLS carries the relay name as SNI, and the query completes" — driven by
+the real relay client against a real `wss://` server behind a SOCKS5 server
+that records the address type it was sent; "a plaintext ws:// relay is refused
+before any socket is opened"; "when the SOCKS port refuses, the relay is
+reported unreachable — never dialled directly". `tests/nostr-protocol.test.js`:
+"Private mode with a Tor port: the Tor-dialling class is built for that port
+and used for the relays"; "Private mode with NO Tor port: refused before any
+relay is dialled, and the page says which switch"; "Fast mode: the injected
+WebSocketImpl is used and the Tor builder is never called".)*
+
 ---
 
 ## 9. The resolution algorithm
@@ -694,7 +812,10 @@ that question a client can answer honestly.
    stop: this is a `400`-class failure and **MUST NOT** cause any network
    access. (A test asserts that nothing is dialled before the address parses.)
 2. **Refuse an `nsec`** (§5.3).
-3. **Assemble the relay set.** Canonicalise every URL to one spelling
+3. **Choose the transport, then assemble the relay set.** The WebSocket
+   class for this request is chosen first (§8.5): in Private mode with no Tor
+   client the resolution ends here with the 503 refusal, and nothing below
+   runs. Otherwise canonicalise every URL to one spelling
    (`normalizeRelayUrl`: host lower-cased, a bare path collapsed, fragment
    dropped), so one relay is one socket and the relay report counts it once.
    Then, for each **hint** in the identifier, in order: refuse it unless it is
@@ -807,6 +928,7 @@ generic error:
 | `not-found` | relays answered and had nothing | 404 |
 | `unreachable` | no relay answered | 502, naming the distinction |
 | `transport` | the runtime has no WebSocket, or the query threw | 502 |
+| `refused` | Private mode, and the Tor client is not connected: no relay is asked | 503, with the §8.5 wording |
 
 A runtime with no WebSocket implementation **MUST** say so rather than
 resolving to zero results. Silently resolving nothing is indistinguishable
@@ -868,11 +990,14 @@ uses for DNS. Fanning out across more relays makes the answer better and the
 disclosure wider; that trade is real and this specification does not resolve
 it.
 
-In the reference implementation the `nostr:` handler is gated off entirely
-while IP-protection is on, because it dials relays from the main process over
-a path the session proxy does not cover. A blocked handler that says so is the
-correct behaviour; a handler that leaks the real address while a UI claims
-anonymity is not.
+The handler dials relays from the main process over a path the session proxy
+does not cover, so the route is its own responsibility. In Private mode it
+dials every relay through the device-local Tor by name (§8.5), which hides the
+asker's address from the relay and the relay's name from the local network,
+and leaves the question with the relay, where it has to be; with protection in
+force and no Tor client it refuses in words rather than dial directly. A
+handler that leaked the real address while the browser's mode said "Private"
+would be the failure this arrangement exists to make impossible.
 
 ### 10.4 Relay hints are attacker-chosen
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0
+## 0.4.0
 
 The public specification of Wildroot's web3 name resolution: every namespace
 the browser resolves, with the reference implementation behind each.
@@ -29,12 +29,24 @@ the browser resolves, with the reference implementation behind each.
 - **`DEVIATIONS.md`** — every departure from a cited standard, every open
   question and every open design decision, per chapter, each open item with a
   recommendation. Generated from the chapters.
+- **The Fast / Private switch** (`SPEC.md` §4.2, `src/delivery-mode.js`) —
+  one control, two handles (Settings › Content delivery › Mode and the Privacy
+  menu), driving the Tor session proxy — which fails closed on a loopback
+  blackhole when Tor cannot be had — and every private path together: a
+  Handshake name over DoH looked up obliviously or not at all
+  (`DoHResolver({ strictOblivious })`), ICANN names through the oblivious
+  bridge only (`privateDns()`), an A-record Handshake site dialled through Tor
+  by address with the DANE pin on the same handshake (`src/dane-connect.js`),
+  Nostr relays dialled through Tor by name (`nostr/tor-websocket.js`),
+  hyper / SSB / BitTorrent discovery refused with the reason, a stated-origin
+  name served from its origin. Every refusal names the mode and points at the
+  switch (`privateRefusal()`); no verdict changes.
 - **`DIVERGENCE.md`** — the cross-cutting inventory of where the fast path
-  and a private path differ, with a no-trade-off attempt for each row; nine of
-  the sixteen both-sides rows are built, and the five that survive are what a
-  Private/Fast mode pair is for.
+  and a private path differ, with a no-trade-off attempt for each row;
+  eighteen both-sides rows are built, and the five that survive are shipped
+  as the Fast / Private switch.
 - **`src/`, `namespaces/*/src/`** — the resolution modules, byte-identical to
   the Wildroot browser tree modulo import paths (`scripts/parity.mjs` proves
-  it; 66 copied modules, 8 declared factored).
-- **`tests/`, `namespaces/*/tests/`** — 900 deterministic tests in 11 suites,
+  it; 69 copied modules, 8 declared factored).
+- **`tests/`, `namespaces/*/tests/`** — 931 deterministic tests in 11 suites,
   no network; `npm test` runs them all.

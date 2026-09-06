@@ -127,10 +127,18 @@ Terms are used as in [`../../SPEC.md`](../../SPEC.md), plus:
   process on the user's own device.
 - **The gate** — the policy decision, taken before any network activity, of
   whether a request may be issued at all (§6.3).
-- **IP Protection** — the browser's user-facing name for the mode in which the
-  session proxy is the device-local Tor SOCKS endpoint. It is the gate's only
-  input. The name deliberately leads with what a user gets ("hide my IP") rather
-  than with the technology.
+- **IP Protection** — the state in which the session proxy is the device-local
+  Tor SOCKS endpoint (or, when that cannot be had, the blackhole of §7.6). It is
+  the gate's only input. It is **not a control of its own**: it is driven by
+  **Settings › Content delivery › Mode** — `Private` turns it on, `Fast` turns
+  it off — one switch with two handles, the settings page and the Privacy menu,
+  both ending in `DeliveryMode.set()` (`../../src/delivery-mode.js`,
+  `../../SPEC.md` §4.2). The name leads with what a user gets ("hide my IP")
+  rather than with the technology.
+- **BLOCKED** — the controller's third state (`MODES.BLOCKED`): protection was
+  asked for and Tor cannot be had, so every session is pointed at a loopback
+  port nothing listens on (§7.6). Nothing loads; nothing leaks.
+- **The blackhole** — that port: `BLACKHOLE_RULES`, `socks5://127.0.0.1:9`.
 - **Structural authentication** — authentication a client obtains by
   construction rather than by checking something. §4 and §9.1 turn on this
   distinction.
@@ -368,8 +376,9 @@ device-local Tor SOCKS endpoint (§7). It is a **mode** check, not a
 **readiness** check, and that distinction is load-bearing — see §7.2.
 
 When the gate refuses, the handler returns a `200` interstitial page explaining
-that IP Protection must be turned on, where to turn it on, and — in the same
-breath — that reaching `.onion` here hides the user's IP but is not full
+that the protected path is off, that choosing **Private** under Settings ›
+Content delivery › Mode (or its Privacy-menu handle, §2) turns it on — and, in
+the same breath, that reaching `.onion` here hides the user's IP but is not full
 anonymity, because this browser does not resist fingerprinting the way Tor
 Browser does. **No request is made.** The host is escaped before being echoed
 into the page.
@@ -514,8 +523,12 @@ In preference order (`src/tor.js:149`):
 1. a **bundled** `tor` binary the browser ships and supervises, spawned as a
    killable process group with a generated `torrc`;
 2. an **external** `tor` the user already runs on `127.0.0.1:9050`;
-3. **nothing** — the mode is unavailable, the session stays on a direct
-   connection, and the onion gate refuses.
+3. **nothing** — Tor cannot be had. What follows is the controller's
+   `failClosed` option. The browser passes it, and the controller enters
+   **BLOCKED** (§7.6): the session is pointed at the blackhole and the gate
+   keeps refusing. Without it — the library default, for controller-only
+   callers — the session stays on a direct connection with a note that says so,
+   and the gate refuses.
 
 Both usable sources are on `127.0.0.1`. There is no third source, and adding one
 that was not would contradict §1.
@@ -556,13 +569,23 @@ changes routing (`tests/tor-policy.test.js`).
 > session.
 
 `isOn()` (`src/anonymize.js:268`) is the gate the onion handler reads. Every
-transition into `off` — the user's switch, an unavailable Tor client, an unknown
-mode, and a bootstrap that never completes — sets `this.mode = MODES.OFF`
-*before* `await this._applyRules(null)`, so there is no instant at which the
-gate says *route* while the session is already direct. The mirror rule on the
-way in means there is no instant at which the mode says *on* while the session
-is still direct. `tests/tor-policy.test.js` pins both directions and the two
-failure paths.
+transition into `off` — the user's switch to Fast, an unknown mode, and,
+without `failClosed`, an unavailable Tor client or a bootstrap that never
+completes — sets `this.mode = MODES.OFF` *before* `await this._applyRules(null)`,
+so there is no instant at which the gate says *route* while the session is
+already direct. The mirror rule on the way in means there is no instant at
+which the mode says *on* while the session is still direct. With `failClosed`
+the two Tor failures enter BLOCKED instead (§7.6), a state no less restrictive
+than the one before it, so the order is moot there. `tests/tor-policy.test.js`
+pins both directions and the two failure paths.
+
+The same rule holds one level up. `DeliveryMode.set()` enters Private by
+flipping the mode **before** it routes the session, so every consumer of the
+policy is restrictive while the proxy is still being applied, and leaves
+Private by routing off — this controller's `setMode('off')`, gate first —
+**before** the mode flips back (`../../src/delivery-mode.js`;
+`tests/delivery-mode.test.js`: *"entering Private flips the mode BEFORE the
+anonymizer routes; leaving it routes off BEFORE the mode flips"*).
 
 The asymmetry is the point, and it is the whole reason to state it as a rule: a
 window of a single microtask on the way out is enough to hand a `.onion` host to
@@ -577,10 +600,14 @@ last main-frame load **errored**, and reload any tab on the `onion://`
 **scheme**; leave everything else alone. Scheme rather than load status, because
 the interstitial is a successful `200` (§6.3).
 
-If the bootstrap never completes, the controller closes the gate, applies a
-direct connection, and says so — *"IP protection could not reach the Tor
-network — staying on a direct connection"*. The next onion navigation gets the
-interstitial rather than a direct attempt.
+If the bootstrap never completes, the controller does not go direct. With
+`failClosed` it enters BLOCKED (§7.6) and says so — *"Private mode could not
+reach the Tor network. Nothing loads until it can — try again, or switch to Fast
+in Settings › Content delivery to connect directly."* — and `isOn()` stays true,
+so no onion request is admitted onto a direct session. Without `failClosed` the
+controller closes the gate, applies a direct connection, and says *"IP
+protection could not reach the Tor network — staying on a direct connection"*;
+the next onion navigation gets the interstitial rather than a direct attempt.
 
 > **R13.** An implementation MUST NOT respond to a Tor failure by attempting the
 > onion address over any non-Tor path.
@@ -598,19 +625,30 @@ One SOCKS URL with no credentials is applied, so Tor's `IsolateSOCKSAuth` has
 nothing to isolate on and every site in the session can share circuits
 ([`../../DEVIATIONS.md`](../../DEVIATIONS.md) TO-3).
 
-**Three paths outside the session dial the same port directly.** Electron's
+**Five paths outside the session dial the same port directly.** Electron's
 session proxy covers what the network stack sends; it does not cover raw TCP
-opened from the main process. Three such paths exist, and while the mode is on
+opened from the main process. Five such paths exist, and while the mode is on
 each of them — instead of refusing, and instead of dialling directly — speaks
-SOCKS5 to **the port this controller chose** (`status.rules`, the
+SOCKS5 to **the port this controller chose** (`torSocks()`, the
 `socks5://127.0.0.1:<port>` URL of §7.1) through one shared client,
 `../../src/socks-dial.js` (RFC 1928, the "no authentication" method only):
 
 | Path | What it dials, and how | Specified in |
 |---|---|---|
-| the Handshake resolver's authoritative hop | the nameserver's **address**, `ATYP` IPv4 or IPv6 | Chapter 1 |
+| the Handshake resolver's authoritative hop | the nameserver's **address**, `ATYP` IPv4 or IPv6 | Chapter 1 §6.11 |
+| an A-record `hns://` site's TLS socket | the resolved **address**, `ATYP` IPv4, with the DANE pin checked on that same handshake (`connectDane`, `../../src/dane-connect.js`) | Chapter 1 §8.1 |
 | the `wss://` tunnel's upstream | the origin's resolved **address**, `ATYP` IPv4 or IPv6 | Chapter 11 §4.4 |
 | a `gemini://` request's TLS socket | the capsule's **name**, `ATYP` `DOMAINNAME`, so no local lookup happens | Chapter 9 §K.6.2 |
+| a Nostr relay's WebSocket | the relay's **name**, `ATYP` `DOMAINNAME`, TLS with the relay's name as SNI layered over the tunnel (`../nostr/src/tor-websocket.js`) | Chapter 6 |
+
+**What they read, and what BLOCKED does to them.** Each path asks the
+controller for the port through `torSocks()`, which returns the SOCKS URL only
+while the mode is `tor`. While BLOCKED (§7.6) it returns `null`, and each path
+refuses **in words** — the Handshake handler with `privateRefusal('site')`, the
+Nostr handler with `privateRefusal('relay')` (`../../src/delivery-mode.js`),
+the tunnel and Gemini with their own refusals — rather than dialling the
+blackhole and reporting a network fault. The session's own requests fail at the
+proxy instead (TO-7).
 
 Two properties of that are this chapter's, and normative here. First, **it is
 still device-local only**: the only SOCKS server any of them may address is the
@@ -625,8 +663,9 @@ address is a leak, and sending a name that was already resolved discloses it for
 nothing.
 
 **And TO-3 applies to these dials too.** They send no SOCKS credential either,
-so a Handshake nameserver lookup, a WebSocket to a Handshake origin and a Gemini
-capsule share circuits with each other and with everything in the session. The
+so a Handshake nameserver lookup, the site connection that follows it, a
+WebSocket to a Handshake origin, a Gemini capsule and a relay query share
+circuits with each other and with everything in the session. The
 per-origin credential of [`../../DEVIATIONS.md`](../../DEVIATIONS.md) TO-D1
 would, unlike the session proxy, be trivial to supply here — these callers
 construct their own dialer — which makes them the cheapest place to *measure*
@@ -636,6 +675,57 @@ answered.
 This is what makes onion resolution possible at all: the onion handler does not
 build a tunnel, it rides the one the session already has. The cost of that
 simplicity is in [`../../DEVIATIONS.md`](../../DEVIATIONS.md) TO-6.
+
+### 7.6 Fail closed: the BLOCKED state
+
+The controller has three states, `MODES`: `off`, `tor` and `blocked`. The third
+exists for one promise — Private mode's *"if a private lookup fails, the page
+fails rather than falling back"* — applied to the proxy itself.
+
+> **R15.** When protection is in force and a device-local Tor cannot be had, an
+> implementation MUST NOT route the session directly. It MUST route it somewhere
+> that answers nothing.
+
+With `failClosed` (the browser passes it), the two ways a `tor` request can fail
+— the Tor client is unavailable (`tor.start()` reports `unavailable`, or no
+external `127.0.0.1:9050` answers) and a bootstrap that ends without a circuit —
+go through `_cannotRoute()` and enter **BLOCKED**:
+
+- **every session is pointed at the blackhole**, `BLACKHOLE_RULES` =
+  `socks5://127.0.0.1:9`: a loopback port nothing listens on, so every
+  connection fails at once at the proxy (`ERR_PROXY_CONNECTION_FAILED`) instead
+  of going out directly. The PAC decorator folds the same rule in, so a `wss://`
+  to a Handshake name is blocked the same way;
+- **`isOn()` stays true**, so every gate that reads it — the onion gate, the
+  non-proxied-protocol gate, the Handshake handler's route gates — keeps
+  refusing;
+- **`torSocks()` is `null`**, so every raw-socket path of §7.5 refuses in words
+  rather than dialling the blackhole and reporting a network fault;
+- **the note names the mode and the switch**: *"Private mode cannot connect — no
+  Tor client is bundled or running. Nothing loads until it can; switch to Fast in
+  Settings › Content delivery to connect directly."*, or *"Private mode could not
+  reach the Tor network. Nothing loads until it can — try again, or switch to
+  Fast in Settings › Content delivery to connect directly."*
+
+`setMode('off')` from BLOCKED goes direct exactly as from `tor`, gate first
+(§7.3); a later `setMode('tor')` that succeeds routes to the real port and
+`torSocks()` reports it again. Without `failClosed` — the library default, kept
+for controller-only callers — the same two failures end `off`, direct, with the
+honest note of §7.4.
+
+The blackhole is loopback by construction and **MUST** stay so: a routable
+address there would turn a refusal into a connection to somebody.
+`tests/tor-policy.test.js` pins the state: *"failClosed: bundled tor unavailable
+-> BLOCKED on the blackhole, isOn stays true, torSocks is null"*, *"failClosed:
+a failed bootstrap -> BLOCKED, not direct"*, *"failClosed: OFF still goes
+direct, and a routed TOR still reports its SOCKS URL"*, and *"the blackhole is a
+loopback port, never a routable address"*.
+
+What BLOCKED costs is what the mode's disclosure and the note say: nothing
+loads. What it does **not** do is change a verdict — there is no page to have
+one — or the gate's logic: the gate is a mode check and not a readiness check
+(§7.2), so it says *route*, the request dies at the blackhole, and the answer is
+the handler's failure page of §6.7, which echoes the proxy error (TO-7).
 
 ---
 
@@ -728,8 +818,8 @@ a resolver exactly as well as a valid one.
 
 Stated positively, because "leak" is the whole subject of this namespace.
 
-**With IP Protection off**, an onion navigation makes **no network request at
-all**: no DNS, no TCP, no probe. The interstitial is generated locally. This is
+**With IP Protection off** (Fast mode), an onion navigation makes **no network
+request at all**: no DNS, no TCP, no probe. The interstitial is generated locally. This is
 pinned by `tests/onion-protocol.test.js` and `tests/onion-leak-guard.test.js`,
 and is the single most important behaviour in this chapter.
 
@@ -744,10 +834,11 @@ and is the single most important behaviour in this chapter.
 
 **At the edges:**
 
-- **Turning protection off** while an onion tab is open: the gate closes first,
+- **Switching to Fast** while an onion tab is open: the gate closes first,
   existing sockets are closed, and the next load gets the interstitial (§7.3).
-- **A bootstrap that fails**: ends direct + off + honest, never in a direct
-  onion attempt (R13).
+- **A bootstrap that fails**: ends BLOCKED (§7.6) — nothing loads, and the note
+  says why — never in a direct onion attempt (R13). Without `failClosed`, it
+  ends direct + off + honest.
 - **An explicit non-onion scheme on an onion host** typed by the user: not
   protected for a top-level load (§3.2, TO-2).
 - **A redirect off Tor**: the destination is named to the user and is never

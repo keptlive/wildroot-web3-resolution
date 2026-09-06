@@ -444,12 +444,24 @@ A redirect is followed **only** when all of the following hold, and at most
 **one** hop is taken:
 
 1. the `Location` resolves to an `https:` URL,
-2. on the **same host** as the gateway that answered, and
+2. on the **same gateway** as the one that answered — its own host, or a
+   **subdomain** of it (`hostname.endsWith('.' + gateway)`, so a host that
+   merely ends in the gateway's name is not one), and
 3. whose first path segment is the **same identifier**.
 
-Anything else — another host, another transaction, a downgrade to `http:`, or a
-second redirect — is refused with **502** and a body naming the gateway that
-tried it. The 502 **MUST NOT** carry a `Location`: handing the redirect back to
+Rule 2 admits the sandbox that arweave.net and every ar.io gateway answer
+`GET /<txid>` with: a 302 to `https://<label>.<gateway>/<txid>[/path]`, where
+`<label>` is the transaction id re-encoded in lowercase unpadded base32
+(RFC 4648 §6; `sandboxLabel()`, 52 characters for a 32-byte id), so that each
+transaction is its own origin in the renderer. The identifier in the path is
+the load-bearing check — a sandbox label is derivable from the id, but the
+path is what names the transaction the gateway is about to serve. The header
+check of §9.1.1 runs after the hop, against the other gateway, and the
+response says so.
+
+Anything else — another host, a subdomain of another host, another
+transaction, a downgrade to `http:`, or a second redirect — is refused with
+**502** and a body naming the gateway that tried it. The 502 **MUST NOT** carry a `Location`: handing the redirect back to
 the renderer would restore the open redirect that `redirect: 'manual'` exists
 to close. `location` is accordingly absent from the response safelist of §6.4.
 
@@ -618,7 +630,7 @@ This is the section to read.
 | No path segment is, or decodes to, a separator or a dot-segment (§4.3) | 400; the path cannot escape the identifier |
 | The method is GET or HEAD (§6.5) | 405; nothing but a read reaches a gateway |
 | Only a fixed header safelist crosses in either direction (§6.4) | nothing caller-chosen beyond a known set reaches the gateway |
-| A gateway may not redirect the fetch, and may not redirect the client out of scope (§6.3) | 502 with no `Location`; the fetch cannot be bounced to an arbitrary host |
+| A gateway may redirect only within itself (its host or a sandbox subdomain of it) and within the same transaction (§6.3) | 502 with no `Location`; the fetch cannot be bounced to an arbitrary host |
 | TLS to an `https:` gateway (§6.1) | the gateway is authenticated as a host, by a CA |
 | The transaction **header** hashes to the identifier, fetched from a gateway *other* than the one that served the bytes (§9.1.1) | 502 on a mismatch, and the response says which of the two happened |
 

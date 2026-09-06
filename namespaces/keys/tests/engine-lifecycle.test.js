@@ -89,7 +89,7 @@ test('every answer carries the CORS headers, whether or not they were mutable', 
   for (const header of CORS_HEADERS) assert.equal(res.headers.get(header), '*')
 })
 
-test('IP Protection refuses the whole namespace with a 503 — nothing underneath runs', async () => {
+test('Private mode refuses the whole namespace with a 503 — nothing underneath runs', async () => {
   // BitTorrent dials peers directly and hyperswarm dials peers directly:
   // neither rides session.setProxy, so while anonymization is on they are
   // refused rather than leaked. (Gemini is one TCP connection to one host, so
@@ -104,7 +104,7 @@ test('IP Protection refuses the whole namespace with a 503 — nothing underneat
   for (const url of [`bittorrent://${INFOHASH}/`, `bittorrent://${'d'.repeat(64)}/`]) {
     const res = await gated(new Request(url))
     assert.equal(res.status, 503)
-    assert.match(await res.text(), /disabled while anonymization is on/)
+    assert.match(await res.text(), /refused in Private mode/)
   }
   assert.equal(engine.constructed, 0, 'the gate answers before the engine is even considered')
 

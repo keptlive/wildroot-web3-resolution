@@ -28,8 +28,10 @@ import {
   planDnsTransport,
   recordDnsPlan,
   effectiveDnsPlan,
-  icannBridgeState
+  icannBridgeState,
+  privateDns
 } from '../src/dns-policy.js'
+import { schemeSteps } from '../../../src/trust-path.js'
 
 // The shipped defaults (src/config.js `dns` and `odoh` blocks).
 const POOL = [
@@ -233,4 +235,54 @@ test('a hostile probe object can never make the panel throw', () => {
   const nasty = { server: {}, get transport () { throw new Error('boom') }, servedRecently: () => true }
   assert.equal(icannBridgeState(nasty, 'example.com'), null)
   assert.equal(icannBridgeState({ server: {}, servedRecently: () => { throw new Error('x') } }, 'a'), null)
+})
+
+// ---------------------------------------------------------------- Private mode
+// Settings › Content delivery › Mode (src/hns/delivery-mode.js): Private
+// forces `secure` with the oblivious bridge as the ONLY server. The pool is
+// dropped — an encrypted resolver still learns every name and who asked —
+// so with no bridge the plan fails closed rather than resolving anywhere else.
+
+// The browser suite's names for the shipped defaults, so the tests below read the same there and here.
+const ODOH = DEFAULT_ODOH
+test('privateDns: secure, and no pool, whatever the configured block said', () => {
+  assert.deepEqual(privateDns({ mode: 'automatic', servers: POOL }), { mode: 'secure', servers: [] })
+  assert.deepEqual(privateDns({ mode: 'off', servers: POOL }), { mode: 'secure', servers: [] })
+  assert.deepEqual(privateDns(), { mode: 'secure', servers: [] })
+  // The bridge is WANTED for the private block even when the configured
+  // mode is off — so main starts it at launch for a later switch.
+  assert.equal(wantsObliviousBridge({ dns: privateDns({ mode: 'off' }), odoh: ODOH }), true)
+})
+
+test('Private with the bridge up: oblivious only, nothing plaintext, never a pool server', () => {
+  const plan = planDnsTransport({ dns: { mode: 'automatic', servers: POOL }, odoh: ODOH, bridge: BRIDGE, privateMode: true })
+  assert.equal(plan.mode, 'secure')
+  assert.deepEqual(plan.servers, [BRIDGE.template])
+  assert.equal(plan.oblivious, true)
+  assert.equal(plan.plaintextFallback, false)
+  assert.equal(plan.failClosed, false)
+  assert.equal(plan.configure, true)
+  // The panel, for a name the bridge did not answer: refused, not "in the clear".
+  const [step] = schemeSteps('https://example.com/', plan, null)
+  assert.match(step.detail, /unencrypted DNS is refused/i)
+  assert.doesNotMatch(step.detail, /in the clear/)
+})
+
+test('Private with NO bridge fails closed: configured secure with an empty list, and the panel says refused', () => {
+  const plan = planDnsTransport({ dns: { mode: 'automatic', servers: POOL }, odoh: ODOH, bridge: null, privateMode: true })
+  assert.equal(plan.configure, true)
+  assert.deepEqual(plan.servers, [], 'the configured pool is never used as a fallback in Private mode')
+  assert.equal(plan.failClosed, true)
+  assert.equal(plan.plaintextFallback, false)
+  const [step] = schemeSteps('https://example.com/', plan, null)
+  assert.equal(step.state, 'failed')
+  assert.match(step.source, /refused/i)
+})
+
+test('Fast is the configured plan, untouched', () => {
+  const fast = planDnsTransport({ dns: { mode: 'automatic', servers: POOL }, odoh: ODOH, bridge: BRIDGE, privateMode: false })
+  const plain = planDnsTransport({ dns: { mode: 'automatic', servers: POOL }, odoh: ODOH, bridge: BRIDGE })
+  assert.deepEqual(fast, plain)
+  const off = planDnsTransport({ dns: { mode: 'off', servers: POOL }, privateMode: false })
+  assert.equal(off.configure, false)
 })

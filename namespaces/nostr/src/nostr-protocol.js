@@ -16,6 +16,8 @@
 
 import { parseNostrURI } from './nip19.js'
 import { queryRelays, DEFAULT_RELAYS, isSafeRelayUrl, normalizeRelayUrl } from './relay.js'
+import { torWebSocketClass } from './tor-websocket.js'
+import { privateRefusal } from '../../../src/delivery-mode.js'
 
 /**
  * The most relay hints one identifier may add. The hints are the link
@@ -42,16 +44,49 @@ const when = (ts) => new Date(ts * 1000).toISOString().replace('T', ' ').slice(0
  * @param {string[]} [options.relays] the relays queried besides any hints
  * @param {number} [options.timeout] per-relay deadline, ms
  * @param {Function} [options.WebSocketImpl] the WebSocket class (tests)
+ * @param {() => boolean} [options.isAnonymized] Private mode / IP Protection on?
+ * @param {() => (string|null)} [options.torSocks] the device-local Tor's SOCKS
+ *   URL while traffic is routed through it, else null
+ * @param {(socks: string) => Function} [options.torWebSocket] the class
+ *   builder for a SOCKS URL (tests); the default is tor-websocket.js
  */
 export default async function createHandler (options = {}) {
   const relays = options.relays || DEFAULT_RELAYS
   const timeout = options.timeout || 6000
-  const WebSocketImpl = options.WebSocketImpl
+  const isAnonymized = typeof options.isAnonymized === 'function' ? options.isAnonymized : () => false
+  const torSocks = typeof options.torSocks === 'function' ? options.torSocks : () => null
+  const torWebSocket = typeof options.torWebSocket === 'function' ? options.torWebSocket : torWebSocketClass
+  // One Tor-dialling class per SOCKS URL, built when first needed and kept
+  // while the port stays the same (the anonymizer picks a port per session).
+  let torClass = null
+  let torClassFor = null
+  /**
+   * The WebSocket class for THIS request. Row 15 of the divergence inventory:
+   * in Private mode the relays are dialled through the device-local Tor —
+   * they still see the question, never the asker's address. With protection
+   * on and no Tor port to hand, the request is refused rather than dialled
+   * directly.
+   */
+  const relayClass = () => {
+    if (!isAnonymized()) return options.WebSocketImpl
+    const socks = torSocks()
+    if (!socks) return null
+    if (torClassFor !== socks) {
+      torClass = torWebSocket(socks)
+      torClassFor = socks
+    }
+    return torClass
+  }
 
   return async function nostrHandler (request) {
     try {
       const target = parseNostrURI(request.url)
       if (target.error) return page(400, 'Not a nostr address', `<p class="err">${esc(target.error)}</p>`)
+      const WebSocketImpl = relayClass()
+      if (WebSocketImpl === null) {
+        const copy = privateRefusal('relay')
+        return page(503, copy.title, `<p class="err">${esc(copy.detail)}</p>`)
+      }
 
       // Relay hints are the LINK AUTHOR's choice — TLV bytes in the
       // identifier — so they are checked before anything is dialled (wss

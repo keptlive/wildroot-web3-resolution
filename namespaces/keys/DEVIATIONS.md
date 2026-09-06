@@ -244,15 +244,15 @@ see §2.3.
 
 ---
 
-### KY-8. With IP Protection off, a `gemini://` host is resolved by the operating system
+### KY-8. In Fast mode, a `gemini://` host is resolved by the operating system
 
-**What.** With protection off, the Gemini client passes the hostname to Node's
+**What.** In Fast mode, the Gemini client passes the hostname to Node's
 `tls.connect()`, which resolves it with the operating system's resolver: not the
 browser's DoH policy, not its Oblivious DoH bridge, not Chromium's secure-DNS
-setting, and not the Handshake resolver. With protection **on** this does not
+setting, and not the Handshake resolver. In **Private** mode this does not
 happen — the handler dials through the device-local Tor by name and no local
 lookup is made (SPEC §K.6.1, §K.6.2) — so this deviation is exactly the
-protection-off case and nothing more.
+Fast-mode case and nothing more.
 
 **The standard says.** RFC 8484 (DoH) and RFC 9230 (Oblivious DoH) are the
 transports the rest of this browser uses for exactly this lookup; the Gemini
@@ -274,7 +274,7 @@ but those are peer addresses rather than user-chosen names, so it is less
 pointed.
 
 **Status: OPEN**, and confined to one mode. The fix is the same shape as the
-one the anonymized route takes: resolve the host with the browser's own
+one the Private route takes: resolve the host with the browser's own
 resolver and pass the resulting **address** to the client with `servername`
 still set to the name, so SNI and any future certificate pin (KY-D1) stay keyed
 to the name rather than the address. That also opens the door to Gemini over
@@ -478,8 +478,8 @@ That is a real similarity and we think it earns the placement. But a reader
 looking for "the key-addressed chapter" finds one namespace in it that is
 neither key- nor content-addressed and that verifies nothing at all, and may
 reasonably think it belongs with the ICANN/DNS material. It is also the one
-namespace here that the anonymizing mode **routes** instead of refusing
-(§K.3.6), which is one more way in which it is not like its neighbours. Nothing
+namespace here that Private mode **routes** instead of refusing (§K.3.6),
+which is one more way in which it is not like its neighbours. Nothing
 else in this chapter depends on it, so moving it costs nothing but the
 cross-references.
 
@@ -487,8 +487,8 @@ cross-references.
 
 ### 2.7. What Tor's exit does with a Gemini host name, and whether it has been proven
 
-While IP Protection is on the host is sent to the SOCKS proxy as a domain name
-and resolved inside Tor (SPEC §K.6.2), which removes the local disclosure and
+In Private mode the host is sent to the SOCKS proxy as a domain name and
+resolved inside Tor (SPEC §K.6.2), which removes the local disclosure and
 moves it: the exit relay's resolver sees which capsule is being visited. That is
 the same trade every `.onion`-capable browser makes for clearnet hosts, and we
 believe it is right, but we have not thought about it as hard as Chapter 8 has
@@ -538,9 +538,9 @@ the browser's resolver before the SDK is constructed, which is a larger change
 worth costing separately.
 
 Gemini needs no part of this item for the mode that cannot tolerate the gap:
-while IP Protection is on, the host is resolved inside Tor and the socket is
-built by this handler (SPEC §K.6.2). What is left there is the protection-off
-route, which is KY-8's own recommendation and the same few lines at the same
+in Private mode, the host is resolved inside Tor and the socket is built by
+this handler (SPEC §K.6.2). What is left there is the Fast-mode route, which
+is KY-8's own recommendation and the same few lines at the same
 injection point — the socket is already constructible at it.
 
 ### KY-D3. Find out whether web content can reach `hyper://localhost/`

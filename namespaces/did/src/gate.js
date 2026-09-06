@@ -1,5 +1,7 @@
 /* global Response */
 
+import { privateRefusal } from '../../../src/delivery-mode.js'
+
 /*
  * The IP-Protection gate for handlers that do NOT route through the proxied
  * Electron session. Two classes need it:
@@ -29,11 +31,11 @@
 export function createNonProxiedGate (isAnonymized) {
   return (handler, label) => async (request) => {
     if (isAnonymized()) {
-      return new Response(
-        `${label} is disabled while anonymization is on — it connects to ` +
-        'peers over a path the proxy cannot cover, which would reveal your ' +
-        'address. Turn anonymization off to use it.',
-        { status: 503, headers: { 'content-type': 'text/plain' } })
+      // Private mode (src/hns/delivery-mode.js), row 19: refused, and the
+      // page says why and where the switch is.
+      const copy = privateRefusal('p2p', { label })
+      return new Response(`${copy.title}\n\n${copy.detail}`,
+        { status: 503, headers: { 'content-type': 'text/plain; charset=utf-8' } })
     }
     return handler(request)
   }

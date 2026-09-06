@@ -1,6 +1,6 @@
 {
   "name": "wildroot-web3-resolution",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Wildroot’s web3 name resolution: which namespace an address belongs to, and how each is resolved and verified — Handshake (SPV chain proof, DNSSEC anchored to the on-chain DS, DANE), ICANN over encrypted and oblivious DNS, IPFS/IPNS, Arweave, ENS and web3://, Nostr, DID/AT Protocol/ActivityPub, Tor, and the key-addressed networks. The reference implementation behind the Wildroot browser, with its written standard.",
   "type": "module",
   "license": "Apache-2.0",
@@ -67,6 +67,7 @@
   },
   "dependencies": {
     "@derhuerst/gemini": "^1.3.2",
+    "ws": "^8.18.2",
     "@noble/curves": "^1.9.2",
     "@noble/hashes": "2.3.0",
     "multiformats": "^9.9.0",

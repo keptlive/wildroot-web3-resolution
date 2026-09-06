@@ -380,10 +380,13 @@ honour it. `../../src/spv.js` (`setProxy`, `_nodeIsProxied`).
 **The standard says.** Nothing. This is a property of hsd's command line, and
 through it of every client that spawns hsd rather than linking it.
 
-**Consequence.** Turning IP Protection on or off costs a window — seconds from
-a persisted chain, minutes from scratch — in which every Handshake name resolves
-`unverified` over DoH rather than chain-proven, and the trust panel says so
-while it lasts. The guarantee a page load receives therefore depends on the
+**Consequence.** Switching between Fast and Private (the one control,
+`../../SPEC.md` §4.2) costs a window — seconds from a persisted chain, minutes
+from scratch — in which every Handshake name resolves `unverified` over DoH
+rather than chain-proven, and the trust panel says so while it lasts. In
+Private the interim is narrower still: the DoH answer is oblivious or the name
+is `unreachable` (SPEC §9.3), so the window costs availability where in Fast it
+costs a disclosure. The guarantee a page load receives therefore depends on the
 clock (§2.5) at one more moment than it used to: not only at launch, but at
 every mode change. It is a degradation to the weaker-but-honest path, never to
 a false answer, and the alternative — keeping a node whose peers see the real
@@ -398,6 +401,8 @@ the re-sync is always the short one. A composition that spawns the node
 chain-proven.
 
 ---
+
+
 
 ## 2. Things we are not sure about
 
@@ -445,12 +450,15 @@ When the chain path fails, resolution falls back to DoH (`query.hns.one`, then
 as the resolver's word and the trust panel names the resolver. Three things we
 are not settled on:
 
-- **The fallback is unconditional on infrastructure failure.** Any thrown error
-  on the chain path leads to a DoH attempt. That is availability-first. An
-  attacker who can reliably break the chain path can therefore *choose* which
-  resolver answers, and gets HS-8's weaker pin semantics as a bonus. We think
-  the answer is the "pinned before" memory (§2.4) rather than removing the
-  fallback, but we are not sure.
+- **In Fast mode the fallback is unconditional on infrastructure failure.**
+  Any thrown error on the chain path leads to a DoH attempt, oblivious first and
+  plain beneath it. That is availability-first. An attacker who can reliably
+  break the chain path can therefore *choose* which resolver answers, and gets
+  HS-8's weaker pin semantics as a bonus. In Private mode (SPEC §9.3) the plain
+  transport is never taken, so the same attacker gets the oblivious resolver's
+  answer or nothing — narrower, and still the resolver's word. We think the
+  answer in both modes is the "pinned before" memory (§2.4) rather than
+  removing the fallback, but we are not sure.
 - **Where the fallback is *not* allowed is settled**, and it is the part that
   matters: a synced chain's authoritative `unregistered` is final, and a DoH
   answer never overrides it (SPEC §9.1). DoH answers only the three states in
@@ -583,12 +591,16 @@ how the code reads:
    and DoH, applies the DoH fallback policy, injects the two egress seams of
    SPEC §6.11 (the SOCKS dialler for the authoritative hop and the DoH/ODoH
    client for ICANN hosts) and the proxied fetch, keeps the SPV node's proxy
-   setting following the anonymization mode, opens the TLS connection, checks
-   the DANE pin against the peer certificate, and records the trust steps. It is
-   Electron-bound and is not extracted into `../../src/`. Its *policy* is
-   specified normatively here (SPEC §6.11, §8, §9); the one deviation that lives
-   in it is HS-8, and the restart cost of the proxy switch is HS-16 — but the
-   code for them is not in this tree. An implementation of this chapter writes
+   setting following the delivery mode, opens the TLS connection through
+   `connectDane` with the route the mode decides (SPEC §8.1), applies the
+   Private-mode decisions at the pointer (SPEC §10.2) and turns a private
+   lookup failure into the page and trust state of SPEC §9.3, and records the
+   trust steps. It is Electron-bound and is not extracted into `../../src/`;
+   the pieces that are — `dane-connect.js`, `socks-dial.js`, `doh.js`,
+   `delivery-mode.js` — are the ones its policy rests on. Its *policy* is
+   specified normatively here (SPEC §6.11, §8, §9, §10.2); the deviations that
+   live in it is HS-8, and the restart cost of the proxy switch is
+   HS-16 — but the code for them is not in this tree. An implementation of this chapter writes
    that layer itself, and the rule that makes it auditable is that the seams are
    injected rather than defaulted: a composition that omits one gets a working
    resolver that leaks, silently, because it works.

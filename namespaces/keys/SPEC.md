@@ -218,41 +218,75 @@ rather than the loader wrapper's.
 
 *(`tests/engine-lifecycle.test.js`.)*
 
-### K.3.6 The IP-Protection gate
+### K.3.6 Private mode: route it or refuse it
 
 Every namespace in this chapter opens its own transport: BitTorrent and
 hyperswarm dial peers directly, SSB dials its own multiserver addresses, and a
 Gemini request is a raw TLS socket opened from the main process. None of them
-rides Electron's `session.setProxy`.
+rides Electron's `session.setProxy`, so the browser's one privacy control —
+**Settings › Content delivery › Mode: Fast / Private** — reaches them only
+through the rule below. The control's policy table is `policyFor()` in
+`../../src/delivery-mode.js`; the row for this chapter is `p2pDiscovery`,
+`allowed` in Fast and `refused` in Private, and it is row 19 of the
+repository's `../../DIVERGENCE.md`.
 
-> **The rule.** An implementation that offers an anonymizing mode **MUST**
-> either route a namespace through it or refuse the namespace. Leaking is not a
-> third option.
+> **The rule.** An implementation that offers a private mode **MUST** either
+> route a namespace through it or refuse the namespace. Leaking is not a third
+> option.
 
-The three peer-to-peer namespaces are **refused**. While the browser's
-anonymization is on, `hyper://`, `ssb://` and `bittorrent://` / `bt://` answer
-**503** with a sentence saying why, and **nothing underneath runs** — the gate
-answers before the engine is even considered (`src/gate.js`, extracted
-byte-identical). Refusal rather than routing is not laziness: a swarm's UDP DHT
-and uTP cannot ride a SOCKS circuit at all, and the peer handshakes disclose the
-real address anyway (§K.11).
+The three peer-to-peer namespaces are **refused**. In Private mode, `hyper://`,
+`ssb://` and `bittorrent://` / `bt://` answer **503** `text/plain` and
+**nothing underneath runs** — the gate answers before the engine is even
+considered (`createNonProxiedGate` in `src/gate.js`, extracted byte-identical).
+The page is built by `privateRefusal('p2p', { label })` from
+`../../src/delivery-mode.js`, so it says what every Private-mode refusal in
+this repository says — the mode, the reason, what was not done, and where the
+switch is:
+
+> **BitTorrent is refused in Private mode**
+>
+> BitTorrent serves its content over a peer-to-peer network, whose peers learn
+> the address of whoever asks; that path cannot be routed through the private
+> connection, so nothing was asked. Switch to Fast in Settings › Content
+> delivery to load it directly.
+
+Refusal rather than routing is not laziness: a swarm's UDP DHT and uTP cannot
+ride a SOCKS circuit at all, a TCP-only proxied swarm is a different and weaker
+engine, and the peer handshakes disclose the real address anyway (§K.11). The
+gate reads the live mode per request, so leaving Private mode lets the next
+request through with no restart.
+
+**A named site is not refused.** The refusal is for *discovery* — asking
+strangers where content is. A Handshake name whose zone also states an
+**origin** for its content loads from that origin in Private mode over the
+proxied fetch (Chapter 3 §8; row 9 of the inventory), and the refusal page the
+Handshake handler builds for a named peer-to-peer site says so in its own
+words — *"A name that also publishes a stated origin for its content loads from
+that origin in Private mode"*, the `host` form of the same `privateRefusal`.
+For a named site the private answer is a stated origin, not a mode; §K.8 is
+where a name reaches these namespaces, and this is the second half of what it
+inherits.
 
 `gemini://` is **routed**, and is therefore not behind the gate. Its transport
 is a single TCP connection to a single host, which is exactly what a SOCKS5
-proxy carries, so while anonymization is on the handler dials the capsule
-through the device-local Tor itself and refuses only when there is no Tor port
-to dial (§K.6.2). The two halves of the rule are both live in this chapter,
-which is the useful thing about it: the choice between them is made by what the
+proxy carries, so in Private mode the handler dials the capsule through the
+device-local Tor itself and refuses only when there is no Tor port to dial
+(§K.6.2). The two halves of the rule are both live in this chapter, which is
+the useful thing about it: the choice between them is made by what the
 transport *is*, not by how much trouble it is.
 
 503 specifically in both cases, never an invented status: a protocol handler's
 status goes straight into Chromium's `net::GetHttpReasonPhrase()`, which
 `NOTREACHED`s on a code it does not know.
 
-*(`tests/engine-lifecycle.test.js`, "IP Protection refuses the whole
-namespace"; `tests/gemini-protocol.test.js`, "with IP Protection on, the capsule
-is reached through the Tor SOCKS port by name — or refused when there is
-none".)*
+The mode is a policy about the route and decides nothing about trust: a
+`hyper://` page that is `verified` in Fast mode is `verified` in Private mode
+or is not served at all, and the trust table of §K.9 does not read the mode.
+
+*(`tests/engine-lifecycle.test.js`, "Private mode refuses the whole namespace
+with a 503 — nothing underneath runs"; `tests/gemini-protocol.test.js`, "with
+IP Protection on, the capsule is reached through the Tor SOCKS port by name —
+or refused when there is none".)*
 
 ---
 
@@ -413,12 +447,12 @@ origin (§K.6.3).
 An ordinary RFC 3986 hierarchical URI: `gemini://host[:port]/path[?query]`,
 default port **1965**. There is no identifier validation of our own.
 
-The host is a DNS name, and **who resolves it depends on the privacy mode**:
+The host is a DNS name, and **who resolves it depends on the mode**:
 
-| IP Protection | Who resolves the host | Consequence |
+| Mode | Who resolves the host | Consequence |
 |---|---|---|
-| off | Node's `tls.connect()`, i.e. the operating system's resolver | the lookup is in the clear: it does not go through the browser's DoH policy, its Oblivious DoH, or the Handshake resolver, so one scheme looks its hosts up in the open while every other lookup the browser makes is encrypted (D **KY-8**) |
-| on | the device-local Tor, from the name itself | no local lookup happens at all: the socket is dialled through SOCKS5 with the host as `ATYP` domain (§K.6.2), so the operating system's resolver is never asked |
+| Fast | Node's `tls.connect()`, i.e. the operating system's resolver | the lookup is in the clear: it does not go through the browser's DoH policy, its Oblivious DoH, or the Handshake resolver, so one scheme looks its hosts up in the open while every other lookup the browser makes is encrypted (D **KY-8**) |
+| Private | the device-local Tor, from the name itself | no local lookup happens at all: the socket is dialled through SOCKS5 with the host as `ATYP` domain (§K.6.2), so the operating system's resolver is never asked |
 
 A Gemini host that is a Handshake name does not resolve on either route: nothing
 here consults the Handshake resolver, and Tor will not either.
@@ -430,33 +464,38 @@ minVersion   TLSv1.2                       (the Gemini specification's floor)
 ALPN         "gemini"                      — offered; the check is overridden to pass
 SNI          the requested hostname
 tlsOpt       { rejectUnauthorized: false }
-             + { socket, servername }      while IP Protection is on
+             + { socket, servername }      in Private mode
 ```
 
-**The socket, while anonymization is on.** The handler takes `isAnonymized` and
-`torSocks` (`src/gemini-protocol.js:57-59`). While protection is on it opens the
-TCP connection itself, through the device-local Tor's SOCKS5 port (RFC 1928,
-`socksDialer`, `../../src/socks-dial.js`), and hands the connected socket to the
-TLS client as `tlsOpt.socket` with `tlsOpt.servername` set to the hostname
-(`:64-73`). Three properties follow, and an implementation that routes this
-scheme through a proxy **MUST** hold all three:
+**The socket, in Private mode.** The handler takes `isAnonymized` and
+`torSocks` — the anonymizer's `isOn()` and `torSocks()`, the second of which is
+the device-local Tor's `socks5://` URL while traffic is routed through it and
+`null` otherwise. In Private mode it opens the TCP connection itself, through
+that SOCKS5 port (RFC 1928, `socksDialer`, `../../src/socks-dial.js`), and
+hands the connected socket to the TLS client as `tlsOpt.socket` with
+`tlsOpt.servername` set to the hostname. Three properties follow, and an
+implementation that routes this scheme through a proxy **MUST** hold all three:
 
 1. **The dial is by NAME** — the host goes to the proxy as RFC 1928 `ATYP`
    `0x03` (`DOMAINNAME`) and is resolved inside Tor — so the operating system's
-   resolver is never asked while protection is on (§K.6.1). This is the same
+   resolver is never asked in Private mode (§K.6.1). This is the same
    mechanism RFC 7686 requires for `.onion` (Chapter 8 §6.4), applied here for
    privacy rather than for correctness.
 2. **`servername` is set explicitly.** TLS runs over a socket the client did not
    open, so SNI cannot be inferred from a hostname the client resolved; it
    **MUST** be passed, or the capsule is asked for the wrong virtual host and any
    future certificate pin (KY-D1) would be keyed to nothing.
-3. **No Tor port is a refusal, not a fallback.** With protection on and no SOCKS
-   port available, the request answers **503** and no socket is opened
-   (`:65-67`, `:105-107`). Falling back to a direct dial would leak the address
-   the mode exists to hide, which is the rule of §K.3.6.
+3. **No Tor port is a refusal, not a fallback.** In Private mode with no SOCKS
+   port available — the anonymizer has blocked because no Tor client can be
+   had — the request answers **503** and no socket is opened. The sentence it
+   carries is the shared `privateRefusal('site', { host })` wording every other
+   Private-mode refusal uses: the capsule's name, "is not loaded in Private
+   mode", nothing was sent, and the pointer at Settings › Content delivery.
+   Falling back to a direct dial would leak the address the mode exists to
+   hide, which is the rule of §K.3.6.
 
 Because the scheme is routed rather than gated, `gemini://` is the one namespace
-in this chapter that keeps working while anonymization is on. What it does not
+in this chapter that keeps working in Private mode. What it does not
 gain is any trust: the paragraphs below are unchanged by the route, and the
 capsule sees a Tor exit's address instead of the user's — an anonymity
 property, not an authentication one.
@@ -549,7 +588,7 @@ the words the capsule chose.
 | | |
 |---|---|
 | **Verified by construction** | Nothing. |
-| **Trusted** | The name→address answer — the operating system's resolver in the clear with IP Protection off, the device-local Tor with it on (§K.6.1) — and the TLS peer (any certificate, remembered nowhere). |
+| **Trusted** | The name→address answer — the operating system's resolver in the clear in Fast mode, the device-local Tor in Private mode (§K.6.1) — and the TLS peer (any certificate, remembered nowhere). |
 | **Bounded rather than trusted** | Redirects: same-host only, five at most, and any other target is handed back to the browser as a navigation or refused (§K.6.3). |
 | **Trust state** | Open — encrypted, unauthenticated (§K.9). |
 
@@ -764,7 +803,8 @@ Three properties an implementation **MUST** preserve:
 
 1. **The pointer is served through the same handler a typed address is.** A
    name-hosted torrent inherits every rule in §K.7 — the same dispatch, the
-   same IP-Protection gate, the same in-namespace failure.
+   same Private-mode gate (§K.3.6) and the same way past it, a stated origin
+   for the content, the same in-namespace failure.
 2. **A malformed pointer is not a pointer.** A `bt=` whose value is neither 40
    nor 64 hex parses to `null` rather than to a half-trusted address.
 3. **The trust states compose, weakest link wins.** The Handshake side proves
@@ -824,9 +864,9 @@ Five properties of that table are normative for this chapter.
   but the verdict **MUST** be `partial` and never `verified`. An implementation
   **MUST NOT** report a resolved address as though its key had been typed.
 - **The verdict is not changed by the route the socket took.** `gemini://`
-  reaches its capsule through the device-local Tor while IP Protection is on
-  (§K.6.2) and directly when it is off, and both produce exactly the steps in
-  the table above. Tor changes who sees the address, not who authenticated the
+  reaches its capsule through the device-local Tor in Private mode (§K.6.2) and
+  directly in Fast mode, and both produce exactly the steps in the table
+  above. Tor changes who sees the address, not who authenticated the
   answer, and an implementation **MUST NOT** score a step differently because
   the connection was anonymized.
 - **The two BitTorrent spellings are one namespace and say one thing**, and the
@@ -887,12 +927,12 @@ open, and an implementation should be explicit about all four:
    answer carries no signature, so that hop is the whole security of the address
    for those forms. It is also resolved outside every DNS protection the rest of
    the browser applies: always for `hyper://` (D **KY-4**), and for `gemini://`
-   whenever IP Protection is off, which is when the operating system's resolver
-   answers (D **KY-8**). With protection on, the Gemini name is resolved inside
-   Tor instead — which removes the disclosure and adds no signature.
-4. **Metadata.** Joining a swarm publishes your address to it. This is why the
-   IP-Protection gate (§K.3.6) refuses the three peer-to-peer namespaces
-   outright rather than pretending to proxy them, why Local Service Discovery is
+   in Fast mode, which is when the operating system's resolver answers (D
+   **KY-8**). In Private mode the Gemini name is resolved inside Tor instead —
+   which removes the disclosure and adds no signature.
+4. **Metadata.** Joining a swarm publishes your address to it. This is why
+   Private mode (§K.3.6) refuses the three peer-to-peer namespaces outright
+   rather than pretending to proxy them, why Local Service Discovery is
    off, and why BitTorrent is deliberately never wired to the bundled Tor: UDP
    DHT and uTP cannot ride a SOCKS circuit, and the handshakes leak the real
    address anyway. `gemini://` is the exception because its transport is one TCP

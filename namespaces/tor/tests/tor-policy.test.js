@@ -19,7 +19,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 
-import { resolveProxy, detectTor, applyProxy, AnonymizeController, MODES } from '../src/anonymize.js'
+import { resolveProxy, detectTor, applyProxy, AnonymizeController, MODES, BLACKHOLE_RULES } from '../src/anonymize.js'
 
 /** A fake TorNode: fully controllable, no real tor process anywhere. */
 function fakeTor ({ state = 'ready', socks = 'socks5://127.0.0.1:41000', ready = null } = {}) {
@@ -47,7 +47,7 @@ function fakeSession () {
 // --- there are two modes, and no hosted relay ------------------------------
 
 test('there are exactly two modes: off and tor', () => {
-  assert.deepEqual(Object.values(MODES).sort(), ['off', 'tor'])
+  assert.deepEqual(Object.values(MODES).sort(), ['blocked', 'off', 'tor'])
   // No remote/VPS/hosted mode exists. This is the design rule in code: a mode
   // pointing at somebody else's SOCKS endpoint would let that operator learn
   // which hidden service was asked for.
@@ -302,4 +302,50 @@ test('a failed bootstrap closes the gate before it returns to a direct connectio
   assert.equal(direct.cfg.mode, 'direct')
   assert.equal(direct.isOnAtThatMoment, false, 'R9: no onion request is admitted onto a direct session')
   assert.match(c.status.note, /could not reach the Tor network/)
+})
+
+// ---------------------------------------------------------------- fail closed
+// Private mode's promise: "if a private lookup fails, the page fails rather
+// than falling back." With failClosed the controller enters BLOCKED — every
+// session pointed at a loopback port nothing listens on — instead of OFF.
+
+test('failClosed: bundled tor unavailable -> BLOCKED on the blackhole, isOn stays true, torSocks is null', async () => {
+  const s = fakeSession()
+  const tor = fakeTor({ state: 'unavailable' })
+  const c = new AnonymizeController({ sessions: s, tor, failClosed: true })
+  const st = await c.setMode(MODES.TOR)
+  assert.equal(st.mode, 'blocked')
+  assert.equal(st.rules, BLACKHOLE_RULES)
+  assert.match(st.note, /Private mode cannot connect/)
+  assert.match(st.note, /switch to Fast/i)
+  assert.equal(s.calls.setProxy.at(-1).proxyRules, BLACKHOLE_RULES, 'the session is pointed at the blackhole, never left direct')
+  assert.equal(c.isOn(), true, 'the gates keep refusing')
+  assert.equal(c.torSocks(), null, 'no raw-socket path dials the blackhole and reports a network fault')
+})
+
+test('failClosed: a failed bootstrap -> BLOCKED, not direct', async () => {
+  const s = fakeSession()
+  const tor = fakeTor({ state: 'starting', ready: false })
+  const c = new AnonymizeController({ sessions: s, tor, failClosed: true })
+  await c.setMode(MODES.TOR)
+  tor._settle(false)
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(c.mode, 'blocked')
+  assert.match(c.status.note, /could not reach the Tor network/)
+  assert.equal(s.calls.setProxy.at(-1).proxyRules, BLACKHOLE_RULES)
+})
+
+test('failClosed: OFF still goes direct, and a routed TOR still reports its SOCKS URL', async () => {
+  const s = fakeSession()
+  const c = new AnonymizeController({ sessions: s, tor: fakeTor(), failClosed: true })
+  await c.setMode(MODES.TOR)
+  assert.equal(c.torSocks(), 'socks5://127.0.0.1:41000')
+  await c.setMode(MODES.OFF)
+  assert.equal(c.mode, 'off')
+  assert.equal(c.torSocks(), null)
+  assert.equal(s.calls.setProxy.at(-1).mode, 'direct')
+})
+
+test('the blackhole is a loopback port, never a routable address', () => {
+  assert.match(BLACKHOLE_RULES, /^socks5:\/\/127\.0\.0\.1:\d+$/)
 })

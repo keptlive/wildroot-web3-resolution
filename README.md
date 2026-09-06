@@ -35,9 +35,12 @@ it.
   every place we are not sure we are right, and every design decision left
   open, per chapter. Read this one.
 - **[`DIVERGENCE.md`](DIVERGENCE.md)** — the cross-cutting inventory of every
-  place where privacy and speed pull apart: what the fast path does, what a
-  private path would do, what the code does today, and what the private path
-  would take. The input to a PRIVATE mode and a FAST mode.
+  place where privacy and speed pull apart: what the fast path does, what the
+  private path does, what the code does, and whether a no-trade-off option
+  exists. Eighteen rows have one and are built; the five that survive are what
+  the **Fast / Private switch** is for (`SPEC.md` §4.2, `src/delivery-mode.js`):
+  one control that drives the Tor session proxy — failing closed — and every
+  private path together, with the disclosure it carries written out in full.
 
 ## Scope
 
@@ -174,7 +177,7 @@ byte-identical to the same files in the Wildroot tree.
 
 ## Citing
 
-> Wildroot, *Web3 name resolution: a specification*, version 0.3.
+> Wildroot, *Web3 name resolution: a specification*, version 0.4.
 > https://github.com/keptlive/wildroot-web3-resolution
 
 ## Contributing

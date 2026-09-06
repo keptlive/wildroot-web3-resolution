@@ -26,9 +26,9 @@ written `src/…` and `tests/…` are this chapter's, under `namespaces/tor/`.
 ### TO-1. With Tor off, and off Tor, we answer with a page rather than an error
 
 **What.** Two of this handler's answers are `200` documents where a caller might
-expect a failure status. When IP Protection is off, an `onion://` navigation
-gets a `200` interstitial explaining what to turn on, where, and what the
-limitation is (`src/onion-protocol.js:125-128`, `:228-238`). When an onion
+expect a failure status. In Fast mode — IP Protection off — an `onion://`
+navigation gets a `200` interstitial explaining what to turn on, where, and what
+the limitation is (`src/onion-protocol.js:125-128`, `:228-238`). When an onion
 service redirects to a target outside Tor, the answer is a `200` page naming the
 destination and offering it as a link (`:167-172`).
 
@@ -104,9 +104,10 @@ than a patch to apply; see §2.2 and TO-D2.
 ### TO-3. No SOCKS stream isolation: everything shares circuits
 
 **What.** One SOCKS proxy URL with no credentials is applied to the whole
-session (`src/anonymize.js:243-258`), and the three main-process paths that dial
-the same port for themselves — the Handshake resolver's authoritative hop, the
-`wss://` tunnel's upstream and a `gemini://` TLS socket, all through
+session (`src/anonymize.js:243-258`), and the five main-process paths that dial
+the same port for themselves — the Handshake resolver's authoritative hop, an
+A-record `hns://` site's DANE-pinned socket, the `wss://` tunnel's upstream, a
+`gemini://` TLS socket and a Nostr relay's WebSocket, all through
 `../../src/socks-dial.js` (SPEC §7.5) — send none either.
 
 **The standard says.** RFC 1929 defines username/password authentication for
@@ -117,7 +118,7 @@ would get a separate circuit per origin at no cost. We supply none.
 
 **Why.** For the session the proxy is configured once, as an Electron
 session-level `proxyRules` string, and that API has no hook for per-request
-SOCKS credentials. For the three direct dialers the reason is different and
+SOCKS credentials. For the five direct dialers the reason is different and
 weaker: the shared SOCKS client simply does not take a credential, because it
 was written for the session's own no-auth port and nothing asked it for one.
 
@@ -126,14 +127,15 @@ session, can share exit-side and circuit-level correlation. Tor Browser isolates
 by first-party domain precisely to prevent that. It is a genuine anonymity gap,
 and it is part of what "hides your IP, is not full anonymity" is paying for. The
 direct dialers widen it in a specific and slightly worse way: a Handshake
-nameserver query, the WebSocket to that name's origin and an unrelated Gemini
-capsule can all traverse one circuit, so a relay that sees the lookup may see
-the socket that follows it.
+nameserver query, the site connection that follows it, the WebSocket to that
+name's origin, an unrelated Gemini capsule and a Nostr relay query can all
+traverse one circuit, so a relay that sees the lookup may see the socket that
+follows it.
 
 **Status: OPEN**, with a real obstacle for the session half: we do not currently
 know how to do this through Electron's session proxy API, and the fix is a piece
 of design work rather than a line of code. TO-D1 states the three routes we can
-see and why none of them is a one-liner. The three direct dialers are the
+see and why none of them is a one-liner. The five direct dialers are the
 exception — they build their own SOCKS connection and could pass a credential
 today — which makes them the place to measure whether Tor isolates on one at
 all. Until per-site isolation exists anywhere, the product claim must keep
@@ -201,10 +203,12 @@ TO-D4.
 
 ### TO-6. IP Protection is all-or-nothing for the whole session
 
-**What.** There is one mode for the whole browser session
-(`src/anonymize.js:243-258`). Reaching a single onion service means routing
-*everything* — every tab, every protocol handler, the search fan-out — through
-Tor for as long as the mode is on.
+**What.** There is one proxy state for the whole browser session
+(`src/anonymize.js:243-258`), and it is driven by Settings › Content delivery ›
+Mode (SPEC §2). Reaching a single onion service means putting the whole browser
+in Private: every tab, every protocol handler and the search fan-out through
+Tor, and the Handshake, ICANN, Nostr and peer-to-peer policies that move with
+the switch (`../../SPEC.md` §4.2), for as long as it is on.
 
 **The standard says.** Nothing directly; this is a deviation from the Tor
 Browser design document, whose first-party isolation model is the reference
@@ -216,8 +220,9 @@ per session, and a design in which *some* traffic is proxied is a design in
 which it is easy to be wrong about which.
 
 **Consequence.** A user who wants one onion page pays Tor latency on everything
-else, which is a strong incentive to leave the mode off — and the mode being off
-is the condition under which onion addresses are unreachable at all. The design
+else, and the Private-mode refusals besides — peer-to-peer content, a Handshake
+name whose oblivious lookup fails — which is a strong incentive to stay in Fast;
+and Fast is the condition under which onion addresses are unreachable at all. The design
 that is safest is also the one that discourages use. It is also, per TO-3, the
 configuration in which everything shares circuits.
 
@@ -231,6 +236,41 @@ proxied?" question in it is worth a great deal, and we would rather keep it than
 trade it for a partial answer. See §2.5.
 
 ---
+
+### TO-7. While BLOCKED, a session request fails as a proxy error, not as a page that names the mode
+
+**What.** In BLOCKED (SPEC §7.6) every session is pointed at
+`socks5://127.0.0.1:9`. A page load, a subresource or a protocol handler's
+session fetch then fails with the engine's `ERR_PROXY_CONNECTION_FAILED`, and
+what the user sees is the engine's own error page — or, for `onion://`, the
+handler's `502` echoing the proxy error (SPEC §6.7). The controller's note names
+the mode and the switch, but it is shown in the status surface, not on the
+failed page. Only the five raw-socket paths of SPEC §7.5 refuse in words
+(`privateRefusal`).
+
+**The specification says.** `../../SPEC.md` §4.2: every refusal or failure a
+mode causes MUST name the mode, say what was not done, not blame the site, and
+point at the control.
+
+**Why.** The blackhole is what makes fail-closed hold for *everything* the
+session sends, with no list of consumers to keep complete; a page that names the
+mode needs a hook at the point where each load fails, which the proxy has no
+part in.
+
+**Consequence.** A person in Private mode whose Tor is down sees a generic
+connection error on every site, and learns why only from the status note or the
+menu. The behaviour is correct — nothing leaks — and the explanation is in the
+wrong place.
+
+**Status: OPEN. Recommendation:** in the composition, on a main-frame
+`did-fail-load` with a proxy-connection error while the controller is BLOCKED,
+replace the engine's error page with one built from the controller's note — the
+same words: the mode, nothing loads, the switch — using the same hook the
+Tor-ready reload of SPEC §7.4 already has on those tabs. Keep the blackhole; add
+the page.
+
+---
+
 
 ## 2. Things we are not sure about
 
@@ -312,7 +352,8 @@ evidence for it. **If somebody has run this experiment, we would like to know.**
 ### 2.5. Whether the mode is at the right granularity (TO-6)
 
 A whole-session proxy is simple, auditable, and has no "was this request
-proxied?" question in it — properties we value highly. It also makes the safe
+proxied?" question in it — properties we value highly — and it is also the
+granularity of the whole Fast / Private switch, which drives it. It also makes the safe
 path expensive enough that users will not stay on it, and per-origin circuit
 isolation (TO-3) impossible.
 
@@ -365,11 +406,12 @@ sent distinct credentials. Electron's `session.setProxy` takes a session-wide
 `proxyRules` string with no hook for per-request SOCKS credentials, so there is
 no small version of this change (TO-3, TO-6).
 
-**Recommendation.** Start where it is nearly free: the three main-process
+**Recommendation.** Start where it is nearly free: the five main-process
 dialers of SPEC §7.5 construct their own SOCKS connection, so giving
 `../../src/socks-dial.js` an optional username/password derived from the
-first-party (the Handshake name, the WebSocket origin, the capsule host) is a
-parameter and a test, and it answers the question the session-wide routes below
+first-party (the Handshake name — for its nameserver hop and its site socket
+alike — the WebSocket origin, the capsule host, the relay) is a parameter and a
+test, and it answers the question the session-wide routes below
 all depend on — *does this Tor isolate on it?* — for the cost of an afternoon. A
 positive answer justifies the session work; a negative one saves it. Then take
 the three session routes in order of what they would prove, not of effort. **(a)** A PAC script returning a different `SOCKS5` line per host
@@ -469,9 +511,12 @@ Three things are deliberately absent from `src/` and `tests/`:
    the Tor Expert Bundle, then a pinned SHA-256) is packaging, not resolution.
 
 3. **The session wiring.** Which Electron sessions the proxy is applied to, how
-   `net.fetch` is bound, and how the anonymize controller composes with the
-   WebSocket PAC all live in the browser's `src/index.js` and
-   `src/protocols/index.js`. `AnonymizeController` takes duck-typed sessions
+   `net.fetch` is bound, how the anonymize controller composes with the
+   WebSocket PAC, and how the `DeliveryMode` controller is wired to the
+   settings page, the Privacy menu and the stored configuration (the controller
+   itself, `../../src/delivery-mode.js`, is in this package; the `failClosed`
+   flag the browser passes is set there) all live in the browser's
+   `src/index.js` and `src/protocols/index.js`. `AnonymizeController` takes duck-typed sessions
    (`{ setProxy, closeAllConnections }`) and the onion handler takes an injected
    `fetchImpl`, so both are fully exercised here without Electron — but the
    *wiring* is the browser's, and SPEC §7.5 specifies its policy rather than its

@@ -401,7 +401,9 @@ Normalisation is specified, and an implementation **SHOULD** copy it
   every default configuration is a warning nobody reads.
 
 `dns.mode` is surfaced in the browser's settings page with all three values
-explained (`src/pages/settings.html:464-472`) and takes effect on restart.
+explained (`src/pages/settings.html:464-472`) and takes effect on restart. It is
+the **Fast-mode** plan: in Private mode (§5.7) the stored value is not consulted
+at all — the block is replaced before it is read.
 
 ### 5.3 Oblivious DoH, through a loopback bridge
 
@@ -481,13 +483,14 @@ Consequences:
   reports it (§6.2).
 - If the bridge **starts and then a lookup fails** — every relay down, the
   target unreachable — the bridge answers SERVFAIL and the engine applies its
-  mode. In `automatic` that means **unencrypted system DNS**, not the
-  configured DoH pool, because the bridge replaced it. Turning obliviousness
-  on therefore changes the floor beneath a failure from *encrypted* to
-  *plaintext*.
-- In `secure` mode there is no floor: a relay outage is a total ICANN outage.
-  That is the honest trade rather than a defect — the alternative is resolving
-  in the clear after the user asked us not to.
+  mode. In `automatic` — the Fast-mode default — that means **unencrypted
+  system DNS**, not the configured DoH pool, because the bridge replaced it.
+  Turning obliviousness on therefore changes the floor beneath a failure from
+  *encrypted* to *plaintext*.
+- In `secure` mode — configured, or forced by Private mode (§5.7) — there is
+  no floor: a relay outage is a total ICANN outage. That is the honest trade
+  rather than a defect — the alternative is resolving in the clear after the
+  user asked us not to.
 
 > **`secure` with no server to point at fails closed.** The engine is
 > configured for secure mode with an **empty** server list, so nothing
@@ -498,7 +501,8 @@ profile that asks for `secure` with an empty `dns.servers`, or whose bridge
 failed to start with `dns.servers` unset, therefore breaks loudly — every
 ordinary web address fails, the implementation logs why, and the interface
 reports the refusal as a *failed* step rather than as system DNS (§6.2). An
-implementation **MUST NOT** treat that configuration as a no-op.
+implementation **MUST NOT** treat that configuration as a no-op. Private mode
+with no bridge is this case by construction (§5.7).
 
 Nothing is configured in two other cases, and neither is a contradiction:
 `mode: 'off'`, which asks for exactly that, and `automatic` with no resolver to
@@ -510,7 +514,9 @@ point at, which asks to resolve the way the platform would. Both report
 `automatic` exists for captive portals and hotel Wi-Fi, which intercept DNS and
 would otherwise make the network unusable. This is a genuine
 availability-versus-privacy trade and it is resolved in favour of availability
-by default (IC-6). An implementation **MUST** state which mode was in force and
+by default, in Fast mode (IC-6). Private mode has no such fallback (§5.7): behind
+a portal that intercepts DNS, no ICANN name resolves in Private until the portal
+is passed in Fast. An implementation **MUST** state which mode was in force and
 **MUST NOT** describe `automatic` as private without the qualification: an
 attacker who can make the configured resolvers unreachable can force every
 lookup into the clear, and in the bridged case (§5.4) that is one relay outage
@@ -535,6 +541,74 @@ So the first lookups of a session, and every configuration refresh, disclose
 clear. They do not disclose which sites the user visits. An implementation
 **MUST NOT** present the oblivious path as leaking nothing to the local
 network. IC-9.
+
+### 5.7 Private mode: the oblivious bridge, or nothing
+
+The Fast / Private switch of `../../SPEC.md` §4.2 reaches this chapter through
+one argument: `planDnsTransport({ privateMode })`. When it is true the `dns`
+block is replaced by `privateDns()` **before anything else reads it**, so every
+fact of §5.4 is computed for the configuration the engine is actually given:
+
+```
+privateDns(dns)  →  { ...dns, mode: 'secure', servers: [] }
+```
+
+- **`secure`, whatever was configured.** `off` and `automatic` are both
+  overridden. Nothing plaintext, ever: a name the bridge cannot answer does not
+  resolve.
+- **The configured pool is dropped.** An encrypted-but-not-oblivious resolver
+  still learns every name and the address asking, which is the disclosure the
+  mode exists to refuse; so the pool is not a fallback and is not in the list.
+  With the bridge up, `servers` is the bridge's template and nothing else
+  (`oblivious: true`, `plaintextFallback: false`, `failClosed: false`).
+- **No bridge: fail closed.** With the bridge not running — no relays
+  configured, `odoh.enabled` or `odoh.icann` false, a start failure — the plan
+  is `secure` with an **empty** list (`configure: true`, `failClosed: true`),
+  the engine is configured exactly so, nothing resolves, and the Domain name
+  step is form 3 of §6.2: *refused*, state `failed`, never *"system DNS"*.
+  Ordinary web addresses fail until the bridge is up or the mode is Fast; the
+  log says which.
+- **Fast is the configured plan, untouched.** `planDnsTransport({ privateMode:
+  false })` is identical to the call without the argument, including
+  `mode: 'off'` configuring nothing.
+
+**Applied on every switch.** The composition (the browser's `src/index.js`,
+`applyDnsPlan`) computes the plan for the stored mode at launch, before any
+window exists, and recomputes it on every `change` the `DeliveryMode`
+controller emits — calling `app.configureHostResolver` with the new `mode` and
+`servers` and recording the plan (`recordDnsPlan`), so the panel describes what
+the engine was told for *this* mode. A return to a plan that configures nothing
+(`dns.mode: off`, in Fast) puts the engine back on its default explicitly
+(`secureDnsMode: 'off'`) rather than leaving the last secure plan in force.
+Because `DeliveryMode` flips the mode before it routes the session and routes
+off before it flips back (`../../src/delivery-mode.js`), the plan is never less
+strict than the session is.
+
+**The bridge is started for either mode.** `wantsObliviousBridge()` is asked
+twice at launch — for the configured block and for `privateDns()` of it — and
+the bridge (and, before the engine is ready, its pinned certificate, §9.3) is
+started if **either** wants it. A profile whose `dns.mode` is `off` therefore
+still has a bridge to switch to: idle in Fast, the only server in Private.
+
+**Row 7.** The same switch drives the session proxy: in Private every ICANN page
+fetch rides the device-local Tor, in Fast none does (Chapter 8 §7.5–§7.6,
+`../../DIVERGENCE.md` row 7). The name lookup and the page fetch are therefore
+private together or fast together; there is no setting in which one is protected
+and the other is not.
+
+**What the mode does, and does not, do to the bridge's own egress.** The
+bridge's connections to the relay and the target ride the session's proxied
+fetch (`OdohTransport({ fetchImpl })` — the composition injects it exactly as
+the Handshake handler's transport receives it), so in Private they leave
+through Tor and while BLOCKED the blackhole stops them. The bootstrap *name*
+lookups of §5.6 are the runtime's, in both modes (IC-9). And the mode does not
+change a verdict: an ICANN page is TRUSTED in both modes (§6.3).
+
+`tests/dns-policy.test.js` pins the plan: *"privateDns: secure, and no pool,
+whatever the configured block said"*, *"Private with the bridge up: oblivious
+only, nothing plaintext, never a pool server"*, *"Private with NO bridge fails
+closed: configured secure with an empty list, and the panel says refused"*, and
+*"Fast is the configured plan, untouched"*.
 
 ---
 
@@ -577,10 +651,11 @@ Five mutually exclusive forms, in the order they are tested:
    - `secure`: *"Oblivious bridge only — this name was not answered by it"*,
      and the detail says unencrypted DNS is refused, so the answer most likely
      came from the engine's cache. It **MUST NOT** suggest plaintext, which
-     that mode does not permit.
+     that mode does not permit. This is the Private-mode wording (§5.7).
 3. **Refused** — *"Secure DNS with no server — lookups refused"*, state
    `failed`, when the plan failed closed (§5.4). Reporting this as system DNS
-   would describe the exact thing that did not happen.
+   would describe the exact thing that did not happen. Private mode with no
+   bridge lands here (§5.7).
 4. **Plaintext** — *"System DNS, unencrypted"*, with the consequence in plain
    words: your router, your ISP and anyone on the path saw the name. This is
    also what is said when the caller has no plan to describe.
@@ -803,6 +878,11 @@ which would fail every lookup instead.
   user should get to make, which is why it is a configuration key. It is
   editable only in the configuration file (IC-15).
 - **The bootstrap lookups leak which privacy infrastructure is in use** (§5.6).
+- **In Private mode** (§5.7) the bridge is the only resolver the engine has and
+  every page fetch rides Tor, so the network sees a connection to the relay and
+  a connection to Tor and no name; the bridge's own connections to the relay
+  and the target ride the same proxied fetch. The exception is the bootstrap
+  name lookups, which are made by the runtime directly in both modes (IC-9).
 - **Without ECH** (spine D-3) the server name is in the ClientHello regardless,
   so an oblivious DNS lookup does not by itself hide which site was visited
   from an on-path observer.

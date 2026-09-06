@@ -159,6 +159,8 @@ a departure that no longer exists is not described.
   - NO-11 The _nostr DNS record is designed and documented but not published
   - NO-12 On a .hns.one NIP-05 address the Handshake guarantees do not apply to the lookup
   - NO-14 The nsec arm is claimed on its prefix, not on its checksum
+  - NO-15 Private mode hides who is asking, not what is asked
+  - NO-16 Two WebSocket implementations on two routes
   - 2.1 Whether a lock can ever close for Nostr — and whether a padlock is the right instrument
   - 2.2 What "the right event" means, once the answer is bound to the query
   - 2.3 Whether NIP-05 belongs in a resolution specification at all
@@ -198,6 +200,7 @@ a departure that no longer exists is not described.
   - TO-4 Whether the session cookie jar reaches the onion fetch is not established
   - TO-5 Onion services with client authorization cannot be reached
   - TO-6 IP Protection is all-or-nothing for the whole session
+  - TO-7 While BLOCKED, a session request fails as a proxy error, not as a page that names the mode
   - 2.1 Whether "device-local" should have any escape hatch at all
   - 2.2 Whether an explicit scheme should be allowed to defeat R1 (TO-2)
   - 2.3 Whether routing before the circuit is ready is the right call (R11)
@@ -218,7 +221,7 @@ a departure that no longer exists is not described.
   - KY-5 magnet: is its own namespace although it only ever redirects
   - KY-6 A dropped .torrent file is shape-checked, not verified
   - KY-7 Every "verified by construction" claim in this chapter is made by a dependency
-  - KY-8 With IP Protection off, a gemini:// host is resolved by the operating system
+  - KY-8 In Fast mode, a gemini:// host is resolved by the operating system
   - KY-9 Engine-reserved host names are reachable: bt-fetch petnames and localhost drives
   - KY-10 Every magnet parameter except xt, xs and dn is ignored
   - KY-11 No freshness is pinned for any mutable address
@@ -256,7 +259,7 @@ a departure that no longer exists is not described.
   - AP-7 A Handshake WebSocket is reachable on port 443 and nowhere else
   - 2.1 Whether the 101 is checked for Sec-WebSocket-Accept in our stack
   - 2.2 What Chromium actually sends to the tunnel for a plaintext ws://
-  - 2.3 Whether the PAC leaves loopback traffic reachable while IP Protection is on
+  - 2.3 Whether the PAC leaves loopback traffic reachable in Private mode
   - 2.4 Cookie behaviour on an hns:// origin
   - 2.5 Storage partitioning inside a native document
   - 2.6 Whether the PAC is applied to every session that can open a WebSocket
@@ -1269,10 +1272,13 @@ honour it. `../../src/spv.js` (`setProxy`, `_nodeIsProxied`).
 **The standard says.** Nothing. This is a property of hsd's command line, and
 through it of every client that spawns hsd rather than linking it.
 
-**Consequence.** Turning IP Protection on or off costs a window — seconds from
-a persisted chain, minutes from scratch — in which every Handshake name resolves
-`unverified` over DoH rather than chain-proven, and the trust panel says so
-while it lasts. The guarantee a page load receives therefore depends on the
+**Consequence.** Switching between Fast and Private (the one control,
+`SPEC.md` §4.2) costs a window — seconds from a persisted chain, minutes
+from scratch — in which every Handshake name resolves `unverified` over DoH
+rather than chain-proven, and the trust panel says so while it lasts. In
+Private the interim is narrower still: the DoH answer is oblivious or the name
+is `unreachable` (SPEC §9.3), so the window costs availability where in Fast it
+costs a disclosure. The guarantee a page load receives therefore depends on the
 clock (§2.5) at one more moment than it used to: not only at launch, but at
 every mode change. It is a degradation to the weaker-but-honest path, never to
 a false answer, and the alternative — keeping a node whose peers see the real
@@ -1287,6 +1293,8 @@ the re-sync is always the short one. A composition that spawns the node
 chain-proven.
 
 ---
+
+
 
 ### 2. Things we are not sure about
 
@@ -1334,12 +1342,15 @@ When the chain path fails, resolution falls back to DoH (`query.hns.one`, then
 as the resolver's word and the trust panel names the resolver. Three things we
 are not settled on:
 
-- **The fallback is unconditional on infrastructure failure.** Any thrown error
-  on the chain path leads to a DoH attempt. That is availability-first. An
-  attacker who can reliably break the chain path can therefore *choose* which
-  resolver answers, and gets HS-8's weaker pin semantics as a bonus. We think
-  the answer is the "pinned before" memory (§2.4) rather than removing the
-  fallback, but we are not sure.
+- **In Fast mode the fallback is unconditional on infrastructure failure.**
+  Any thrown error on the chain path leads to a DoH attempt, oblivious first and
+  plain beneath it. That is availability-first. An attacker who can reliably
+  break the chain path can therefore *choose* which resolver answers, and gets
+  HS-8's weaker pin semantics as a bonus. In Private mode (SPEC §9.3) the plain
+  transport is never taken, so the same attacker gets the oblivious resolver's
+  answer or nothing — narrower, and still the resolver's word. We think the
+  answer in both modes is the "pinned before" memory (§2.4) rather than
+  removing the fallback, but we are not sure.
 - **Where the fallback is *not* allowed is settled**, and it is the part that
   matters: a synced chain's authoritative `unregistered` is final, and a DoH
   answer never overrides it (SPEC §9.1). DoH answers only the three states in
@@ -1472,12 +1483,16 @@ how the code reads:
    and DoH, applies the DoH fallback policy, injects the two egress seams of
    SPEC §6.11 (the SOCKS dialler for the authoritative hop and the DoH/ODoH
    client for ICANN hosts) and the proxied fetch, keeps the SPV node's proxy
-   setting following the anonymization mode, opens the TLS connection, checks
-   the DANE pin against the peer certificate, and records the trust steps. It is
-   Electron-bound and is not extracted into `../../src/`. Its *policy* is
-   specified normatively here (SPEC §6.11, §8, §9); the one deviation that lives
-   in it is HS-8, and the restart cost of the proxy switch is HS-16 — but the
-   code for them is not in this tree. An implementation of this chapter writes
+   setting following the delivery mode, opens the TLS connection through
+   `connectDane` with the route the mode decides (SPEC §8.1), applies the
+   Private-mode decisions at the pointer (SPEC §10.2) and turns a private
+   lookup failure into the page and trust state of SPEC §9.3, and records the
+   trust steps. It is Electron-bound and is not extracted into `../../src/`;
+   the pieces that are — `dane-connect.js`, `socks-dial.js`, `doh.js`,
+   `delivery-mode.js` — are the ones its policy rests on. Its *policy* is
+   specified normatively here (SPEC §6.11, §8, §9, §10.2); the deviations that
+   live in it is HS-8, and the restart cost of the proxy switch is
+   HS-16 — but the code for them is not in this tree. An implementation of this chapter writes
    that layer itself, and the rule that makes it auditable is that the seams are
    injected rather than defaulted: a composition that omits one gets a working
    resolver that leaks, silently, because it works.
@@ -1682,10 +1697,12 @@ who can answer for them.
 #### IC-6. `automatic` falls back to unencrypted system DNS
 *`../../src/dns-policy.js`, `src/config.js:348-357`*
 
-**What.** The default `dns.mode` is `automatic`: encrypted DNS to the
-configured resolvers, falling back to unencrypted system DNS when none answer.
-The plan reports this as `plaintextFallback: true` and the interface says it in
-words.
+**What.** In Fast mode — the configured plan — the default `dns.mode` is
+`automatic`: encrypted DNS to the configured resolvers, falling back to
+unencrypted system DNS when none answer. The plan reports this as
+`plaintextFallback: true` and the interface says it in words. In Private mode
+the block is replaced by `privateDns()` before it is read (SPEC §5.7), so the
+fallback does not exist there: `secure`, the bridge alone, or nothing.
 
 **The standard says.** RFC 8484 defines the DoH transport but not a fallback
 policy; RFC 8310 §8.2, on the analogous DoT case, distinguishes an opportunistic
@@ -1697,11 +1714,12 @@ profile.
 the network unusable. This is a genuine availability-versus-privacy trade and it
 is resolved in favour of availability by default.
 
-**Consequence.** An attacker who can make the configured resolvers unreachable
-can force every ICANN lookup into the clear — and, because the bridge replaces
-the pool (IC-7), needs only to reach the two relays to do it. `secure` mode
-exists, refuses plaintext even when that means resolving nothing at all, and is
-documented in the settings page in the user's own words.
+**Consequence.** In Fast mode an attacker who can make the configured resolvers
+unreachable can force every ICANN lookup into the clear — and, because the
+bridge replaces the pool (IC-7), needs only to reach the two relays to do it.
+`secure` mode exists, refuses plaintext even when that means resolving nothing
+at all, is documented in the settings page in the user's own words, and is what
+Private mode forces.
 
 **Status: DELIBERATE** as a default, and stated as a limitation everywhere it
 applies (SPEC §5.5, §9.2).
@@ -1714,7 +1732,9 @@ applies (SPEC §5.5, §9.2).
 **What.** When the loopback ODoH bridge starts, its template becomes the whole
 of `secureDnsServers`. The configured DoH pool is discarded for the life of the
 process, so the engine has exactly one secure resolver and, below it, whatever
-the mode permits.
+the mode permits. This is a Fast-mode question: in Private the pool is dropped
+by policy before the bridge is consulted (`privateDns()`, SPEC §5.7), so there
+the bridge is the only server whether or not it replaces anything.
 
 **The standard says.** Nothing requires either arrangement; RFC 8484 clients
 customarily hold a list. This is a deviation from what a reader of the
@@ -1727,9 +1747,10 @@ interface's per-name claim (SPEC §6.2) would become the only thing that could
 tell the two apart.
 
 **Consequence.** Turning obliviousness on changes the floor beneath a failed
-lookup from *encrypted* to *plaintext* in `automatic` mode, and to a total ICANN
-outage in `secure` mode. The second is the honest trade; the first is a
-downgrade the user did not ask for by asking for more privacy.
+lookup from *encrypted* to *plaintext* in Fast mode's `automatic`, and to a
+total ICANN outage in `secure` mode — configured, or forced by Private. The
+second is the honest trade; the first is a downgrade the user did not ask for
+by asking for more privacy.
 
 **Status: OPEN.** We think leading the pool with the bridge is strictly better
 on privacy and would take it — but only with a measurement first. What is
@@ -1799,6 +1820,12 @@ chicken-and-egg-free answer at the moment it is needed.
 uses* to the local network in the clear. What bounds it is that they are two
 fixed hostnames, asked once a session and once an hour: no name a user typed
 is in them, and there is nothing per navigation.
+
+Private mode does not change the lookups themselves (SPEC §5.7): the mode
+replaces what the engine is told. The connections that follow them — the
+bridge's relay leg and its config fetch — ride the session's proxied fetch
+(`OdohTransport({ fetchImpl })`), so in Private they leave through Tor and
+while BLOCKED they stop with everything else.
 
 **Status: OPEN**, and not hard: the relay and target addresses can be pinned in
 the configuration, or resolved through the engine once it is configured, which
@@ -1954,11 +1981,17 @@ three-valued enumeration is a typo waiting to happen — harmless now that the
 value is normalised and a bad one is reported (SPEC §5.2), but still a field
 that can be wrong.
 
+The Fast / Private switch (SPEC §5.7) is in the settings page and the Privacy
+menu, and it does not expose these two keys either. With `odoh.icann: false`
+Private mode resolves **no** ICANN name at all — the plan fails closed with no
+bridge — and nothing on the switch says so; only the Domain name step does,
+after the fact.
+
 **Status: OPEN.** Add a checkbox for `odoh.icann` in the same DNS privacy
-block, with the cost stated in the hint text, and a textarea for `dns.servers`;
-make `dns.mode` a `<select>` so the class of error disappears rather than being
-reported. The plumbing exists — `dns.mode` is already written through the
-settings preload. IC-D3.
+block, with the cost stated in the hint text — including that Private mode
+depends on it — and a textarea for `dns.servers`; make `dns.mode` a `<select>`
+so the class of error disappears rather than being reported. The plumbing
+exists — `dns.mode` is already written through the settings preload. IC-D3.
 
 ---
 
@@ -1997,6 +2030,7 @@ a comment.
 
 ---
 
+
 ### 2. Things we are not sure about
 
 These are the ones we most want challenged.
@@ -2022,8 +2056,8 @@ an unregistered path, which is a thing the working group might want to hear.
 
 #### 2.3. Whether replacing the resolver pool is the right failure ordering
 
-IC-7 means the fallback below a failed oblivious lookup is plaintext rather
-than DoH. Prepending the bridge to the pool instead would make the fallback
+In Fast mode, IC-7 means the fallback below a failed oblivious lookup is
+plaintext rather than DoH. Prepending the bridge to the pool instead would make the fallback
 encrypted-but-not-oblivious, which is strictly better on privacy — but it also
 means a *silent* downgrade from oblivious to non-oblivious that the engine
 performs without telling us, and the interface's per-name claim (SPEC §6.2)
@@ -2038,9 +2072,11 @@ measured whether a SERVFAIL response — which is what our bridge returns on
 failure, and which is a *successful* HTTP exchange — triggers the same fallback
 as a transport failure, nor how long the engine remembers a failing resolver.
 The bridge's failure policy was chosen on the assumption that it does. If it
-does not, a relay outage in `automatic` mode is a hard failure rather than a
-silent downgrade — which would be *better* for privacy and worse for
-availability, and either way we should know which one we shipped. The same
+does not, a relay outage in Fast mode's `automatic` is a hard failure rather
+than a silent downgrade — which would be *better* for privacy and worse for
+availability, and either way we should know which one we shipped. In Private
+mode the question does not arise: `secure` refuses every fallback, so a SERVFAIL
+from the bridge is a failed lookup whichever way the engine reads it. The same
 measurement answers what threshold IC-1's staleness check should use only by
 analogy; that one is a separate guess.
 
@@ -2115,9 +2151,10 @@ would resolve.
 
 #### IC-D1. Lead the resolver pool with the bridge instead of replacing it
 
-The bridge's template becomes the whole of `secureDnsServers`, so the floor
-beneath a failed oblivious lookup is plaintext rather than the configured DoH
-pool (IC-7). Prepending would keep an encrypted floor, at the cost of a silent
+The bridge's template becomes the whole of `secureDnsServers`, so in Fast
+mode's `automatic` the floor beneath a failed oblivious lookup is plaintext
+rather than the configured DoH pool (IC-7); Private mode has no floor by policy
+(SPEC §5.7). Prepending would keep an encrypted floor, at the cost of a silent
 oblivious-to-non-oblivious downgrade that only the interface's per-name claim
 could detect.
 
@@ -2164,7 +2201,9 @@ is the open question of what N should be.
    *policy* the browser's Electron composition layer calls at both of its
    gates, not an implementation of resolution. If you are implementing from
    this specification, the resolver is your platform's and §5 is a description
-   of what to tell it.
+   of what to tell it. The re-application of the plan on a mode switch
+   (`applyDnsPlan`, driven by the `DeliveryMode` controller's `change` event)
+   is part of that composition layer; its policy is SPEC §5.7.
 
 2. **The modules this chapter is about that live in the spine's `src/`.**
    `router.js`, `hns-host.js`, `icann-tlds.cjs`, `reserved-names.cjs`,
@@ -3783,6 +3822,79 @@ narrow it to a valid checksum.
 
 ---
 
+#### NO-15. Private mode hides who is asking, not what is asked
+*SPEC §8.5, §10.3 · `../../DIVERGENCE.md` row 15 · `src/tor-websocket.js`, `src/nostr-protocol.js` (`relayClass`)*
+
+**What.** In Private mode every relay is dialled through the device-local Tor
+by name, so a relay sees a Tor exit's address and the local network never sees
+a relay's name. The relay still receives the filter — the key, the event id,
+the `d` tag — because that is the question, and NIP-01 has no way to ask it
+without saying it.
+
+**The standard says.** Nothing: NIP-01 defines no oblivious query, and no NIP
+does. The deviation is from this repository's own design rule (the browser's
+`docs/MODES.md`): make privacy and speed stop pulling apart before adding a
+mode. For Nostr the attempt fails by protocol, which is why row 15 survives as
+one of the five places a mode is for.
+
+**Why.** A relay is a store that answers the question it is asked. The
+both-sides options are all partial: our own relay sees the question but is
+ours (§2.4); caching an answer removes repeats, not the first ask; NIP-65
+(NO-3) changes which relays are asked, not what they learn.
+
+**Consequence.** The Private-mode disclosure to a relay is "someone, from a Tor
+exit, asked about this key at this moment". Across the four default relays and
+the hints, the same exit can ask all of them, because no SOCKS credential is
+sent and the circuits are the session's (Chapter 8, TO-3) — so the relays are
+linkable to one another through the exit as well as through the identical
+filter. The refusal page and the settings disclosure say the mode hides this
+device's address; neither says the question is hidden, and nothing in this
+chapter may.
+
+**Status: DELIBERATE**, and bounded. The recommendation is the pair that
+narrows the disclosure without a new protocol: cache an answer for the
+navigation, so following a link on a profile page does not re-ask every relay
+for the same profile; and read NIP-65 (NO-D4), so the relays asked are the
+author's rather than ours. Per-relay stream isolation is Chapter 8's item
+(TO-3), not this chapter's.
+
+---
+
+#### NO-16. Two WebSocket implementations on two routes
+*SPEC §8.1, §8.5 · `src/relay.js`, `src/tor-websocket.js`*
+
+**What.** On the direct route the relay client uses the injected
+`WebSocketImpl` or the runtime's global `WebSocket`. On the Private route it
+uses the `ws` package, because the runtime's `WebSocket` accepts no transport
+and cannot be given a socket that came out of a SOCKS tunnel. Two clients, one
+relay protocol, one event surface (`onopen` / `onmessage` / `onerror` /
+`onclose`, `send`, `close`).
+
+**The standard says.** RFC 6455 is the wire protocol both implement; the
+WHATWG WebSockets Standard is the API the direct route uses. `ws` implements
+RFC 6455 and presents a compatible subset of the WHATWG surface; it is not the
+WHATWG interface.
+
+**Why.** There is no seam in the built-in client. The alternative — `ws` on
+both routes — would make the direct route depend on a package for something
+the platform provides, and would change the direct route to fix the private
+one.
+
+**Consequence.** A behaviour that differs between the two clients shows only
+in Private mode. The one known difference is handled — `ws` delivers a text
+frame to `onmessage` as a string, which is what `src/relay.js` reads — and the
+Tor route is driven end to end by the real relay client against a real
+`wss://` server (`tests/tor-websocket.test.js`), so the relay protocol is
+proven on both. Timeouts, close codes and error shapes are not compared between
+the two.
+
+**Status: DELIBERATE.** The recommendation is a conformance run: drive the
+scripted-relay suite of `tests/nostr-protocol.test.js` through the `ws` class
+as well as through the scripted `WebSocketImpl`, so a difference between the
+two clients is found by the suite rather than by a user in Private mode.
+
+---
+
 ### 2. Things we are not sure about
 
 These are the ones we would most like other implementers to argue with. Each
@@ -3891,11 +4003,16 @@ where the resolver learns the query and not who asked. Nostr has no analogue. A
 relay learns the key you asked about and your address, and the fan-out that
 makes answers better makes the disclosure wider.
 
-We do not have a design. Querying through a proxy moves the disclosure rather
-than removing it. Asking every relay for a superset and filtering locally is
-the classic answer and is prohibitively expensive here. Today we handle it by
-refusing to run at all when IP protection is on, which is honest and is not a
-solution.
+Private mode does the half that is possible: every relay is dialled through
+the device-local Tor by name (SPEC §8.5), so the relay sees an exit's address
+and the local network sees no relay name — and the relay still sees the
+question, because there is no way to ask it otherwise (NO-15). Asking every
+relay for a superset and filtering locally is the classic answer to the other
+half and is prohibitively expensive here. What we are not sure of is whether
+hiding the asker without hiding the question is worth what it costs the user —
+Tor's latency on every relay, and relays that refuse Tor exits — or whether the
+honest line for this namespace is that Private mode buys less here than
+anywhere else in the browser, and the page should say so.
 
 #### 2.8. Whether a refused relay hint should be silent
 
@@ -4022,9 +4139,13 @@ well the temptation is stronger and the answer is still no.
 4. **Electron.** Nothing here imports it. `src/nostr-protocol.js` uses only the
    global `Response`, and `src/relay.js` takes its WebSocket implementation
    from an injected seam or the global — so the handler runs, and is tested,
-   under plain `node --test`. The one Electron-shaped thing it is missing is
-   the IP-protection gate (`createNonProxiedGate`, SPEC §10.3), which wraps the
-   handler at registration time in the browser and is a composition concern.
+   under plain `node --test`. The Private-mode behaviour is inside the handler
+   (SPEC §8.5), behind three injected functions — `isAnonymized`, `torSocks`,
+   `torWebSocket`. What stays in the browser is the wiring of the first two to
+   the anonymizer's `isOn()` and `torSocks()` (`namespaces/tor/src/anonymize.js`)
+   and of the mode to `DeliveryMode` in `../../src/delivery-mode.js`, which is
+   a composition concern. `nostr:` is not behind the non-proxied gate of
+   Chapter 9 §K.3.6.
 
 5. **Everything the fan-out is not.** No caching, no connection reuse, no
    subscription that stays open, no streaming. A resolution opens sockets, asks
@@ -4528,8 +4649,9 @@ is the DID document / here is the PDS / here is the key".
 Node standard library and the shared modules of `../../src/`:
 **`@noble/curves`**, for BIP-340 over secp256k1, reached through `src/keys.js`
 and `src/nostr-event.js`. `src/did-protocol.js`, `src/unimplemented-protocol.js`,
-`src/gate.js`, `src/bsky.js` and `src/xrpc.js` need nothing beyond `fetch`,
-`Response`, `URL` and `AbortSignal` from the platform.
+`src/bsky.js` and `src/xrpc.js` need nothing beyond `fetch`, `Response`, `URL`
+and `AbortSignal` from the platform; `src/gate.js` adds only the shared
+`../../src/delivery-mode.js`, for the words its refusal carries.
 
 
 ---
@@ -4564,9 +4686,9 @@ written `src/…` and `tests/…` are this chapter's, under `namespaces/tor/`.
 #### TO-1. With Tor off, and off Tor, we answer with a page rather than an error
 
 **What.** Two of this handler's answers are `200` documents where a caller might
-expect a failure status. When IP Protection is off, an `onion://` navigation
-gets a `200` interstitial explaining what to turn on, where, and what the
-limitation is (`src/onion-protocol.js:125-128`, `:228-238`). When an onion
+expect a failure status. In Fast mode — IP Protection off — an `onion://`
+navigation gets a `200` interstitial explaining what to turn on, where, and what
+the limitation is (`src/onion-protocol.js:125-128`, `:228-238`). When an onion
 service redirects to a target outside Tor, the answer is a `200` page naming the
 destination and offering it as a link (`:167-172`).
 
@@ -4642,9 +4764,10 @@ than a patch to apply; see §2.2 and TO-D2.
 #### TO-3. No SOCKS stream isolation: everything shares circuits
 
 **What.** One SOCKS proxy URL with no credentials is applied to the whole
-session (`src/anonymize.js:243-258`), and the three main-process paths that dial
-the same port for themselves — the Handshake resolver's authoritative hop, the
-`wss://` tunnel's upstream and a `gemini://` TLS socket, all through
+session (`src/anonymize.js:243-258`), and the five main-process paths that dial
+the same port for themselves — the Handshake resolver's authoritative hop, an
+A-record `hns://` site's DANE-pinned socket, the `wss://` tunnel's upstream, a
+`gemini://` TLS socket and a Nostr relay's WebSocket, all through
 `../../src/socks-dial.js` (SPEC §7.5) — send none either.
 
 **The standard says.** RFC 1929 defines username/password authentication for
@@ -4655,7 +4778,7 @@ would get a separate circuit per origin at no cost. We supply none.
 
 **Why.** For the session the proxy is configured once, as an Electron
 session-level `proxyRules` string, and that API has no hook for per-request
-SOCKS credentials. For the three direct dialers the reason is different and
+SOCKS credentials. For the five direct dialers the reason is different and
 weaker: the shared SOCKS client simply does not take a credential, because it
 was written for the session's own no-auth port and nothing asked it for one.
 
@@ -4664,14 +4787,15 @@ session, can share exit-side and circuit-level correlation. Tor Browser isolates
 by first-party domain precisely to prevent that. It is a genuine anonymity gap,
 and it is part of what "hides your IP, is not full anonymity" is paying for. The
 direct dialers widen it in a specific and slightly worse way: a Handshake
-nameserver query, the WebSocket to that name's origin and an unrelated Gemini
-capsule can all traverse one circuit, so a relay that sees the lookup may see
-the socket that follows it.
+nameserver query, the site connection that follows it, the WebSocket to that
+name's origin, an unrelated Gemini capsule and a Nostr relay query can all
+traverse one circuit, so a relay that sees the lookup may see the socket that
+follows it.
 
 **Status: OPEN**, with a real obstacle for the session half: we do not currently
 know how to do this through Electron's session proxy API, and the fix is a piece
 of design work rather than a line of code. TO-D1 states the three routes we can
-see and why none of them is a one-liner. The three direct dialers are the
+see and why none of them is a one-liner. The five direct dialers are the
 exception — they build their own SOCKS connection and could pass a credential
 today — which makes them the place to measure whether Tor isolates on one at
 all. Until per-site isolation exists anywhere, the product claim must keep
@@ -4739,10 +4863,12 @@ TO-D4.
 
 #### TO-6. IP Protection is all-or-nothing for the whole session
 
-**What.** There is one mode for the whole browser session
-(`src/anonymize.js:243-258`). Reaching a single onion service means routing
-*everything* — every tab, every protocol handler, the search fan-out — through
-Tor for as long as the mode is on.
+**What.** There is one proxy state for the whole browser session
+(`src/anonymize.js:243-258`), and it is driven by Settings › Content delivery ›
+Mode (SPEC §2). Reaching a single onion service means putting the whole browser
+in Private: every tab, every protocol handler and the search fan-out through
+Tor, and the Handshake, ICANN, Nostr and peer-to-peer policies that move with
+the switch (`SPEC.md` §4.2), for as long as it is on.
 
 **The standard says.** Nothing directly; this is a deviation from the Tor
 Browser design document, whose first-party isolation model is the reference
@@ -4754,8 +4880,9 @@ per session, and a design in which *some* traffic is proxied is a design in
 which it is easy to be wrong about which.
 
 **Consequence.** A user who wants one onion page pays Tor latency on everything
-else, which is a strong incentive to leave the mode off — and the mode being off
-is the condition under which onion addresses are unreachable at all. The design
+else, and the Private-mode refusals besides — peer-to-peer content, a Handshake
+name whose oblivious lookup fails — which is a strong incentive to stay in Fast;
+and Fast is the condition under which onion addresses are unreachable at all. The design
 that is safest is also the one that discourages use. It is also, per TO-3, the
 configuration in which everything shares circuits.
 
@@ -4769,6 +4896,41 @@ proxied?" question in it is worth a great deal, and we would rather keep it than
 trade it for a partial answer. See §2.5.
 
 ---
+
+#### TO-7. While BLOCKED, a session request fails as a proxy error, not as a page that names the mode
+
+**What.** In BLOCKED (SPEC §7.6) every session is pointed at
+`socks5://127.0.0.1:9`. A page load, a subresource or a protocol handler's
+session fetch then fails with the engine's `ERR_PROXY_CONNECTION_FAILED`, and
+what the user sees is the engine's own error page — or, for `onion://`, the
+handler's `502` echoing the proxy error (SPEC §6.7). The controller's note names
+the mode and the switch, but it is shown in the status surface, not on the
+failed page. Only the five raw-socket paths of SPEC §7.5 refuse in words
+(`privateRefusal`).
+
+**The specification says.** `SPEC.md` §4.2: every refusal or failure a
+mode causes MUST name the mode, say what was not done, not blame the site, and
+point at the control.
+
+**Why.** The blackhole is what makes fail-closed hold for *everything* the
+session sends, with no list of consumers to keep complete; a page that names the
+mode needs a hook at the point where each load fails, which the proxy has no
+part in.
+
+**Consequence.** A person in Private mode whose Tor is down sees a generic
+connection error on every site, and learns why only from the status note or the
+menu. The behaviour is correct — nothing leaks — and the explanation is in the
+wrong place.
+
+**Status: OPEN. Recommendation:** in the composition, on a main-frame
+`did-fail-load` with a proxy-connection error while the controller is BLOCKED,
+replace the engine's error page with one built from the controller's note — the
+same words: the mode, nothing loads, the switch — using the same hook the
+Tor-ready reload of SPEC §7.4 already has on those tabs. Keep the blackhole; add
+the page.
+
+---
+
 
 ### 2. Things we are not sure about
 
@@ -4850,7 +5012,8 @@ evidence for it. **If somebody has run this experiment, we would like to know.**
 #### 2.5. Whether the mode is at the right granularity (TO-6)
 
 A whole-session proxy is simple, auditable, and has no "was this request
-proxied?" question in it — properties we value highly. It also makes the safe
+proxied?" question in it — properties we value highly — and it is also the
+granularity of the whole Fast / Private switch, which drives it. It also makes the safe
 path expensive enough that users will not stay on it, and per-origin circuit
 isolation (TO-3) impossible.
 
@@ -4903,11 +5066,12 @@ sent distinct credentials. Electron's `session.setProxy` takes a session-wide
 `proxyRules` string with no hook for per-request SOCKS credentials, so there is
 no small version of this change (TO-3, TO-6).
 
-**Recommendation.** Start where it is nearly free: the three main-process
+**Recommendation.** Start where it is nearly free: the five main-process
 dialers of SPEC §7.5 construct their own SOCKS connection, so giving
 `../../src/socks-dial.js` an optional username/password derived from the
-first-party (the Handshake name, the WebSocket origin, the capsule host) is a
-parameter and a test, and it answers the question the session-wide routes below
+first-party (the Handshake name — for its nameserver hop and its site socket
+alike — the WebSocket origin, the capsule host, the relay) is a parameter and a
+test, and it answers the question the session-wide routes below
 all depend on — *does this Tor isolate on it?* — for the cost of an afternoon. A
 positive answer justifies the session work; a negative one saves it. Then take
 the three session routes in order of what they would prove, not of effort. **(a)** A PAC script returning a different `SOCKS5` line per host
@@ -5007,9 +5171,12 @@ Three things are deliberately absent from `src/` and `tests/`:
    the Tor Expert Bundle, then a pinned SHA-256) is packaging, not resolution.
 
 3. **The session wiring.** Which Electron sessions the proxy is applied to, how
-   `net.fetch` is bound, and how the anonymize controller composes with the
-   WebSocket PAC all live in the browser's `src/index.js` and
-   `src/protocols/index.js`. `AnonymizeController` takes duck-typed sessions
+   `net.fetch` is bound, how the anonymize controller composes with the
+   WebSocket PAC, and how the `DeliveryMode` controller is wired to the
+   settings page, the Privacy menu and the stored configuration (the controller
+   itself, `../../src/delivery-mode.js`, is in this package; the `failClosed`
+   flag the browser passes is set there) all live in the browser's
+   `src/index.js` and `src/protocols/index.js`. `AnonymizeController` takes duck-typed sessions
    (`{ setProxy, closeAllConnections }`) and the onion handler takes an injected
    `fetchImpl`, so both are fully exercised here without Electron — but the
    *wiring* is the browser's, and SPEC §7.5 specifies its policy rather than its
@@ -5282,15 +5449,15 @@ see §2.3.
 
 ---
 
-#### KY-8. With IP Protection off, a `gemini://` host is resolved by the operating system
+#### KY-8. In Fast mode, a `gemini://` host is resolved by the operating system
 
-**What.** With protection off, the Gemini client passes the hostname to Node's
+**What.** In Fast mode, the Gemini client passes the hostname to Node's
 `tls.connect()`, which resolves it with the operating system's resolver: not the
 browser's DoH policy, not its Oblivious DoH bridge, not Chromium's secure-DNS
-setting, and not the Handshake resolver. With protection **on** this does not
+setting, and not the Handshake resolver. In **Private** mode this does not
 happen — the handler dials through the device-local Tor by name and no local
 lookup is made (SPEC §K.6.1, §K.6.2) — so this deviation is exactly the
-protection-off case and nothing more.
+Fast-mode case and nothing more.
 
 **The standard says.** RFC 8484 (DoH) and RFC 9230 (Oblivious DoH) are the
 transports the rest of this browser uses for exactly this lookup; the Gemini
@@ -5312,7 +5479,7 @@ but those are peer addresses rather than user-chosen names, so it is less
 pointed.
 
 **Status: OPEN**, and confined to one mode. The fix is the same shape as the
-one the anonymized route takes: resolve the host with the browser's own
+one the Private route takes: resolve the host with the browser's own
 resolver and pass the resulting **address** to the client with `servername`
 still set to the name, so SNI and any future certificate pin (KY-D1) stay keyed
 to the name rather than the address. That also opens the door to Gemini over
@@ -5516,8 +5683,8 @@ That is a real similarity and we think it earns the placement. But a reader
 looking for "the key-addressed chapter" finds one namespace in it that is
 neither key- nor content-addressed and that verifies nothing at all, and may
 reasonably think it belongs with the ICANN/DNS material. It is also the one
-namespace here that the anonymizing mode **routes** instead of refusing
-(§K.3.6), which is one more way in which it is not like its neighbours. Nothing
+namespace here that Private mode **routes** instead of refusing (§K.3.6),
+which is one more way in which it is not like its neighbours. Nothing
 else in this chapter depends on it, so moving it costs nothing but the
 cross-references.
 
@@ -5525,8 +5692,8 @@ cross-references.
 
 #### 2.7. What Tor's exit does with a Gemini host name, and whether it has been proven
 
-While IP Protection is on the host is sent to the SOCKS proxy as a domain name
-and resolved inside Tor (SPEC §K.6.2), which removes the local disclosure and
+In Private mode the host is sent to the SOCKS proxy as a domain name and
+resolved inside Tor (SPEC §K.6.2), which removes the local disclosure and
 moves it: the exit relay's resolver sees which capsule is being visited. That is
 the same trade every `.onion`-capable browser makes for clearnet hosts, and we
 believe it is right, but we have not thought about it as hard as Chapter 8 has
@@ -5576,9 +5743,9 @@ the browser's resolver before the SDK is constructed, which is a larger change
 worth costing separately.
 
 Gemini needs no part of this item for the mode that cannot tolerate the gap:
-while IP Protection is on, the host is resolved inside Tor and the socket is
-built by this handler (SPEC §K.6.2). What is left there is the protection-off
-route, which is KY-8's own recommendation and the same few lines at the same
+in Private mode, the host is resolved inside Tor and the socket is built by
+this handler (SPEC §K.6.2). What is left there is the Fast-mode route, which
+is KY-8's own recommendation and the same few lines at the same
 injection point — the socket is already constructible at it.
 
 #### KY-D3. Find out whether web content can reach `hyper://localhost/`
@@ -6008,9 +6175,9 @@ the argument that it is acceptable is a specific one: a process already on
 loopback can resolve the same name over public DoH and dial the same address by
 itself, so the tunnel confers no capability it lacked — while the port,
 Handshake-only and SSRF fences mean it confers rather *less* than a general
-proxy would. While IP Protection is on that connection is made through the
-user's own Tor client rather than directly, which is a route the local process
-could also have taken itself.
+proxy would. In Private mode that connection is made through the user's own
+Tor client rather than directly — or, while that Tor is blocked, not at all —
+which is a route the local process could also have taken itself.
 
 **Status: DELIBERATE.** The credential path is retained and tested
 (`tests/ws-proxy.test.js`, "OPTIONAL auth (future platform)") so that a platform
@@ -6224,19 +6391,20 @@ fences and the pin are the same on both routes — but a realtime application is
 the one kind of page for which "it works, slowly, forever" is a different
 product from "it works".
 
-#### 2.3. Whether the PAC leaves loopback traffic reachable while IP Protection is on
+#### 2.3. Whether the PAC leaves loopback traffic reachable in Private mode
 
 The privacy controller's own configuration carries
-`proxyBypassRules: '<-loopback>'` (browser `src/hns/anonymize.js:243-247`). The
-PAC decorator replaces the whole configuration with `{mode: 'pac_script', …}`
-(browser `src/index.js:1142-1145`), and the PAC has no loopback branch: with IP
-Protection on, its non-WebSocket answer for `http://127.0.0.1:<port>/` is the
-Tor SOCKS directive. Whether Chromium applies an implicit loopback bypass to a
-PAC-configured session is exactly the thing we could not establish from the
-specification or from a measurement. If it does not, then every in-process
-loopback service a page fetches (a content-gateway port, a media sidecar) is
-routed into Tor — which refuses it — for as long as both features are on. See
-AP-D1.
+`proxyBypassRules: '<-loopback>'` (`_defaultConfig` in
+`namespaces/tor/src/anonymize.js`). The PAC decorator replaces the whole
+configuration with `{mode: 'pac_script', …}` (browser `src/index.js`), and the
+PAC has no loopback branch: in Private mode, its non-WebSocket answer for
+`http://127.0.0.1:<port>/` is the anonymizer's SOCKS directive — the Tor port
+while routed, the blackhole port while blocked. Whether Chromium applies an
+implicit loopback bypass to a PAC-configured session is exactly the thing we
+could not establish from the specification or from a measurement. If it does
+not, then every in-process loopback service a page fetches (a content-gateway
+port, a media sidecar) is routed into Tor — which refuses it — for as long as
+Private mode and the tunnel are both on. See AP-D1.
 
 #### 2.4. Cookie behaviour on an `hns://` origin
 
@@ -6350,8 +6518,8 @@ so the change is in the discovery base and its test.
 #### AP-D8. Surface the tunnel's refusal reason
 
 Every fence answers a distinct HTTP status that the WebSocket API discards, so
-"this is not port 443", "IP Protection is on and there is no Tor circuit", "this
-name has no address", "this name resolves to a private address" and "the origin
+"this is not port 443", "Private mode, and the Tor client is not connected",
+"this name has no address", "this name resolves to a private address" and "the origin
 is down" are one untyped `error` event to the page and nothing at all to the
 user (`src/ws-proxy.js:264-274`).
 **Recommendation.** Record each refusal with its reason and the name, and show
@@ -6366,8 +6534,8 @@ Handshake host costs one resolution. **Recommendation.** A cap on live tunnels
 and a small per-name rate limit on resolutions, refusing with `503` beyond it.
 The risk today is bounded by the loopback bind, so this is hygiene rather than a
 hole — but it is the kind of hygiene that is much easier to add before the
-tunnel's dials are, while IP Protection is on, made through the user's own Tor
-circuit (SPEC §4.4 fence 4), where every accepted CONNECT costs circuit capacity
+tunnel's dials are, in Private mode, made through the user's own Tor circuit
+(SPEC §4.4 fence 4), where every accepted CONNECT costs circuit capacity
 as well as a resolution.
 
 ---
@@ -6432,42 +6600,46 @@ Chapter 8), the only privacy setting the browser has today. Sizes are rough:
 |---|---|---|---|---|---|---|
 | 1 | **Handshake resolution, the authoritative hop** (Ch. 1 §6) | chain proof from the local SPV node, then plaintext TCP/53 to the zone's nameserver — the operator and the path see the name and the user's IP | the chain proof kept, the hop carried over Tor | **Done**: the authoritative hop is dialled through the device-local Tor's SOCKS port (`src/socks-dial.js`, `query()`'s `dial`) and the SPV node runs through hsd `--proxy`; chain proof and DNSSEC validation are kept. Until the node has restarted through Tor, DoH answers and the trust state says so | **BOTH, partly.** The chain proof never leaves the machine — only the authoritative hop discloses. Carrying that one TCP query over Tor keeps the proof and hides the asker; the cost is Tor latency on one round trip per name, which the flat cache already amortises. What Tor cannot give back is the plaintext hop's integrity — DNSSEC does, and every record on the path validates or fails. Remaining trade: a Tor circuit's latency on the first visit only | built — the remaining trade is Tor's latency on a first visit |
 | 2 | **The SPV node's peer traffic** (Ch. 1 §11.5) | hsd connects to Handshake peers directly; peers learn the user's IP and that a Handshake client is there, not which names | hsd's P2P over Tor | **Done**: `SPVNode` takes `proxy` → hsd `--proxy`, set from the anonymizer; a change restarts the spawned node | **BOTH.** hsd supports a SOCKS proxy; started against the Tor port the node syncs privately at the cost of a slower initial sync, which happens once. No functional loss | built — the cost is a header re-sync on each change (from the persisted chain, or from scratch in `--memory` mode), with resolution on DoH meanwhile |
-| 3 | **Handshake names over DoH / ODoH** (Ch. 1 §9) | not used on the fast path | ODoH to `odoh.hns.one` through an independent relay; plain DoH when the relay path fails | **Degrade**: the private path is the implemented one; the fallback to plain DoH is a **leak of the name to `query.hns.one`** when both relays fail, and the trust state names the endpoint | **No** — the fallback exists precisely because the relays are two and can both fail; the only both-sides option is more relays (a provider-side change: run one ourselves that is *not* the target operator) | **S** — a PRIVATE mode refuses the plain-DoH fallback (fail closed) instead of taking it |
+| 3 | **Handshake names over DoH / ODoH** (Ch. 1 §9) | ODoH to `odoh.hns.one` through an independent relay; plain DoH to `query.hns.one` when the relay path fails (a leak of the name, and the trust state names the endpoint) | the same, and fails closed: `unreachable`, said in words | **Shipped as the Private/Fast switch**: in Private `DoHResolver({ strictOblivious })` never takes the plain fallback; the page names the mode, says nothing is known about the site, and points at the switch (`privateRefusal('lookup')`) | **No** — the fallback exists precisely because the relays are two and can both fail; the only both-sides option is more relays (a provider-side change: run one ourselves that is *not* the target operator) | done |
 | 4 | **The resolver's plaintext `dns.lookup()`** for NS and CNAME targets that are ICANN hosts (Ch. 1 §6.5, §6.8) | the OS resolver, in the clear, from the chain path | the same lookup through the browser's DoH/ODoH client | **Done**: `HNSResolver` takes `lookup`, the browser hands it `DoHResolver.addressOf`; nameserver names and CNAME targets go through DoH/ODoH in every mode. The OS resolver is the library default only | **BOTH.** Resolving the ICANN host through the ODoH bridge or `DoHResolver` is neither slower in any way a user sees nor less functional; it removes the plaintext query on the fast path too | built |
 | 5 | **ODoH configuration fetch** (`/.well-known/odohconfigs`, Ch. 2 IC-9) | fetched directly from the target at startup | through a relay, or pinned in the release | **Leak** of "this user runs Wildroot's oblivious path" to the target, once per start | **BOTH, in principle.** An ODoH relay forwards only the oblivious query (RFC 9230 §4.2), not a GET for `/.well-known/odohconfigs`, so "through the relay" is not available as written; the both-sides shape is a config pinned in the release and refreshed through Tor when IP Protection is on | **S–M** |
 | 6 | **ICANN browsing DNS** (Ch. 2 §5) | Chromium's own secure DNS to the configured pool (encrypted, not oblivious) | the loopback ODoH bridge | **Degrade with a stated cost**: the bridge replaces the pool; in `automatic` mode the fallback below it is **plaintext system DNS** (IC-7); in `secure` mode there is none; the panel reports which happened | **BOTH, mostly.** The bridge is the both-sides answer for the lookup itself (private, and encrypted DNS was already a round trip). The remaining trade is availability: what happens when the bridge cannot answer — DoH to the pool (fast, not oblivious) or nothing. A cache of bridge answers narrows the window; more relays narrow it further | **S–M** — a PRIVATE mode is `secure` + bridge; measure the engine on a mixed template list before deciding whether the pool sits behind the bridge |
-| 7 | **ICANN page fetches** (Ch. 2) | direct | through Tor (the session proxy) | **Proxied** when IP Protection is on; the site sees a Tor exit | **No** — the site must see *some* address; only Tor or a VPN-shaped relay hides the user's, and both cost latency and Tor-blocking sites. This is the divergence IP Protection *is* | done; the two-mode pair already exists as the IP Protection switch |
+| 7 | **ICANN page fetches** (Ch. 2) | direct | through Tor (the session proxy) | **Shipped as the Private/Fast switch**: Private routes the session through the device-local Tor and **fails closed** when Tor cannot be had (`MODES.BLOCKED`, a loopback blackhole proxy — never a direct fallback); ICANN names resolve through the oblivious bridge only (`privateDns()`); the site sees a Tor exit | **No** — the site must see *some* address; only Tor or a VPN-shaped relay hides the user's, and both cost latency and Tor-blocking sites. This is the divergence the switch *is* | done |
 | 8 | **IPFS: the local node's DHT and bitswap** (Ch. 3 §7) | kubo dials peers directly; peers learn the user's IP and every CID asked for | a trustless gateway over the proxied fetch with every block verified, or kubo over Tor | **Refuse** (503) for `ipfs://`, `ipns://` and an `ipfs=` name while anonymization is on — the stated-origin fetch itself is proxied (row 9), but the local node would PROVIDE the imported blocks to the DHT, which is the disclosure the gate exists for | **BOTH, for named sites.** A Handshake name can state its origin (`car=`, Ch. 3 §8) and the browser can fetch the whole CAR from it over HTTPS and verify every block on import — no DHT, no peers, first byte from one round trip. Private because the origin sees a Tor exit when proxied and one CID it already serves; fast because it is a single HTTPS fetch. Our own provider (pinthis) already announces every sub-root so that the default mode is both private and fast. What it does not cover: a bare `ipfs://` CID with no stated origin, which needs a configured trustless gateway (a third party sees the CID) | **M** — kubo with `Routing.Type=none` (no DHT, no announces) while anonymized, then the stated-origin fetch serves named sites privately; **L** for kubo over Tor |
 | 9 | **Origin warming and the `car=` stated origin** (Ch. 3 §8, experimental) | an HTTPS fetch of a CAR from the stated origin: faster first paint; the origin sees the user's IP and the CID | the same fetch over the proxied session fetch | **Proxied** — origin-warm rides the proxied session fetch; still unreachable while anonymized by inheritance from row 8's gate | **BOTH** — this row *is* the no-trade-off attempt for row 8: the fetch is verification-on-import already; injecting the proxied fetch makes it private with no loss. The warm path should stop being a warm-up and become the anonymized delivery path | the fetch is built; ungating waits on row 8's node-side change |
-| 10 | **Cooperative delivery** (the coop project, not in this specification yet) | fetch from other Wildroot users' nodes: fast, and every peer learns the user's IP and CID | peers reached as onion services, or refuse | not shipped (Phase 0 blocked on provider peer identity) | **Unknown.** The both-sides shape would be peers that serve as onion services, so a fetcher learns nothing about a peer and a peer nothing about a fetcher; whether that is fast enough to be worth having is unmeasured. Serving-on-by-default is a disclosure by construction | **L** — a design decision before it ships |
+| 10 | **Cooperative delivery** (the coop project, not in this specification yet) | fetch from other Wildroot users' nodes: fast, and every peer learns the user's IP and CID | peers reached as onion services, or refuse | not shipped in either mode (Phase 0 blocked on provider peer identity); the switch's disclosure says so | **Unknown.** The both-sides shape would be peers that serve as onion services, so a fetcher learns nothing about a peer and a peer nothing about a fetcher; whether that is fast enough to be worth having is unmeasured. Serving-on-by-default is a disclosure by construction | **L** — a design decision before it ships |
 | 11 | **Arweave gateways** (Ch. 4 §6) | `ar.io` gateway over the proxied session fetch; the gateway sees the txid and the user's IP | the same over Tor | **Proxied** — works while anonymized | **BOTH, already.** The same code path serves both; the only cost is Tor latency, which is the IP Protection switch (row 7) | done; byte verification (AR-1) is a trust item, not a privacy one |
 | 12 | **ENS resolution** (Ch. 5 §5) | public Ethereum RPC over the proxied fetch; the endpoint sees the `.eth` name and the user's IP | the same over Tor; a light client removes the endpoint entirely | **Proxied** — works while anonymized; CCIP-Read gateways ride the same fetch | **BOTH, partly.** A short positive cache (EN-6) removes repeat questions on both paths. Removing the endpoint's knowledge of *which* name needs either a light client or an oblivious relay for `eth_call` — the latter is the ODoH idea applied to JSON-RPC and nobody runs one | done for privacy under Tor; **L** for a light client |
 | 13 | **`web3://` (ERC-4804)** (Ch. 5 §8) | the `web3protocol` client's own RPC calls, over its own fetch (unproxied) | the same through the proxied fetch | **Refuse** (503) while anonymized | **BOTH, blocked on the library.** `web3protocol` builds its own viem chain clients and takes no fetch implementation; handing it the proxied fetch needs a fork or an upstream option | **M** — an upstream change request, else a fork |
 | 14 | **HIP-5 `_op` registry reads** (Ch. 10 Part A) | Optimism RPC over the injected proxied fetch, from the chain path | already private when it runs | **Done** with row 1: when the chain path is alive under Tor the `_op` read runs anonymized over the injected proxied fetch; a name published only on chain is reachable | **BOTH** — built with row 1 | — |
-| 15 | **Nostr relay queries** (Ch. 6 §8) | a WebSocket to each relay from the main process; the relay sees the user's IP and the exact filter | relays dialled through Tor, or `.onion` relays | **Refuse** (503) while anonymized | **No, by protocol.** A relay must see the question to answer it; there is no oblivious NIP-01. Both-sides options are partial: our own relay (`social.hns.one`) sees the question but is ours; caching answers for the navigation removes repeats. The IP can be hidden (Tor); the question cannot | **M** — a SOCKS-capable WebSocket fills the handler's `WebSocketImpl` seam |
+| 15 | **Nostr relay queries** (Ch. 6 §8) | a WebSocket to each relay from the main process; the relay sees the user's IP and the exact filter | relays dialled through Tor | **Shipped as the Private/Fast switch**: in Private the relays are dialled through the Tor SOCKS port by name (`namespaces/nostr/src/tor-websocket.js`, the handler's `WebSocketImpl` seam); the relay sees the question, never the asker; with no Tor port the request is refused in words (`privateRefusal('relay')`) | **No, by protocol.** A relay must see the question to answer it; there is no oblivious NIP-01. Both-sides options are partial: our own relay (`social.hns.one`) sees the question but is ours; caching answers for the navigation removes repeats. The IP can be hidden (Tor); the question cannot | **M** — a SOCKS-capable WebSocket fills the handler's `WebSocketImpl` seam |
 | 16 | **DID documents, AT Protocol and WebFinger** (Ch. 7) | `plc.directory` or the `did:web` host over the proxied fetch | the same over Tor | **Proxied** — `did:` works while anonymized | **BOTH, already** for the transport; the directory still learns *which* DID (an audit-log mirror would remove even that, and is the trust item DI-2) | done |
 | 17 | **Tor / `onion://`** (Ch. 8) | none — the namespace exists only through the device-local Tor | the only path | works only with IP Protection on; interstitial otherwise | not a divergence: there is one path by design | per-site circuit isolation (TO-3) is the open privacy item |
 | 18 | **Gemini** (Ch. 9 §K.6) | `tls.connect` from the main process: the OS resolver sees the host, the capsule sees the user's IP | dial through the Tor SOCKS port; resolve through the browser's resolver | **Done**, half: while anonymized the capsule is dialled through Tor BY NAME (no OS lookup) and refused only without a Tor port; with protection off the OS resolver still sees the host | **BOTH, half.** Resolving the host through the browser's resolver instead of the OS's is free on both paths (and opens Gemini over Handshake names). Hiding the IP from the capsule is Tor, row 7 | built for the anonymized half; the protection-off lookup through the browser's resolver remains **S** |
-| 19 | **hyper / SSB / BitTorrent discovery** (Ch. 9) | DHT, swarm and gossip from the main process over UDP and TCP; peers learn the user's IP and what is sought | none that keeps the protocol: UDP does not traverse Tor | **Refuse** (503) while anonymized | **No.** A DHT is a disclosure to strangers by design; a TCP-only proxied swarm is a different, weaker engine. The honest both-sides answer for a *named* site is row 8's: state an origin and fetch from it | **L**, and possibly "refuse, and say why" is the right private path |
+| 19 | **hyper / SSB / BitTorrent discovery** (Ch. 9) | DHT, swarm and gossip from the main process over UDP and TCP; peers learn the user's IP and what is sought | refuse, and say why | **Shipped as the Private/Fast switch**: refused (503) in Private with the mode, the reason, "nothing was asked" and the switch on the page (`privateRefusal('p2p')`); a Handshake name with a stated origin loads from that origin instead (row 9) | **No.** A DHT is a disclosure to strangers by design; a TCP-only proxied swarm is a different, weaker engine. The honest both-sides answer for a *named* site is row 8's: state an origin and fetch from it | **L**, and possibly "refuse, and say why" is the right private path |
 | 20 | **hyper DNSLink lookups** (Ch. 9 KY-4) | `hyper-sdk` asks a DoH JSON resolver (Cloudflare by default) — a third party learns which hypercore names are opened | the same lookup at the browser's own bridge, or through Tor | **Leak** to a third-party resolver even with anonymization off; refused with the engine while on | **BOTH, not free.** `hyper-sdk` speaks the DoH JSON API and would not trust the bridge's loopback certificate, while the bridge speaks wire format for Chromium; pointing the engine at the bridge needs a JSON endpoint on the bridge and a fetch that trusts its pin | **M** |
 | 21 | **WebSockets to a Handshake name** (Ch. 11 §4) | the loopback CONNECT tunnel dials the resolved address from the main process | the tunnel dials through the Tor SOCKS port | **Done**: with IP Protection on the upstream is dialled through the Tor SOCKS port (`torSocks` → `socksDialer`); refused only without one | **BOTH, at Tor's latency.** Built: chain proof, DANE pin and fences unchanged, only the socket's route differs | built |
 | 22 | **Search** (`search://`) | the metasearch backend over the proxied fetch | the same over Tor | **Proxied** | **BOTH, already** — the backend is ours and blind-token-gated; it sees a Tor exit when IP Protection is on | done |
+| 24 | **The A-record `hns://` document fetch** (Ch. 1 §8) — the raw-socket path outside the session proxy, which no earlier row inventoried | `tls.connect` to the resolved address with the DANE pin checked on the handshake; the site sees the user's IP | the same socket through the Tor SOCKS port, by address | **Done**: `src/dane-connect.js connectDane({ dial })` — in Private the site is dialled through the SOCKS port by address (Tor learns an IP and no name), the pin is checked on that handshake, SNI is the name; with no Tor port the page is refused (`privateRefusal('site')`), never sent directly | **BOTH, at Tor's latency** — the check is identical on both routes | built |
 | 23 | **Bootstrap and configuration fetches** (kubo AutoConf, delegated routers, mDNS; the ICANN TLD snapshot; the ODoH config) | kubo's are disabled by policy (Ch. 3); the TLD list is bundled; the ODoH config is row 5 | — | no leak from kubo by construction; row 5 remains | **BOTH, by policy** — bundling and disabling are the no-trade-off answers, already taken | — |
 
 What follows from the table, recorded rather than decided:
 
-1. **Sixteen of twenty-three rows have a no-trade-off option** (rows 1, 2, 4,
-   5, 6, 8, 9, 11, 13, 14, 16, 18, 20, 21, 22, 23 marked BOTH in whole or in
-   part), and **nine of them are built**: 1, 2, 4, 9 (the fetch), 11, 14, 16,
-   18 (the anonymized half), 21, 22 and 23 by policy. What remains on the
-   both-sides side is node-side (row 8: kubo without a DHT while anonymized,
-   which also unlocks row 9), library-side (13, 20), a pinned ODoH config (5),
-   and the protection-off Gemini lookup (18).
+1. **Seventeen of twenty-four rows have a no-trade-off option** (rows 1, 2, 4,
+   5, 6, 8, 9, 11, 13, 14, 16, 18, 20, 21, 22, 23, 24 marked BOTH in whole or
+   in part), and **ten of them are built**: 1, 2, 4, 9 (the fetch), 11, 14,
+   16, 18 (the anonymized half), 21, 22, 24 and 23 by policy. What remains on
+   the both-sides side is node-side (row 8: kubo without a DHT while
+   anonymized — the stated-origin path of row 9 serves a whole archive from
+   disk meanwhile), library-side (13, 20), a pinned ODoH config (5), and the
+   protection-off Gemini lookup (18).
 2. **The divergences that survive the attempt are rows 3, 7, 10, 15 and 19**:
    the plain-DoH fallback, the site seeing an address at all, cooperative
    delivery, Nostr's question-must-be-seen, and DHT discovery. Those five are
-   what a PRIVATE/FAST pair is for, and for two of them (10, 19) the honest
-   private path may be "refuse, and say why".
+   **shipped as the Fast / Private switch** (`SPEC.md` §4.2,
+   `src/delivery-mode.js`): one control that drives the Tor session proxy —
+   failing closed — and the four private paths together; for 19 the private
+   path is "refuse, and say why", and 10 is not offered in either mode.
 3. **The Handshake chain proof no longer costs anonymization anything in
    trust** (rows 1, 2, 14): the authoritative hop and the node's peers go
    through the device-local Tor and the proof stays. What it costs is a node
@@ -6478,5 +6650,7 @@ What follows from the table, recorded rather than decided:
    the hyper DNSLink resolver (20) and the ODoH configuration fetch (5) — and
    both turned out to be **M**, not S, once the bridge's wire-only endpoint and
    the relay's POST-only forwarding were checked. The Private/Fast design that
-   follows from this table is the browser's `docs/MODES.md`.
+   follows from this table is the browser's `docs/MODES.md`; the switch it
+   describes is built, and the disclosure it carries is `DISCLOSURE` in
+   `src/delivery-mode.js`.
 
