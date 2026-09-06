@@ -17,6 +17,7 @@ import net from 'node:net'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { socksDialer, parseSocksUrl, connectRequest, replyLength } from '../src/socks-dial.js'
 import { query, TYPES } from '../src/dns-query.js'
@@ -171,7 +172,8 @@ test('a nameserver name and a CNAME target are resolved through the injected loo
 
 // ---------------------------------------------------------------- the node's own peers
 
-const FAKE = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'fake-hsd.cjs')
+// fileURLToPath, not URL.pathname: on Windows the pathname is `/C:/…`, which path.join turned into `C:\C:\…`.
+const FAKE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-hsd.cjs')
 
 test('the SPV node is started with hsd --proxy when a Tor SOCKS port is given, and restarted when it changes', async () => {
   const prefix = fs.mkdtempSync(path.join(os.tmpdir(), 'hnsone-spv-'))
