@@ -64,3 +64,14 @@ test('a Range request, or a transaction over the in-memory limit, keeps the head
   const res = await bigHandler(new Request(`ar://${big.id}`))
   assert.equal(res.headers.get('X-Arweave-Verified'), 'header', 'declared too large to hold: header only, and the response says so')
 })
+
+test('a gateway that RENDERS a transaction (a bundle, a manifest) serves a different length: header only, not a refusal', async () => {
+  const bytes = randomBytes(10_386)
+  const { id, header } = transaction(bytes)
+  const rendered = Buffer.from('<!DOCTYPE html><html><body>an index page the gateway made</body></html>')
+  const { handler } = createArHandler(opts(gateways(id, header, rendered).fetchImpl))
+  const res = await handler(new Request(`ar://${id}`))
+  assert.equal(res.status, 200, 'the page is served')
+  assert.equal(res.headers.get('X-Arweave-Verified'), 'header', 'not the transaction\'s own bytes, so only the header is claimed')
+  assert.deepEqual(Buffer.from(await res.arrayBuffer()), rendered)
+})

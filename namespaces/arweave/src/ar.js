@@ -266,6 +266,15 @@ export default function createArHandler ({ gateway = null, gateways = null, fetc
     // because the check needs the bytes in memory before the first one is
     // handed on; above that the header check stands alone and the response
     // says so. A bundled data item has no top-level header and is never here.
+    //
+    // ONLY THE TRANSACTION'S OWN BYTES CAN BE CHECKED. A gateway renders some
+    // transactions rather than serving them: a bundle id or a path manifest
+    // answers with an HTML index (arweave.net, 2026-09-06: a 10,386-byte
+    // bundle came back as a 2,285-byte page), which is the gateway's page
+    // and not the data `data_root` commits to. The body is checked when its
+    // length is the header's `data_size` — the gateway served the data —
+    // and reported `header` when it is not; a body of the RIGHT length that
+    // does not hash to the root is the one case that is refused.
     let body = res.body
     let bytesVerified = false
     if (headerVerified && header && header.data_root && res.status === 200 &&
@@ -273,13 +282,15 @@ export default function createArHandler ({ gateway = null, gateways = null, fetc
       const declared = Number(header.data_size)
       if (Number.isFinite(declared) && declared >= 0 && declared <= MAX_VERIFY_BYTES) {
         const bytes = Buffer.from(await res.arrayBuffer())
-        if (!bytesMatchRoot(bytes, header.data_root)) {
-          return new Response(`The bytes ${servedBy} served for ${txid} do not hash to the transaction's data root. Refused.`, {
-            status: 502, headers: { 'content-type': 'text/plain' }
-          })
+        if (bytes.length === declared) {
+          if (!bytesMatchRoot(bytes, header.data_root)) {
+            return new Response(`The bytes ${servedBy} served for ${txid} do not hash to the transaction's data root. Refused.`, {
+              status: 502, headers: { 'content-type': 'text/plain' }
+            })
+          }
+          bytesVerified = true
         }
         body = bytes
-        bytesVerified = true
       }
     }
     const out = new Headers()

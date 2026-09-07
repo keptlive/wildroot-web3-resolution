@@ -62,9 +62,14 @@ chunks, the last two rebalanced; leaf `H(H(H(chunk))‖H(note))`, branch
 `H(H(l)‖H(r)‖H(note))`; validated live against top-level transactions) and
 `../../src/ar.js` holds a whole body of a proven header's transaction up to
 `MAX_VERIFY_BYTES` (8 MiB), refuses one that does not hash to `data_root`,
-and answers `X-Arweave-Verified: bytes`. Above the limit, on a Range request,
-and for a bundled data item (no top-level header: `/tx/<id>` is 404 on every
-gateway), the header check stands alone and the header says `header` or
+and answers `X-Arweave-Verified: bytes`. The body is checked only when its length is
+the header's `data_size`: a gateway RENDERS a bundle or a path manifest as an
+index page (arweave.net: a 10,386-byte bundle answered with a 2,285-byte page),
+and that page is the gateway's, not the data the root commits to — reported
+`header`, never refused; a body of the right length that does not hash is the
+one case refused. Above the limit, on a Range request, and for a bundled data
+item (no top-level header: `/tx/<id>` is 404 on every gateway), the header
+check stands alone and the header says `header` or
 `none` — the label never claims what was not checked. The trust panel's
 content step remains `unverified` because it is written at resolution time,
 before the fetch; the response header is the per-fetch truth. What remains:
