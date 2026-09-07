@@ -51,6 +51,8 @@ export const CHUNK_SIZE = 256 * 1024
 export const MAX_LINKS = 174
 /** kubo `Import.UnixFSHAMTDirectorySizeThreshold` default: `256KiB`. */
 export const HAMT_THRESHOLD = 256 * 1024
+/** fileCid yields to the event loop this often (chunks of CHUNK_SIZE: 16 = every 4 MiB). */
+export const YIELD_EVERY = 16
 /** The dag-pb multicodec. `raw` comes from multiformats. */
 const DAG_PB = 0x70
 
@@ -271,9 +273,16 @@ export async function fileCid (body, { chunkSize = CHUNK_SIZE, maxLinks = MAX_LI
   }
   const builder = new BalancedBuilder(maxLinks)
   let size = 0
+  let chunks = 0
   for await (const chunk of rechunk(bytesOf(body), chunkSize)) {
     size += chunk.length
     await builder.push(await leaf(chunk))
+    // sha256.digest is synchronous under the await (node's createHash): over
+    // an in-memory buffer nothing else yields, and a GiB of hashing starved
+    // the main process — no input, no paint, no IPC — for seconds while the
+    // sheet said "Looking at the site…" (2026-09-06). A turn of the loop
+    // every few MiB keeps the browser alive; kubo equality is untouched.
+    if (++chunks % YIELD_EVERY === 0) await new Promise((resolve) => setImmediate(resolve))
   }
   // go-unixfs: "No data, return just an empty node" — with raw leaves that
   // is a raw block of zero bytes, not a UnixFS file node.

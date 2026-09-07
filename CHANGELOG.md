@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.2
+
+Sync with browser 2.78.28 (`93cdc62`). No behaviour change in resolution:
+
+- `src/resolver.js` — the failover's first-candidate pick is written as a
+  plain `for await` (a lint pass in the browser); same answer, same order.
+- `namespaces/ipfs/src/cid.js` — `fileCid` yields to the event loop every
+  4 MiB (`YIELD_EVERY`) so hashing a large file cannot starve the caller;
+  the CID is unchanged (kubo equality tests untouched).
+
+## 0.7.1
+
+- **Arweave byte check limited to the transaction's own bytes** — verified
+  only when the body length equals the header's `data_size`; a gateway's
+  rendered page for a bundle or manifest is reported `header`, not refused.
+
 ## 0.7.0
 
 The open items the 2026-09-06 review left, closed where they belong to the

@@ -318,10 +318,9 @@ export class HNSResolver {
    * @returns {Promise<{ server?: {server:string, port:number}, blocked?: object }>}
    */
   async _nameserverFor (tld, records, nsRecords) {
-    for await (const candidate of this._nameserverCandidates(tld, records, nsRecords)) {
-      return candidate
-    }
-    throw new Error(`no reachable nameserver for ${tld}`)
+    const first = await this._nameserverCandidates(tld, records, nsRecords).next()
+    if (first.done) throw new Error(`no reachable nameserver for ${tld}`)
+    return first.value
   }
 
   /**
@@ -717,7 +716,7 @@ export class HNSResolver {
 
     const synth = synthRecord(records)
     const hasNs = records.some((r) => r.type === 'NS')
-    let server = this.authoritative
+    const server = this.authoritative
     // THE TLD'S OWN ADDRESS IS THE TLD'S OWN, and only when there is nothing
     // better to ask. Both guards were missing, and each was a real hole:
     //
