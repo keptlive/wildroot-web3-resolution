@@ -1,24 +1,10 @@
 # Chapter 6 — Nostr: references
 
-Every standard this chapter's implementation actually reads, with what it is
-used for and where in the tree it is used. Nothing is listed that the code does
-not touch: a padded bibliography is worse than none, because it makes the real
-dependencies impossible to see.
+Sources used by this chapter, with their implementation locations.
+Rows marked as unimplemented document gaps or requirements for future work.
 
-Paths are relative to `namespaces/nostr/`. Where a row points outside this
-directory it is naming code in the Wildroot browser that is **not** extracted
-here, and says so.
-
-A note on what a "NIP" is, since this file cites nine of them. The
-[NIPs repository](https://github.com/nostr-protocol/nips) is not a standards
-body and has no process comparable to the IETF's. A NIP is a numbered document
-in a git repository, merged by its maintainers, revisable in place, with no
-errata mechanism and no versioning. **NIP-01 is stable and universally
-implemented; the rest vary.** Every citation below is to the document as it
-stands, and an implementer should read the current text rather than trusting
-this summary of it.
-
----
+Paths are relative to `namespaces/nostr/` unless a row identifies browser code.
+NIP links point to living documents in the [NIPs repository](https://github.com/nostr-protocol/nips); consult their revision history when comparing implementations.
 
 ## Naming
 
@@ -30,7 +16,7 @@ this summary of it.
 | [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986) | Uniform Resource Identifier (URI): Generic Syntax | **§5.4**: the `nostr:` URI's shape, and the reason `nostr://` is a different production (an authority component) rather than a spelling variant. `src/nip19.js` |
 | [RFC 7595](https://www.rfc-editor.org/rfc/rfc7595) | Guidelines and Registration Procedures for URI Schemes | **§5.4**, cited for a negative: `nostr:` is not in the IANA URI Schemes registry. It is a de-facto scheme with wide implementation and no registration. |
 | [RFC 9498](https://www.rfc-editor.org/rfc/rfc9498) | The GNU Name System | **§3**, §9.10 of it — namespace precedence: resolve in the alternative namespace when its suffix matches, and do not continue into DNS on failure. Adopted across this specification as rule L2; for Nostr it forbids a failed `nostr:` lookup from becoming a DNS or Handshake one. `../../src/router.js` |
-| [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123) | Requirements for Internet Hosts — §2.1, host names | **§10.5**: LDH label syntax and length limits, which `verificationHost` enforces before a claim from a stranger's profile is allowed near a URL. `src/nip05.js` |
+| [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123) | Requirements for Internet Hosts — §2.1, host names | **§10.5**: LDH label syntax and length limits, which `verificationHost` enforces before a claim from an untrusted profile is allowed near a URL. `src/nip05.js` |
 | [RFC 5890](https://www.rfc-editor.org/rfc/rfc5890) | Internationalized Domain Names for Applications (IDNA): Definitions and Document Framework | **§10.5**, cited for what is refused: a Unicode host in a NIP-05 claim is rejected outright rather than IDNA-converted. `src/nip05.js` |
 | [WHATWG URL Standard](https://url.spec.whatwg.org/) | URL | **§10.5**: the parser whose behaviour makes the SSRF vectors work — `\` is a path separator, `#` truncates, `:` starts a port, `@` ends userinfo. Every one of those characters ends the host, which is why appending a suffix to an unvalidated claim does not make it safe. `src/nip05.js`, and the adversarial vectors in `tests/nip05.test.js` |
 
@@ -75,16 +61,16 @@ Listed because each absence is a documented gap rather than an oversight.
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [CSP Level 3](https://www.w3.org/TR/CSP3/) | Content Security Policy Level 3 | **§10.6**: every response, error pages included, is served under `default-src 'none'; style-src 'unsafe-inline'; img-src https: data:`. No script source is granted at all, which is the second line of defence behind escaping a stranger's `content`. `src/nostr-protocol.js` |
+| [CSP Level 3](https://www.w3.org/TR/CSP3/) | Content Security Policy Level 3 | **§10.6**: every response, error pages included, is served under `default-src 'none'; style-src 'unsafe-inline'; img-src https: data:`. No script source is granted at all, which is the second line of defence behind escaping an untrusted `content`. `src/nostr-protocol.js` |
 | [Electron `registerSchemesAsPrivileged`](https://www.electronjs.org/docs/latest/api/protocol#protocolregisterschemesasprivilegedcustomschemes) | Electron `protocol` API | **§5.4** and `../../DEVIATIONS.md` §2.5: `nostr:` is registered with low privileges — not a standard scheme, so no origin, no `fetch`, no service workers, no secure-context features. A deliberate difference from `hns:`: a `nostr:` page is a document, not an application. The browser's `src/main.cjs`, not in this chapter |
 | [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) · [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174) | Key words for use in RFCs | The key words throughout `SPEC.md`. |
 
-## Not a standard, but load-bearing
+## Implementation dependencies
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [`@noble/curves`](https://github.com/paulmillr/noble-curves) | Audited elliptic-curve implementations | **§6.2**: the BIP-340 implementation. Dependency-light and already in the browser's tree, which is the honest reason Nostr was cheap to add at all. `src/event.js`, and every test file, which mint their own key material rather than carrying fixtures |
-| [nostr-tools `normalizeURL`](https://github.com/nbd-wtf/nostr-tools) | Relay-URL canonicalisation | **§9.1 step 3**: the canonicalisation everyone else follows — host lower-cased, a bare path collapsed, fragment dropped — so `wss://nos.lol` and `wss://nos.lol/` are one relay, one socket, and one row in the relay report. `normalizeRelayUrl` in `src/relay.js` |
+| [`@noble/curves`](https://github.com/paulmillr/noble-curves) | Audited elliptic-curve implementations | **§6.2**: the BIP-340 implementation. Used by both the browser and resolver. `src/event.js`, and every test file, which mint their own key material rather than carrying fixtures |
+| [nostr-tools `normalizeURL`](https://github.com/nbd-wtf/nostr-tools) | Relay-URL canonicalisation | **§9.1 step 3**: the relay canonicalisation convention — host lower-cased, a bare path collapsed, fragment dropped — so `wss://nos.lol` and `wss://nos.lol/` are one relay, one socket, and one row in the relay report. `normalizeRelayUrl` in `src/relay.js` |
 | [The NIPs repository](https://github.com/nostr-protocol/nips) | Nostr Implementation Possibilities | Read for what is and is not settled. Its lack of a versioning or errata process is itself a fact an implementer needs — see the note at the top of this file. |
 | [`ws`](https://github.com/websockets/ws) | WebSocket client and server for Node.js | **§8.5**: the client on the Private route, chosen because it takes an `agent` and the runtime's `WebSocket` does not. A declared dependency of this repository (`^8.18.2`); the browser carries 7.x, and the class is written for both — each hands a text frame to `onmessage` as a string. Only `src/tor-websocket.js` imports it; the direct route never touches it (NO-16). Also the relay server `tests/tor-websocket.test.js` stands up |
 | `../../src/delivery-mode.js` | The one switch — Settings › Content delivery › Mode | **§8.5**: `policyFor()` is the policy table this handler's `nostrThroughTor` row comes from; `privateRefusal('relay')` is the wording of the 503 page and `SWITCH_HINT` its last sentence. `src/nostr-protocol.js` |
@@ -98,7 +84,7 @@ Listed because each absence is a documented gap rather than an oversight.
 node --test namespaces/nostr/tests/*.test.js     # from the repository root
 ```
 
-**73 tests, deterministic, no network.** Requirements: Node ≥ 20 (for the
+**Deterministic tests using stubs and loopback servers.** Requirements: Node ≥ 20 (for the
 global `Response` and `fetch` these modules use in place of dependencies),
 `@noble/curves` and `ws`, installed at the repository root. `@noble/hashes` is
 present at the root and is **not** used here: `src/event.js` takes SHA-256 from
@@ -111,7 +97,7 @@ direct-route relay client takes its WebSocket from the injected `WebSocketImpl`
 seam or the global, and the NIP-05 client uses the platform `fetch` with the
 implementation injectable for tests. Because the seam exists, no test replaces
 a global — the whole handler is driven against scripted, misbehaving relays.
-"No network" includes the Tor route: `tests/tor-websocket.test.js` runs a real
+The Tor test uses local sockets: `tests/tor-websocket.test.js` runs a real
 `wss://` relay behind a SOCKS5 server, both on loopback, with a certificate
 from `../../src/self-cert.js`.
 

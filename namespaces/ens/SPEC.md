@@ -1,8 +1,10 @@
 # Chapter 5 — ENS and `web3://`
 
-This chapter is part of the integrated Wildroot resolution specification whose
-spine is `../../SPEC.md`, where namespace selection — the rule that decides
-that a `.eth` name belongs here and to nothing else — is specified.
+> **Review pending:** [REVIEW.md](../../REVIEW.md) records unresolved questions
+> about resolver error wording and content trust labels. The rewrite does not change runtime behaviour.
+
+The [routing specification](../../SPEC.md) defines how `.eth` names reach
+this namespace.
 
 **Status:** describes the behaviour of the reference implementation in
 `namespaces/ens/src/`, which ships in the Wildroot browser. Not endorsed by any
@@ -13,13 +15,9 @@ governs.
 **Licence:** CC-BY-4.0 (`../../LICENSE-SPEC`). The reference implementation is
 licensed separately (Apache-2.0).
 
-The spine defines the vocabulary this chapter reuses without restating:
-*namespace*, *trust state*, *content pointer*, *resolution kind*, and the
-weakest-link aggregation that produces the three-way lock. Every deviation from
-a cited standard and every question we are unsure of is in `../../DEVIATIONS.md`
-under the prefix `EN-`. Every standard cited is listed with its purpose in
-`REFERENCES.md` beside this file. **Those two files are part of this
-specification, not appendices to it.**
+The routing specification defines the namespace and trust-state vocabulary.
+See [deviations](DEVIATIONS.md) (`EN-` entries) and [references](REFERENCES.md)
+for limits and supporting sources.
 
 ---
 
@@ -42,19 +40,13 @@ used as in RFC 2119 / RFC 8174.
 
 ## 1. What this specifies
 
-A `.eth` name is a token on Ethereum whose owner may publish records against it.
-One of those records — `contenthash`, EIP-1577 — names a website by a
-self-authenticating content address. A browser that can read that record can
-open an ENS name as a site, with no gateway, no `*.eth.limo` suffix and no
-server that could substitute different content.
+This chapter resolves `.eth` names to websites by reading EIP-1577
+`contenthash` records. It also documents the separate `web3://` handler (§8).
 
-This chapter specifies how that read is performed, and — more importantly —
-what it is worth. The read is an `eth_call` against a **public JSON-RPC endpoint
-over HTTPS**. There is no light client and no Merkle proof of the record against
-a block header. The endpoint is therefore a trusted third party for the mapping
-*name → contenthash*, and it also learns which `.eth` name the user asked for.
-The bytes that mapping points at are content-addressed and are checked by the
-fetching layer; the pointer to them is not checked by anything.
+The ENS read uses `eth_call` over HTTPS to a public JSON-RPC endpoint.
+There is no Ethereum light client or proof against a verified block header.
+The endpoint is trusted for the name-to-contenthash mapping and learns the
+lookup. Content handlers apply their own verification rules after handoff.
 
 Two properties follow, and both are normative:
 
@@ -65,19 +57,17 @@ Two properties follow, and both are normative:
   name, an ICANN domain, or a search query. This is the spine's namespace rule
   (RFC 9498 §9.10), applied to `.eth`.
 
-The second is not hypothetical. Without it, `vitalik.eth` classifies as "a TLD
-that is not in the ICANN root", is resolved on the Handshake chain, and the
-traffic goes to whoever holds the Handshake top-level name `eth`.
+Without the `.eth` routing exception, a non-ICANN suffix would be sent to
+Handshake and could resolve through the owner of the Handshake name `eth`.
 
-`web3://` (ERC-4804) is specified in §8. It is in this chapter because it is
-the other Ethereum-reading scheme in the browser and because the two are
-constantly confused with each other and with the Handshake top-level name
-`.w3`; it is **not** part of the ENS namespace and shares no code with it.
+`web3://` (ERC-4804) belongs to a separate namespace. It is covered here
+because both handlers read Ethereum. It is also distinct from the Handshake
+top-level name `.w3`.
 
 ### 1.1 Scope
 
-**In scope:** how a `.eth` name becomes a **content pointer** and a **trust
-state**, and how a failure to do so is reported. Precisely:
+**In scope:** website content pointers, the associated trust state, and the
+errors and limited text-record display used when no website is published.
 
 - ENSIP-15 name normalisation and EIP-137 `namehash`;
 - the single ENSIP-10 `resolve(bytes,bytes)` call through the ENS Universal
@@ -89,22 +79,19 @@ state**, and how a failure to do so is reported. Precisely:
 - the `ens://` URL form and the handoff to the content handlers;
 - the trust state the result carries, and the failure kinds.
 
-**Out of scope, explicitly:**
+**Out of scope:**
 
 | Out of scope | Where it lives |
 |---|---|
 | **Fetching the content** the pointer names — IPFS, IPNS, Arweave: retrieval, CID verification, rendering | the IPFS and Arweave chapters; this chapter ends at the pointer, exactly as the Handshake chapter's content-pointer section does |
-| **Other ENS records** — `addr`, `text`, avatars, reverse resolution (EIP-181), primary names | not read. This browser resolves `.eth` to a *website* and nothing else; see EN-1 and EN-3 |
+| **Wallet and reverse records** — `addr`, multichain addresses, reverse resolution (EIP-181), primary names | Not read. Selected text records are displayed only on the no-website page (§5.6a); see EN-1 and EN-3. |
 | **Writing ENS records**, registration, renewal, the ENS registrar | a different problem with a different threat model |
 | **Ethereum consensus, light clients, `eth_getProof`** | cited, not restated. §7 states what an RPC answer is worth, which is the only part a resolver needs |
 | **The HIP-5 `_op` route**, which uses the *same* EIP-137/EIP-1577 primitives against an Optimism registry | the Handshake chapter. It is a Handshake resolution that happens to read a contract; this is an ENS resolution. They share the pointer grammar and nothing else |
 | **The browser's padlock and security panel** | §7 specifies the model an interface is given; not a rendering |
 
-**Non-goal:** this is not a general ENS client specification. It reads one
-record for one purpose. An ENS library that resolves addresses for payments has
-a different and larger job, and where this document says "MUST NOT" about
-something such a library does routinely, that is a statement about *browsing*,
-not about ENS.
+This is a website-resolution specification, not a general ENS client.
+Its scope excludes wallet operations and record-management workflows.
 
 ---
 
@@ -125,19 +112,17 @@ Terms specific to this chapter:
   back to a named callback.
 - **Batch sentinel** — the literal URL `x-batch-gateway:true` (ENSIP-21),
   meaning "any compliant batch gateway will do, including your own".
-- **Answer** — a result, or a revert. The chain spoke. Everything else is the
-  chain **not having been reached**, and the distinction is load-bearing: it
-  decides whether the browser says "this name is not registered" or "we could
-  not ask". §5.6.
+- **Answer** — an RPC result or revert. A transport failure produces no
+  answer about the name. This distinction controls error classification (§5.6);
+  the RPC endpoint remains trusted for the result.
 
 ---
 
 ## 3. Which names belong to this namespace
 
-A host whose final label, after stripping a trailing dot and any port, is
-`eth` (compared case-insensitively) belongs to this namespace. That is the
-whole rule, and it is deliberately a **suffix test, not a registry lookup**:
-`isEthName()` in `../../src/router.js`.
+`isEthName()` in `../../src/router.js` uses a case-insensitive `eth`
+suffix test after removing a trailing dot and port. It does not query the
+registry during classification.
 
 Order matters, and this namespace sits **second** in the spine's classification
 order:
@@ -162,7 +147,7 @@ IPFS request whose CID-shaped component happens to look like an ENS name; it
 is the spine's law that a named scheme is authoritative.
 
 `.eth` is not in the ICANN root, so under rule 6 it would otherwise be a
-Handshake name. Rule 3 is therefore a deliberate carve-out of exactly one label
+Handshake name. Rule 2 is therefore a deliberate carve-out of exactly one label
 from the Handshake namespace, and the only one made for an alternative naming
 system other than Tor. Other alt-roots (`.crypto`, `.sol`, `.bnb`) are **not**
 carved out and resolve as Handshake names; the reasoning, which is a product
@@ -191,18 +176,11 @@ The parsed path is appended to the resolved content pointer **only when it is
 not `/`**, so that `ens://vitalik.eth/` and `ens://vitalik.eth` both fetch
 `ipfs://<cid>` rather than `ipfs://<cid>/`.
 
-**Percent-decoding the name is required, not optional.** `ens:` is a
-non-standard scheme, so the URL parser treats everything after `ens://` as an
-[opaque path](https://url.spec.whatwg.org/#url-opaque-path) and percent-encodes
-non-ASCII: `ens://🚀.eth/` reaches the handler as `ens://%F0%9F%9A%80.eth/`.
-Emoji and other non-ASCII names are a large and deliberate part of the ENS
-namespace, and a client that hands the encoded text to the normaliser refuses
-every one of them with "is not a valid ENS name" — a sentence that is false
-about the name and true only about the client. An implementation **MUST**
-decode `<name>` before normalising it, and the decode **MUST** be guarded: a
-name that is not valid percent-encoding (`ens://100%.eth/`) is kept exactly as
-written, so that **ENSIP-15** is the thing that refuses it and the refusal is
-about the name.
+The handler can receive a percent-encoded non-ASCII name such as
+`ens://%F0%9F%9A%80.eth/`. An implementation **MUST** decode `<name>` before
+ENSIP-15 normalization, and the decode **MUST** be guarded. If decoding fails
+(for example, `ens://100%.eth/`), retain the original text and let ENSIP-15
+report the invalid name.
 
 `ens:` is registered as a **non-standard, non-secure** scheme in the browser
 (`LOW_PRIVILEGES`, plus streaming). An ENS page therefore has an **opaque
@@ -229,13 +207,9 @@ node       = namehash(normalized)                 EIP-137
 dnsName    = RFC 1035 wire-format(normalized)     length-prefixed labels, root-terminated
 ```
 
-An implementation **MUST** normalise with **ENSIP-15**, not with bare UTS-46 and
-not with a lowercase-and-hope. ENSIP-15 is what every ENS registration was
-validated against, so a client that normalises differently computes a different
-`namehash` and resolves a different name — or, worse, resolves a
-confusable-but-distinct name to a real site. The reference implementation calls
-`normalize()` from `viem/ens`, which is `@adraffy/ens-normalize` (the
-specification's own reference implementation) via `ox`.
+An implementation **MUST** normalize with **ENSIP-15**. Bare UTS-46 or
+lowercasing alone can produce a different namehash. The reference handler uses
+`normalize()` from `viem/ens`, backed by `@adraffy/ens-normalize` via `ox`.
 
 **EIP-137's own text specifies UTS-46 / nameprep.** ENSIP-15 supersedes it and
 is what the namespace actually uses; where the two disagree, ENSIP-15 governs.
@@ -262,15 +236,11 @@ outer = resolve(bytes dnsName, bytes inner)              ENSIP-10
 result, resolverAddress = eth_call(UniversalResolver, outer, "latest")
 ```
 
-An implementation **SHOULD** issue exactly this one call and **SHOULD NOT**
-read `Registry.resolver(node)` directly for a name it did not itself verify to
-be a second-level `.eth` registration. The registry holds an entry for the name
-that was *registered* — `base.eth`, not `jesse.base.eth` — so a direct registry
-read reports most of the currently-used ENS namespace as unregistered. ENSIP-10
-says a client walks up to the nearest ancestor **with** a resolver and calls
-`resolve(dnsEncode(name), data)` on it; the Universal Resolver performs that
-walk on chain, so one call replaces the walk, the wildcard handling and the
-CCIP plumbing.
+An implementation **SHOULD** issue this single Universal Resolver call and
+**SHOULD NOT** call `Registry.resolver(node)` directly unless it has verified
+that the name is a second-level `.eth` registration. ENSIP-10 requires finding
+the nearest ancestor with a resolver. The Universal Resolver performs that
+walk and wildcard handling for names such as `jesse.base.eth`.
 
 The Universal Resolver address **MUST** be verified to be a contract before it
 is trusted as one. `0xb8c2C29ee19D8307cb7255e1Cd9CbDE883A267d5` circulates as
@@ -281,12 +251,10 @@ implementation **SHOULD** use the DAO-owned upgradable **proxy** rather than
 pinning an implementation address, so that an ENS upgrade behind an unchanged
 read interface needs no client change.
 
-The address is **pinned in this code and is not read from the chain list**. The
-bundled `web3protocol` registry names a different, older Universal Resolver
-(`0xce01f8eE…`) and an `ensRegistry` address that this chapter's single call
-never uses; nothing but the chain's RPC list is taken from that registry. The
-trade — a verified address that must be maintained by hand, against a registry
-entry that is currently wrong — is `../../DEVIATIONS.md` §2 under this prefix.
+The contract address is pinned in this module. Only RPC endpoints are read
+from the bundled `web3protocol` chain registry; its older Universal Resolver
+and `ensRegistry` entries are unused. Section 2.5 of [DEVIATIONS.md](DEVIATIONS.md)
+discusses maintenance of the pinned address.
 
 ### 5.3 Step 3 — the JSON-RPC transport
 
@@ -328,7 +296,7 @@ The endpoints are not ours and are not chosen by us: they come from the chain
 registry bundled with the `web3protocol` package, which for mainnet is
 `https://ethereum.publicnode.com` and `https://cloudflare-eth.com`. An
 implementation **MUST** state which endpoints it uses in its trust output (§7),
-because they are the trusted third party.
+because they are the trusted service.
 
 The RPC request **SHOULD** be issued through the same proxy/anonymisation path
 as the page load, so that turning on IP protection does not leave the name
@@ -369,9 +337,8 @@ A recognised codec this client cannot fetch **MUST** be refused by name and
 points at Swarm content, which this build cannot fetch" is a true and useful
 sentence; falling through to a search box is not.
 
-The request is re-issued at `pointer.url + path` (§4) carrying the original
-method and, for a method other than `GET`/`HEAD`, the original body. The
-response from the content handler is returned **with two headers added**:
+The request is re-issued at `pointer.url + path` (§4), retaining the method
+and, except for GET/HEAD, the body. The content handler's response receives:
 
 - `X-Resolution-Namespace: ens` — on **every** response this handler produces,
   including every error page, so that a downstream consumer can tell which
@@ -385,22 +352,19 @@ indistinguishable, downstream, from a verified one.
 
 ### 5.6 Distinguishing "no" from "we could not ask"
 
-This is the single most consequential rule in the chapter.
+The error classification distinguishes a resolver response from a failure to
+obtain one.
 
-**An error is an answer about the name only when it carries revert data.** A
-revert is the chain speaking, and *which* revert decides the sentence. Every
+**An error is treated as an answer about the name only when it carries revert
+data.** The revert selector determines the handler's classification. Every
 other failure — no RPC reachable, a CCIP gateway that did not answer, a lookup
-that did not terminate, a result that will not decode — is the chain not having
-been reached, and an implementation **MUST** report it as `unreachable` with
+that did not terminate, a result that will not decode — does not yield a usable resolver answer, and an implementation **MUST** report it as `unreachable` with
 HTTP status **502, never 404**. Nothing was learned about the name, so nothing
 may be claimed about it.
 
-That default is normative and it is the safe one. Telling someone their own
-name "is not registered" because our RPC list was down is a false statement
-about a fact we never obtained, and it is the statement a naive implementation
-makes, because a revert and a dead endpoint both arrive as a thrown error. The
-test is structural — *is there revert data?* — and **MUST NOT** be a pattern
-match on an error message, which is the least stable interface in the stack.
+An endpoint outage does not establish whether a name is registered. The
+answer/failure decision is based on the presence of revert data and **MUST NOT**
+be inferred from error-message wording alone.
 
 When the call throws with revert data, the Universal Resolver's own errors, by
 selector:
@@ -414,26 +378,23 @@ selector:
 | `0x95c0c752` | `ResolverError(bytes)` | `no-content` | "has no website" |
 | anything else | — | `no-content` | "has no website" |
 
-A name with no resolver is not registered. A resolver that does not implement
-`contenthash` is registered and simply has no website. Saying the first about
-the second tells someone their own name does not exist.
+The handler labels `no-resolver` as "not registered". Resolver configuration
+does not by itself establish registration status; [REVIEW.md](../../REVIEW.md)
+records the wording issue. Likewise, an unknown resolver error does not prove
+that `contenthash` is absent.
 
-An unrecognised **revert selector** defaults to `no-content` rather than
-`unreachable`, and that is deliberate: the chain did answer, and the answer was
-an error raised by a resolver that exists. What it did not do is tell us which
-error, so the weaker of the two sentences is the honest one.
+An unrecognized revert selector defaults to `no-content`. The handler treats
+the revert as a resolver answer whose more specific meaning is unknown.
 
 ### 5.6a ENSIP-5 text records, on the no-website page only
 
-A name whose resolver holds no `contenthash` is a name with no website, not
-an unregistered one (§5.6). Since 2026-09-06 that page also lists the ENSIP-5
-text records the name does publish — `url`, `description`, `avatar`
-(ENSIP-12), `email`, `com.twitter`, `com.github`, `org.telegram` — read
-through the same Universal Resolver path (`text(node, key)` inside
-`resolve()`), one call per key, only for that page. Values are TEXT: escaped,
-capped at 512 characters, never fetched; `url` becomes a link only when it is
-`https:`. They are on the resolver's word exactly as the contenthash is, and
-the page says so. `textRecords()` in `../src/ens-protocol.js`.
+When resolution returns `no-content`, the page also reads these ENSIP-5
+text keys: `url`, `description`, `avatar` (ENSIP-12), `email`,
+`com.twitter`, `com.github` and `org.telegram`. Each uses `text(node, key)`
+inside the same Universal Resolver `resolve()` call, one request per key.
+Values are escaped, capped at 512 characters and never fetched. `url` becomes
+a link only when it uses `https:`. The page identifies the RPC trust limit.
+`textRecords()` in `src/ens-protocol.js` implements this display.
 
 ### 5.7 Resolution kinds
 
@@ -441,15 +402,14 @@ the page says so. `textRecords()` in `../src/ens-protocol.js`.
 |---|---|---|
 | `content` | a supported content pointer | whatever the content handler returns |
 | `unsupported` | a decoded pointer this client cannot fetch, named | 501 |
-| `no-resolver` | the chain says this name has no resolver | 404 |
+| `no-resolver` | the RPC response indicates no usable resolver | 404 |
 | `no-content` | the name resolves and publishes no `contenthash` | 404 |
 | `unreachable` | no answer was obtained; **nothing is claimed about the name** | 502 |
 | `invalid-name` | ENSIP-15 rejected the name | 400 |
 
-Every one of these **MUST** be reported as a failure *of ENS*. None of them
-**MAY** trigger a lookup in another namespace. The reference implementation's
-404 pages say so in words ("It was NOT looked up as a Handshake name"), which
-is worth copying: the user's next question is "so did it try something else?"
+Every failure **MUST** remain an ENS failure. None **MAY** trigger a lookup
+in another namespace. The reference error pages state that no Handshake lookup
+was attempted.
 
 A failure to load the resolver machinery at all (§5.1's dependencies) is 502,
 not 404, for the same reason as `unreachable`. `resolve()` loads those
@@ -460,10 +420,8 @@ rather than a type error.
 
 ## 6. CCIP-Read (ERC-3668)
 
-Most of the interesting ENS namespace is not stored on L1. `*.base.eth`,
-`uni.eth`, `linea.eth`, and every ICANN domain imported through ENS's gasless
-DNSSEC path answer by reverting with `OffchainLookup(...)`. **An ENS client
-without CCIP-Read covers a shrinking minority of the names people have.**
+Offchain ENS records use ERC-3668 `OffchainLookup`, including names under
+`base.eth`, `uni.eth` and `linea.eth`, and the gasless DNSSEC import path.
 
 An implementation that follows an offchain lookup **MUST**:
 
@@ -517,26 +475,21 @@ rules:
   as a **failure in the array**, not as a failed batch — that is the
   interface's own shape.
 
-**What CCIP-Read is not.** It does not make anything trustless. The gateway's
-answer is handed straight back to the contract, and what the contract does with
-it is the resolver author's choice: some verify a signature from a key they
-control (so the answer is that operator's word), some verify a Merkle storage
-proof or a DNSSEC chain on chain (so the answer is cryptographic). Both are the
-same protocol and opposite guarantees.
+CCIP-Read transports a gateway answer to a contract callback. The callback
+may verify an operator signature, a storage proof or a DNSSEC chain; the
+transport protocol alone does not establish which assurance applies.
 
-It is tempting to grade the lock by which one happened — payload size and revert
-shape make it observable. An implementation **MUST NOT**, for a reason that
-outranks the distinction: **without an Ethereum light client, the "verified
-storage proof" was learned about from an RPC endpoint that could equally have
-invented it.** Grading would show the user a difference the client cannot
-actually observe. ENS is trusted, all of it, until there is a light client
-(EN-2).
+An implementation **MUST NOT** grade the lock by the callback's apparent
+verification method. Without a verified Ethereum state, the RPC endpoint can
+fabricate that method and its result. EN-2 records this limit.
 
 ---
 
 ## 7. Trust state
 
-An ENS resolution produces exactly two steps, in the spine's vocabulary:
+The reference trust model uses two steps for ENS. The second is currently
+generic; its accuracy for an Arweave pointer is an open issue in
+[REVIEW.md](../../REVIEW.md).
 
 | # | label | state | says |
 |---|---|---|---|
@@ -556,10 +509,8 @@ and **MUST** name the unverified hop in words rather than omitting the step. A
 panel that falls through to "this browser has no verification path for this
 scheme" is both wrong and silent about the one hop that actually needs saying.
 
-Whether **TRUSTED** is the right verdict rather than **OPEN** — the state a
-plain `http://` page is in — is a real question, and both cases are set out in
-`../../DEVIATIONS.md` §2 under this prefix. What ships is TRUSTED, and it ships
-consistently.
+The reference verdict is TRUSTED. Whether it should instead be OPEN remains
+an unresolved policy question in [DEVIATIONS.md](DEVIATIONS.md) §2.1.
 
 The trust output **MUST** name the RPC endpoints. "An RPC endpoint" is not a
 disclosure; `ethereum.publicnode.com` is.
@@ -592,11 +543,9 @@ document instead of the code.
 
 ### 8.3 What the implementation does
 
-The handler is thin, and honestly so: it delegates the whole of ERC-4804 —
-URL parsing, auto/manual mode selection, ERC-6821 cross-chain `contentcontract`
-resolution, ERC-5219 resource-request mode, ERC-7617 chunking — to the
-third-party `web3protocol` package. The code in this chapter does exactly five
-things:
+The `web3protocol` dependency handles URL parsing, auto/manual mode,
+ERC-6821 cross-chain `contentcontract` resolution, ERC-5219 requests and
+ERC-7617 chunking. This chapter's wrapper:
 
 1. imports the library and the chain registry **lazily, on the first
    `web3://` request**, never at startup (the default chain registry costs
@@ -675,7 +624,9 @@ Two residual exposures an implementer should know about:
   fetching a contract can direct is bounded, and this is an amplifier with a
   ceiling rather than a bypass.
 
-### 9.2 The RPC endpoint is a trusted third party, and it is watching
+<a id="92-the-rpc-endpoint-is-a-trusted-third-party-and-it-is-watching"></a>
+
+### 9.2 RPC trust and disclosure
 
 The endpoint learns every `.eth` name the user opens, in real time, tied to
 their IP address unless the request rides a proxy. It can also lie: return a
@@ -685,10 +636,8 @@ detectable only by asking a second endpoint; the third is bounded by §6. A
 malformed answer is the one lie that gains it nothing, because §5.4 reports it
 as `unreachable`.
 
-Nothing is cached, so the endpoint sees one request per navigation and per
-subresource rather than one per cache lifetime (EN-6). For a scheme whose
-stated privacy problem is that the endpoint learns which names you open,
-re-asking is the wrong default.
+The ENS path has no cache. Navigations and subresources repeat the RPC and
+CCIP lookups, increasing latency and disclosure volume (EN-6).
 
 An implementation **SHOULD** send the RPC request over the same
 proxy/anonymisation path as the page, and **MUST** say in the trust output that
@@ -696,23 +645,18 @@ this hop exists.
 
 ### 9.3 Privacy: the batch gateway is the leak
 
-Without ENSIP-21 handled locally (§6), the *outer* URL of a modern ENS
-resolution is ENS's own batch gateway, and every name the user resolves is
-disclosed to a single third party — a far larger leak than the RPC endpoint,
-because it is one operator seeing the whole namespace's traffic. Handling the
-sentinel locally is a **privacy requirement**, not a performance one.
+Handling ENSIP-21 locally avoids sending lookups to the shared outer batch
+gateway. The resolver's own gateway still receives each sub-request. Section 6
+requires local handling for this privacy reason.
 
 ### 9.4 Unknown is `unreachable`
 
-Every ambiguity in this namespace is resolved *away* from a claim about a name
-nothing was learned about. An unclassified failure, a dead CCIP gateway, a
-lookup that does not terminate and an answer that will not decode are all
-`unreachable` and all served 502. The only 404s are the two the chain actually
-answered: no resolver, and a resolver with no `contenthash`.
+Transport failures, CCIP timeouts, lookup-limit failures and malformed ABI
+answers return `unreachable` with HTTP 502. Resolver answers indicating no
+resolver or no `contenthash` return 404.
 
-An implementation **MUST** keep the default on that side. The rule is not a
-nicety: a 404 is a statement about someone's name, and the failure mode of
-getting it wrong is telling a user their own name does not exist.
+An implementation **MUST** keep unclassified failures as `unreachable`; a
+failure to obtain records must not become a statement that a name is absent.
 
 ### 9.5 Privilege follows verification
 

@@ -1,18 +1,10 @@
 # Chapter 8 — Tor: references
 
-Every standard this chapter's implementation actually reads, with what it is
-used for and where in the tree it is used. Nothing is listed that the code does
-not touch: a padded bibliography is worse than none, because it makes the real
-dependencies impossible to see.
+Sources used by this chapter, with their implementation locations.
+Rows marked as unimplemented document gaps or requirements for future work.
 
-Where a row says *cited for what we do not do*, that is stated in the row. Those
-rows are here because a reader deciding whether to copy this design needs to
-know which available mechanism was declined, and why.
-
-Paths written `../../src/…` are the shared modules of the top-level package;
-paths written `src/…` and `tests/…` are this chapter's, under `namespaces/tor/`.
-
----
+`../../src/` denotes shared repository modules. `src/` and `tests/` denote
+files under `namespaces/tor/`.
 
 ## Tor
 
@@ -30,10 +22,10 @@ paths written `src/…` and `tests/…` are this chapter's, under `namespaces/to
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [RFC 7686](https://www.rfc-editor.org/rfc/rfc7686) | The ".onion" Special-Use Domain Name | §3, the rule this whole chapter is built around. The application requirements of §2: software that does not implement the Tor protocol should not perform a DNS lookup for a `.onion` name, and name-resolution APIs must either refuse it or hand it to Tor. Implemented in the stronger form R1/R2 — `.onion` is classified first and unconditionally, valid or malformed, at every entry point: `../../src/router.js:310-313`, `../../src/reserved-names.cjs:31`, `../../src/hns-host.js:50`, `src/subresource-guard.js:35-53`. Cited again in DEVIATIONS TO-1 and TO-2. |
+| [RFC 7686](https://www.rfc-editor.org/rfc/rfc7686) | The ".onion" Special-Use Domain Name | §3, the no-DNS rule. The application requirements of §2: software that does not implement the Tor protocol should not perform a DNS lookup for a `.onion` name, and name-resolution APIs must either refuse it or hand it to Tor. Implemented in the stronger form R1/R2 — `.onion` is classified first and unconditionally, valid or malformed, at every entry point: `../../src/router.js:310-313`, `../../src/reserved-names.cjs:31`, `../../src/hns-host.js:50`, `src/subresource-guard.js:35-53`. Cited again in DEVIATIONS TO-1 and TO-2. |
 | [RFC 6761](https://www.rfc-editor.org/rfc/rfc6761) | Special-Use Domain Names | §3, the registry and the process RFC 7686 used, and the reason `onion` sits in the same never-Handshake list as `localhost`, `invalid`, `test` and `example` rather than being a special case of its own. `../../src/reserved-names.cjs`. |
-| [IANA special-use domain names](https://www.iana.org/assignments/special-use-domain-names/) | Special-Use Domain Names registry | §3, where `onion` is recorded. The bundled ICANN root snapshot does **not** contain it, which is why the carve-out has to be explicit: without it, "not in the ICANN root" would make `.onion` a Handshake name. `../../src/reserved-names.cjs`, `../../src/icann-tlds.cjs`. |
-| [RFC 9498 §9.10](https://www.rfc-editor.org/rfc/rfc9498) | The GNU Name System — namespace precedence | §3, namespace precedence: resolve in the alternative namespace when its suffix matches, and do not continue into DNS on failure. Adopted as a normative rule in the spine and applied here in its strictest form, R2 — a *failed* onion address still must not continue into DNS. It is the only place we know of where this rule is written down in an RFC. |
+| [IANA special-use domain names](https://www.iana.org/assignments/special-use-domain-names/) | Special-Use Domain Names registry | §3, where `onion` is recorded. The bundled ICANN root snapshot does **not** contain it, so the classifier has an explicit exception: without it, "not in the ICANN root" would make `.onion` a Handshake name. `../../src/reserved-names.cjs`, `../../src/icann-tlds.cjs`. |
+| [RFC 9498 §9.10](https://www.rfc-editor.org/rfc/rfc9498) | The GNU Name System — namespace precedence | §3, namespace precedence: resolve in the alternative namespace when its suffix matches, and do not continue into DNS on failure. Adopted as a normative rule in the spine and applied here in its strictest form, R2 — a *failed* onion address still must not continue into DNS.  |
 
 ## Encoding
 
@@ -47,7 +39,7 @@ paths written `src/…` and `tests/…` are this chapter's, under `namespaces/to
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS Protocol Version 5 | §6.4 and R6, the transport the whole design rests on, and specifically §4: address type `0x03` (`DOMAINNAME`). Sending the `.onion` *hostname* to the proxy — rather than resolving it and sending an address — is the mechanism by which RFC 7686's no-DNS rule is satisfied at the wire level. `src/anonymize.js:243-258` (the `socks5://` proxy rule), `src/onion-protocol.js:136-176`. §7.5 cites it a second time for the five main-process paths that dial this controller's port for themselves rather than through the session: the protocol is spoken directly by `../../src/socks-dial.js` — the greeting with the "no authentication" method of §3, a CONNECT command, and `ATYP` IPv4 for a resolved address (the Handshake authoritative hop, an A-record `hns://` site's DANE-pinned socket, the `wss://` tunnel) or `0x03` for a host that must be resolved inside Tor (a Gemini capsule, a Nostr relay). §5 (the reply, whose own address type the client must parse to know where the framing ends) is implemented there too. |
+| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS Protocol Version 5 | §6.4 and R6, the transport the handler uses, and specifically §4: address type `0x03` (`DOMAINNAME`). Sending the `.onion` *hostname* to the proxy — rather than resolving it and sending an address — is the mechanism by which RFC 7686's no-DNS rule is satisfied at the wire level. `src/anonymize.js:243-258` (the `socks5://` proxy rule), `src/onion-protocol.js:136-176`. §7.5 cites it a second time for the five main-process paths that dial this controller's port for themselves rather than through the session: the protocol is spoken directly by `../../src/socks-dial.js` — the greeting with the "no authentication" method of §3, a CONNECT command, and `ATYP` IPv4 for a resolved address (the Handshake authoritative hop, an A-record `hns://` site's DANE-pinned socket, the `wss://` tunnel) or `0x03` for a host that must be resolved inside Tor (a Gemini capsule, a Nostr relay). §5 (the reply, whose own address type the client must parse to know where the framing ends) is implemented there too. |
 | [RFC 1929](https://www.rfc-editor.org/rfc/rfc1929) | Username/Password Authentication for SOCKS V5 | **Cited for what we do not do.** Tor overloads SOCKS username/password for stream isolation, so distinct credentials per origin put each site on its own circuit. We send none — not on the session proxy, which has no hook for it, and not on the five direct dialers of §7.5, which could pass one and do not — so everything shares circuits within the session. DEVIATIONS TO-3 and TO-D1. |
 | [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110) | HTTP Semantics | §6.4–§6.7, the protocol spoken **inside** the tunnel, in plain HTTP. §13 conditional requests and §14 `Range` are among the forwarded request headers; §15 is the status codes the handler returns and passes through; §15.4 is the redirect semantics of §6.5, including §15.4.4: a same-service 301/302/303 after a request with a body is followed with a GET and no body, 307/308 keep the method. There is no TLS in this path, which is why the lock is open (§8). `src/onion-protocol.js:136-205`. |
 | [RFC 6265](https://www.rfc-editor.org/rfc/rfc6265) | HTTP State Management Mechanism | §6.4 and §6.6, cited for a negative that matters: neither `Cookie` (request) nor `Set-Cookie` (response) crosses this handler's allow-lists. Whether the underlying session-bound fetch attaches the session cookie jar of its own accord is **not established** — DEVIATIONS TO-4. `src/onion-protocol.js:182-190`, `:209-219`. |

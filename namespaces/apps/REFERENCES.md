@@ -1,14 +1,8 @@
 # Chapter 11 — Native applications on a Handshake name: references
 
-Every standard this chapter's implementation actually reads, with what it is
-used for and where in the tree it is used. Nothing is listed that the code does
-not touch: a padded bibliography is worse than none, because it makes the real
-dependencies impossible to see.
-
-Where a row says *cited for what we do not do*, that is stated in the row. Those
-rows are here because a reader deciding whether to copy this design needs to
-know which available mechanism was declined, and why — and they are among the
-most useful rows in the file.
+Standards and implementation documents used by this chapter. Each row
+identifies the relevant section and code. Entries for mechanisms the
+implementation does not support state that limitation explicitly.
 
 Paths written `../../src/…` are shared modules of the top-level package; paths
 written `src/…` and `tests/…` are this chapter's, under `namespaces/apps/`.
@@ -21,7 +15,8 @@ extracted into this repository (SPEC.md, "Paths").
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [WHATWG URL](https://url.spec.whatwg.org/) | URL Standard | **§4.6** — the parser a PAC sandbox does **not** have, which is why the PAC's host rule is an ASCII-only copy of the one classifier rather than a call into it. **§3.1** — what registering `hns` as a *standard* scheme means: a [special scheme](https://url.spec.whatwg.org/#special-scheme) whose URLs get an [origin](https://url.spec.whatwg.org/#concept-url-origin) and whose host is run through [host parsing](https://url.spec.whatwg.org/#host-parsing). **§3.3** — the cost: the [ends-in-a-number checker](https://url.spec.whatwg.org/#ends-in-a-number-checker) and the [IPv4 parser](https://url.spec.whatwg.org/#concept-ipv4-parser) make an all-digit final label an IP address, which is the numeric-TLD casualty Chapter 10 Part B addresses. Registration at `browser src/main.cjs:110-120`; the marker is decoded at `src/ws-proxy.js:295` via `../../src/hns-url.cjs`. |
+| [WHATWG URL](https://url.spec.whatwg.org/) | URL Standard | **§4.6** — the parser a PAC sandbox does **not** have, which is why the PAC's host rule is an ASCII-only copy of the one classifier rather than a call into it. **§3.1** — origin and host-parsing concepts. Electron's custom `standard` registration is an engine extension, not an addition to WHATWG's fixed [special-scheme list](https://url.spec.whatwg.org/#special-scheme). **§3.3** — the cost: the [ends-in-a-number checker](https://url.spec.whatwg.org/#ends-in-a-number-checker) and the [IPv4 parser](https://url.spec.whatwg.org/#concept-ipv4-parser) make an all-digit final label an IP address, which is the numeric-TLD casualty Chapter 10 Part B addresses. Registration at `browser src/main.cjs:110-120`; the marker is decoded at `src/ws-proxy.js:295` via `../../src/hns-url.cjs`. |
+| [Electron protocol registration](https://www.electronjs.org/docs/latest/api/protocol#protocolregisterschemesasprivilegedcustomschemes) | Custom scheme privileges | §3.1: `standard`, `secure`, `supportFetchAPI`, and the other privileges used by the reference browser. |
 | [WHATWG HTML](https://html.spec.whatwg.org/multipage/) | HTML Standard | **§3.2** — [origin](https://html.spec.whatwg.org/multipage/browsers.html#concept-origin) as a tuple, and the [storage model](https://html.spec.whatwg.org/multipage/webstorage.html) keyed by it: what a Handshake page gains when the scheme becomes standard, and why an opaque origin makes an ordinary web application throw on its first line. Also **DEVIATIONS §2.5**, storage partitioning, which we have not measured. |
 | [Secure Contexts](https://www.w3.org/TR/secure-contexts/) | W3C, Secure Contexts | **§3.1, §3.2** — what `secure: true` makes an `hns://` document: `isSecureContext`, `crypto.subtle`, and eligibility to open `wss://`. Note the chapter's own qualification: a secure *context* is not a padlock, and this implementation keeps the indicator scheme- and proof-driven (spine Part I §4). |
 | [Mixed Content](https://www.w3.org/TR/mixed-content/) | W3C, Mixed Content | **§4.1** — the rule that makes this chapter's whole transport design necessary: a secure context may not open a plaintext `ws://`, and the reference engine enforces it in the renderer, before any proxy or handler could route it. |
@@ -71,7 +66,7 @@ extracted into this repository (SPEC.md, "Paths").
 |---|---|---|
 | [NIP-98](https://github.com/nostr-protocol/nips/blob/master/98.md) | Nostr, HTTP Auth (kind 27235) | **§5.3, §5.4** — the token the mediator mints and the application's server verifies: kind 27235, empty content, `u` / `method` / `payload` tags, a freshness window, and single use. `browser src/identity/receipt.js:174-218`, `browser src/identity/app-attest.js`. **DEVIATIONS AP-5** — the one place we depart from it: at a native origin the `u` tag is the application's canonical gateway origin, not the URL the request is sent to. |
 | [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md) | Nostr, Basic protocol flow description | **§5.3** — the event shape and id/signature rules NIP-98 builds on: the serialised id, the `pubkey` field, and the signature the application's server checks. |
-| [BIP-340](https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki) | Schnorr Signatures for secp256k1 | **§5.3, §5.4** — the signature algorithm over that event. The verifying server implements it independently (and vendors one implementation rather than two), which is the correct posture: the browser's signature is worth nothing until something the browser does not control has checked it. |
+| [BIP-340](https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki) | Schnorr Signatures for secp256k1 | **§5.3, §5.4** — the signature algorithm over that event. The verifying server implements it independently (and vendors one implementation rather than two), so authentication does not depend on trusting the browser's report. |
 | [NIP-05](https://github.com/nostr-protocol/nips/blob/master/05.md) | Nostr, Mapping Nostr keys to DNS-based internet identifiers | **§5.1** — one of the public facts the identity capability may return about the user's main name (`_@<name>.<base>`), and nothing more: it is a discoverable address, not a credential. `browser src/identity/app-identity.js`. |
 | [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750) | The OAuth 2.0 Authorization Framework: Bearer Token Usage | **§5.4** — the shape of the credential that carries a session after the one signed request: `Authorization: Bearer <token>`, treated as a bearer credential (high-entropy, constant-time compared, expiring, revocable, never in a URL). Cited for the pattern; no OAuth flow is involved. |
 | [FIPS 180-4](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf) | NIST, Secure Hash Standard (SHA-256) | **§5.3, §5.2** — the body hash in a NIP-98 `payload` tag, and the hash that pins an installed manifest's bytes. |
@@ -81,7 +76,7 @@ extracted into this repository (SPEC.md, "Paths").
 
 | Identifier | Title | Used for |
 |---|---|---|
-| `browser docs/WEBSOCKETS.md` | Wildroot, *WebSockets for Handshake apps (`wss://<name>`)* — the tunnel as built | **§4** in full: the constraint, the CONNECT mechanism, why not SOCKS5, the five fences with the port rule and the Tor route, the certificate gate, and the postmortem of the release that shipped and never connected once. It is the document this chapter's §4 is the specification of, and where the file-by-file map of the reference wiring lives. |
+| `browser docs/WEBSOCKETS.md` | Wildroot, *WebSockets for Handshake apps (`wss://<name>`)* — the tunnel as built | **§4** in full: the constraint, the CONNECT mechanism, why not SOCKS5, the five fences with the port rule and the Tor route, the certificate gate, and integration diagnostics. It is the document this chapter's §4 is the specification of, and where the file-by-file map of the reference wiring lives. |
 | `browser docs/MODES.md` | Wildroot, *Private mode and Fast mode* | **§4.4 fence 4** — the design of the one control, Settings › Content delivery › Mode, whose Private side routes the tunnel's upstream dial through Tor and whose fail-closed anonymizer produces the blocked state fence 4 refuses. Chapter 8 owns the circuit itself. |
 | `../../src/delivery-mode.js` | The one switch — Settings › Content delivery › Mode | **§4.4 fence 4** — `policyFor()`, the policy table whose `ipProtection` row (`tor` or `off`) the anonymizer is driven to by `DeliveryMode`; the tunnel reads the anonymizer's `isOn()` and `torSocks()`, never a flag of its own. `namespaces/tor/src/anonymize.js` is where `BLACKHOLE_RULES` and the blocked state live. |
 | `browser docs/HANDSHAKE-APPS-MEDIATOR.md` | Wildroot, the mediator as built | **§5** — the capability surface, the manifest store and the consent copy this chapter's §5 specifies the behaviour of (`browser src/apps/app-store.js`). |

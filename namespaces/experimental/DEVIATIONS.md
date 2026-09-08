@@ -1,8 +1,9 @@
 # Chapter 10 — Experimental: deviations and open questions
 
-Both parts of this chapter are experimental, so the whole file should be read
-with that word in front of it: these are not settled positions we are defending
-but a record of what ships and what we know is unresolved about it.
+This file records limitations and open questions for the experimental
+registry and numeric-name conventions. Remaining questions are
+tracked in [the content review](../../REVIEW.md). The numeric-name default
+below reflects the current classifier.
 
 Identifiers are prefixed `OP-` (Part A, HIP-5 `_op`) and `NT-` (Part B, numeric
 Handshake TLDs) so they cannot collide with another chapter's. The code is
@@ -22,7 +23,7 @@ the top-level name's ordinary NS records in two cases the route's own rationale
 argues against:
 
 1. **Every RPC endpoint failed or timed out.** Arguably this should be
-   `unreachable`, not "ask the box the contract exists not to trust".
+   `unreachable`, rather than querying the TLD operator's nameserver.
 2. **A sub-name of a sold name** (`www.maya.persist`) whose own namehash has no
    resolver in the registry also falls back.
 
@@ -36,8 +37,7 @@ is us, so this is a design point rather than a live exposure.
 
 **Consequence.** The exact weakness the registry exists to remove — the
 seller's nameserver answering for a name the seller no longer holds — is
-reachable by an attacker who can make every Optimism RPC endpoint fail. That is
-not a trivial capability, but it is not a high bar either.
+reachable by an attacker who can make every Optimism RPC endpoint fail. This depends on the attacker being able to disrupt every configured RPC endpoint.
 
 Not a fallback, deliberately: a **private or link-local address** from the
 registry is `blocked`, never retried against DNS.
@@ -51,12 +51,11 @@ pinned by a test (`../../tests/hip5-op.test.js`, "every RPC failing falls back
 
 ---
 
-### NT-1. Numeric Handshake top-level names: DECIDED 2026-09-06 — off by default, behind a switch
+### NT-1. Numeric Handshake top-level names: off by default, behind a switch
 
-**What.** An all-numeric final label is classified as a Handshake name
-(`../../src/router.js`: ICANN has no all-numeric top-level domains), and the
-`_` marker of SPEC Part B gives it a written URL form. Both are implemented and
-neither is committed.
+**What.** Numeric-name classification is optional and off by default.
+`setNumericNames()` in `../../src/classify-host.cjs` enables it. SPEC Part B
+defines the retained `_` marker for explicit URLs.
 
 **The standard says.** Nothing forbids a numeric Handshake label — Handshake
 labels are `[a-z0-9-]` and the registry sells them. The WHATWG URL Standard's
@@ -66,9 +65,9 @@ host parser is what makes them unwritable as URLs (NT-2).
 top-level name `14898`, so refusing them strands real registrations. Supporting
 them costs a written convention nobody else implements.
 
-**Consequence.** Until this is decided, anything written against Part B may
-have to be rewritten: links, documentation, and any other client's
-interoperation.
+**Consequence.** Bare numeric names are not automatically routed to Handshake
+unless the option is enabled. Clients using the explicit URL form must
+implement the marker convention.
 
 **Status.** DECIDED (Matt, 2026-09-06): pure-number names are excluded by
 default for simplicity. The resolution method and the `_` URL form of Part B
@@ -94,7 +93,7 @@ unmarked form. `../../src/hns-url.cjs`.
 **The standard says.** The WHATWG URL Standard's
 [host parser](https://url.spec.whatwg.org/#host-parsing) runs the
 ["ends in a number" checker](https://url.spec.whatwg.org/#ends-in-a-number-checker)
-for every special (standard) scheme and parses such a host as an
+for special schemes and parses such a host as an
 [IPv4 address](https://url.spec.whatwg.org/#concept-ipv4-parser). It provides no
 per-scheme opt-out, and `_` is not a
 [forbidden host code point](https://url.spec.whatwg.org/#forbidden-host-code-point),
@@ -103,7 +102,7 @@ all.
 
 **Why.** `hns:` is registered as a standard scheme to get a real web origin
 (Chapter 1 §5), which is the same decision that subjects the host to that
-parser. Something has to give, and every alternative is worse (SPEC B.4).
+parser. SPEC B.4 records the alternatives considered.
 
 **Consequence.** Every name under a numeric Handshake top-level name has two
 written forms, and any third party writing a link to one must know the
@@ -112,8 +111,7 @@ standing anywhere else, so a link written by this client may be dead in another
 Handshake client and vice versa.
 
 **Status.** OPEN. If a different convention gains traction anywhere else we
-would rather adopt it than defend this one — the value of a convention here is
-entirely in it being *one* convention (§NT-2.1).
+would rather adopt it than defend this one — a shared convention is needed for interoperable links (§NT-2.1).
 
 ---
 
@@ -134,9 +132,9 @@ person would naturally use — produces a link this browser cannot repair, where
 the same name written `hns://hello._14898/` works. Only `hns://` links to
 numeric names are reachable.
 
-**Status.** OPEN, and not fixable inside this codebase; it is a consequence of
-NT-1 being undecided. If numeric top-level names are supported, the answer is
-that they must be written `hns://` and the documentation has to say so.
+**Status.** The automatic classification policy is decided in NT-1.
+This URL-parser limitation remains: links to supported numeric names need
+the marked `hns://` form.
 
 ---
 
@@ -162,7 +160,7 @@ that an RPC-trusted answer should never close a lock, full stop.
 
 ### OP-2.2. One deployment is not a specification
 
-`persist` on Optimism mainnet is the only live `_op` registry, and it is ours.
+`persist` on Optimism mainnet is the registry deployment documented here.
 Every property in SPEC A.3 is a property of that contract, verified by reading
 it; none of them is enforced by the mechanism. A second registry that behaves
 differently — a `resolver(node)` that reverts rather than returning zero, a
@@ -183,16 +181,14 @@ exists to avoid. It is a measurement, not an argument, and it has not been made.
 
 ### NT-2.1. The marker is a local invention, and its value depends on being shared
 
-Two things about the convention we are unsure of beyond NT-1:
+Two interoperability questions remain after the default-off decision:
 
 - Whether the marker belongs on the **numeric label** (`hello._14898`) or as a
   **whole-host** marker. A prefix on the label is minimal and local; a host-wide
   marker would be uglier but would not change meaning depending on which label
   it lands on.
 - Whether other Handshake clients will do something different, at which point a
-  link written by one is dead in the other. **That is the reason this is
-  specified at all: if there is going to be a convention it should be one
-  convention, and we would rather adopt somebody else's than defend ours.**
+  link written by one is dead in the other. A shared convention would prevent incompatible links.
 
 ---
 
@@ -208,7 +204,7 @@ fetch — which ignores the session's proxy settings. An embedder that forgets
 the injection gets a route that works and leaks the user's address to the RPC
 endpoint, with nothing to notice.
 
-This matters more than it reads: the route runs while anonymization is on and is
+This affects privacy because the route runs while anonymization is on and is
 not gated (SPEC §A.6), so the default is the one place where a mode the user
 turned on for privacy can be defeated by an omission in an embedder rather than
 by a decision anybody made.
@@ -220,9 +216,8 @@ caller rather than invisible in the default.
 
 ### OP-D2. No light-client verification of the registry's answer
 
-The obvious next step, and the same one `ens://` wants: verify the storage slot
-against a block header, by a light client or an execution proof, at which point
-this hop could honestly report `verified` and close a trustless lock.
+A possible next step, also applicable to `ens://`, is to verify the storage slot
+against a block header, by a light client or an execution proof, which would allow the record step to report `verified` if that proof validates.
 
 **Recommendation.** Not now — the dependency is large and the route already
 degrades honestly. Revisit when a usable Optimism light-client or storage-proof
@@ -236,9 +231,8 @@ cases, including the trailing-dot case. What is not covered anywhere is the
 *path*: a typed `hello.14898`, through the classifier, through the URL
 construction, through a resolution, back to a displayed address bar.
 
-**Recommendation.** If NT-1 is decided in favour of supporting numeric
-top-level names, add that end-to-end test before anything else; if it is
-decided against, delete the convention rather than leaving it untested.
+**Recommendation.** Add an end-to-end test for both the opt-in classifier
+and explicit marked URLs, since both remain supported.
 
 ---
 

@@ -1,17 +1,13 @@
 # Chapter 9 — Key-addressed namespaces (hyper, SSB, Gemini, BitTorrent): deviations and open questions
 
-Every place this chapter's implementation departs from a standard it cites,
-from common practice in the namespace, or from its own stated design — plus
-every place we are not sure we have made the right call.
+Known deviations, unresolved questions and proposed changes for Hypercore, SSB, Gemini and BitTorrent identifiers, dispatch and trust states.
 
-The rule this file serves: **a deviation that is not written down is just a bug
-nobody has found yet.**
+Entries distinguish current behaviour from recommendations. Paths beginning
+`src/` or `tests/` are relative to this chapter; `../../src/` names shared
+modules. Browser paths refer to the Wildroot source tree. Historical line
+references may have moved since extraction.
 
-A note that colours all of it: **three of the five namespaces here are ten to
-thirty lines of Wildroot code in front of a third-party engine.** Part of what
-follows is therefore a deviation *inherited* rather than chosen. That is not an
-excuse — we ship it, so we own it — but it changes what "fix" means, and each
-entry says whether the fix is ours to make or requires a fork.
+[Chapter specification](SPEC.md) · [References](REFERENCES.md)
 
 ---
 
@@ -31,20 +27,11 @@ public key) presented by a host and refuses a different one on a later visit,
 because Gemini servers are expected to be self-signed and there is no CA to
 consult.
 
-**Why.** The store is not written. The rest of the client was adopted whole,
-and the missing half is invisible from the outside: a Gemini connection with no
-pinning looks exactly like one with pinning, until the day it matters.
+**Why.** No server-certificate store has been implemented.
 
-**Consequence.** An active network attacker between the user and a Gemini
-server can substitute a certificate, on the first connection or the thousandth,
-and nothing notices. Because a Gemini server's certificate *is* its identity,
-this removes the protocol's whole authentication story. Everything that
-describes the scheme says so plainly rather than papering over it — the scheme
-table's `verify` string leads with `none`, the trust panel's step says the
-certificate is "neither checked against an authority nor remembered from a
-previous visit", the handler's header comment says the same, and
-`docs/Fetch-Gemini.md` in the browser tree agrees — so the user is not told
-something false. They are told the truth about a control that is absent.
+**Consequence.** An active attacker can replace the certificate on any visit.
+The connection remains encrypted but has no server authentication. The scheme
+metadata and trust panel disclose that limit.
 
 **Status: OPEN.** Implement the store: pin the peer's SPKI SHA-256 on first
 sight, keyed by `host:port`, persist it, and on a mismatch fail closed with the
@@ -68,15 +55,11 @@ not read."*
 **The standard says.** BEP 9 permits a magnet's info-hash to be written either
 as 40 hexadecimal characters or as 32 base32 characters.
 
-**Why.** Hex is what every current client emits; base32 magnets are a decade
-old. Accepting one form keeps a single canonical key string for the whole
-scheme, which is what lets the magnet handler, the `bittorrent://` dispatcher
-and the torrents page share one definition (SPEC §K.7.1).
+**Why.** The implementation uses one canonical hexadecimal key form across
+the magnet handler, dispatcher and torrent-input parser (SPEC §K.7.1).
 
-**Consequence.** An old magnet link does not resolve. There is no security
-consequence: a base32 info-hash decodes to the same 20 bytes, so accepting it
-would be a normalisation rather than a weakening. Since the refusal names the
-form, the user is not sent looking for a fault in the magnet.
+**Consequence.** A valid base32 magnet is refused. Supporting it would require
+normalization to the same 20 bytes, without changing downstream semantics.
 
 **Status: OPEN**, low priority. The right fix is to decode base32 to the same
 20 bytes at the edge and carry on with the canonical hex string, so that
@@ -145,9 +128,8 @@ browser's own RFC 8484 or RFC 9230 code even if the endpoint were configurable.
    Handshake names is that the lookup is oblivious.
 2. **Integrity of the mapping.** A hostile or compromised answer names a
    *different* hypercore, whose contents then verify perfectly against the key
-   it supplied. This is said out loud: a dotted `hyper://` host gets two trust
-   steps, the mapping **unverified** and the content **verified**, the lock
-   stays open, and the scheme table's `verify` string carries the same
+   it supplied. This is said explicitly: a dotted `hyper://` host gets two trust
+   steps, the mapping **unverified** and the content **verified**, the verdict is `partial` / TRUSTED, and the scheme table's `verify` string carries the same
    qualification (SPEC §K.4.2, §K.9).
 
 **Status: OPEN.** The privacy half is a configuration change — set
@@ -209,7 +191,7 @@ than from the browser's. Not a security consequence: the info-hash the engine
 derives *is* the address, whatever the file claimed, so a malformed or hostile
 `.torrent` cannot make the browser fetch something under the wrong address.
 
-**Status: DELIBERATE.** Pinned by a test that says so out loud
+**Status: DELIBERATE.** Pinned by a test that says so explicitly
 (`tests/torrent-input.test.js`, "the .torrent check is a SHAPE check and claims
 nothing more"), so nobody later reads it as verification.
 
@@ -227,9 +209,8 @@ code is in this package**, and none of it is tested here.
 **The standard says.** The Hypercore protocol, the Scuttlebutt protocol guide,
 BEP 3 and BEP 46 each define a check this chapter's trust states depend on.
 
-**Why.** Reimplementing four peer-to-peer stacks to own their integrity checks
-is not a proportionate response, and a second implementation of a verifier is a
-second place to get it wrong.
+**Why.** The browser delegates protocol verification to the engines that
+retrieve the data.
 
 **Consequence.** The trust states this chapter specifies are only as true as
 those libraries are. A silent regression in any of them — a check made
@@ -238,9 +219,8 @@ here, and the padlock keeps saying verified. That is a materially weaker
 position than the Handshake chapter, where every signature an answer rests on
 is validated by code in this repository and tested against flipped bytes.
 
-**Status: DELIBERATE** as to the architecture. Whether the gap should be closed
-by a conformance test rather than a reimplementation is genuinely unsettled —
-see §2.3.
+**Status: DELIBERATE** architecture. Section 2.3 proposes independent
+conformance vectors for the delegated checks.
 
 ---
 
@@ -367,16 +347,12 @@ for any of them.
 accept an item with a lower sequence number than one it holds; Hypercore
 versions and SSB feed tips are the equivalent counters in their protocols.
 
-**Why.** It is not done. Each needs a small persistent store keyed by address
-and a policy for what to do on a regression.
+**Why.** Highest-seen values are not stored. Each protocol needs persistent
+state keyed by address and a policy for handling regressions.
 
-**Consequence.** An attacker who can influence which peers are reached can
-serve a real, correctly signed, **old** answer indefinitely, and nothing
-notices. This is a rollback attack, and it is the largest gap in this chapter's
-trust story — larger than any parsing deviation above, because it is invisible:
-every signature checks out. The trust steps say what they can, naming freshness
-as the thing a key does not establish (SPEC §K.9), but naming a gap is not
-closing it.
+**Consequence.** A peer can return an older, validly signed answer without
+triggering a rollback warning. The trust steps distinguish integrity from
+freshness, but the client does not detect this regression (SPEC §K.9).
 
 **Status: OPEN**, and not planned. The smallest honest version is one store
 keyed by address holding the highest sequence number, version or tip seen, a
@@ -426,18 +402,12 @@ KY-7 says plainly that every integrity guarantee in this chapter is a
 dependency's. Whether that is acceptable as it stands is the question we cannot
 settle.
 
-The argument for leaving it: reimplementing the checks is worse, and a
-conformance test against a live swarm is not deterministic.
+Delegation avoids duplicate protocol implementations, and live-swarm tests
+would be nondeterministic.
 
-The argument against: the Handshake chapter verifies every signature its
-answers rest on with code in this repository and tests each one against flipped
-bytes. Holding a different standard for these namespaces because they were
-easier to adopt is a reason of convenience, not of security. A deterministic
-offline vector for each — a hypercore block with a broken signature, a torrent
-piece that does not match its hash, an SSB message with a tampered chain, each
-asserted to be *rejected* — is buildable, and would turn "the library does it"
-into a fact we check. We think the second argument is right and have not acted
-on it.
+Offline negative vectors could still check each engine: a broken Hypercore
+signature, a mismatched torrent piece and a tampered SSB message chain. These
+would test the guarantees the browser reports without requiring a live swarm.
 
 ### 2.4. Dropping a magnet's trackers
 
@@ -474,13 +444,8 @@ because its *trust* model — TOFU — is the one place a name namespace behaves
 like a key namespace: the certificate's key becomes the identity after the
 first sight of it.
 
-That is a real similarity and we think it earns the placement. But a reader
-looking for "the key-addressed chapter" finds one namespace in it that is
-neither key- nor content-addressed and that verifies nothing at all, and may
-reasonably think it belongs with the ICANN/DNS material. It is also the one
-namespace here that Private mode **routes** instead of refusing (§K.3.6),
-which is one more way in which it is not like its neighbours. Nothing
-else in this chapter depends on it, so moving it costs nothing but the
+Gemini could be moved to a separate chapter or grouped with DNS-based
+protocols. No other section here depends on it; a move would require updating
 cross-references.
 
 ---
@@ -509,10 +474,8 @@ unmeasured.
 
 ### KY-D1. A Gemini certificate store
 
-The half of trust-on-first-use that carries the security is remembering the
-key, and no certificate is stored or compared (KY-1). Everything that describes
-the scheme already says so, so this is a missing control rather than a false
-claim — but it is the control the whole protocol's identity story rests on.
+KY-1 records the missing certificate store. Implementing it would add the
+persistent identity check required by TOFU.
 
 **Recommendation.** Pin the peer's SPKI SHA-256 on first sight, keyed by
 `host:port`, in a persistent store; on a mismatch fail closed with the wording

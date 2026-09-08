@@ -1,5 +1,8 @@
 # Chapter 9 — Key-addressed namespaces (hyper, SSB, Gemini, BitTorrent)
 
+> **Review pending:** [REVIEW.md](../../REVIEW.md) records unresolved questions
+> about Private-mode origin handling and delegated verification. The rewrite does not change runtime behaviour.
+
 **Version:** 0.1 (draft for public comment)
 **Status:** Describes the behaviour of the Wildroot browser's `hyper://`,
 `ssb://`, `gemini://`, `bittorrent://` / `bt://` and `magnet:` resolution, and
@@ -10,16 +13,10 @@ standard, that standard is cited and its rule governs.
 **Licence:** CC-BY-4.0 (`../../LICENSE-SPEC`). The reference implementation is
 licensed separately.
 
-This chapter is part of the integrated specification whose spine is
-[`../../SPEC.md`](../../SPEC.md), where namespace selection — which identifier
-belongs to which namespace, and the two routing laws that keep the boundary —
-is specified.
-
-The spine's terminology and trust-state definitions apply here unchanged; this
-chapter does not restate them. Deviations and open questions for this chapter
-live in [`../../DEVIATIONS.md`](../../DEVIATIONS.md) under the `KY-` prefix,
-and its references in `REFERENCES.md` beside this file. **Both are part of the
-specification, not appendices to it.**
+The [routing specification](../../SPEC.md) defines namespace selection and
+trust-state terms. This chapter covers Hypercore, SSB, Gemini and BitTorrent.
+See [deviations](DEVIATIONS.md) (`KY-` entries) and
+[references](REFERENCES.md) for limits and supporting sources.
 
 Key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT** and **MAY** are
 used as in RFC 2119 / RFC 8174.
@@ -44,10 +41,9 @@ used as in RFC 2119 / RFC 8174.
 
 ## K.1 What this specifies
 
-A **key-addressed** namespace is one where the identifier *is* the
-cryptographic object: a public key, or the hash of some content. There is no
-registry, no expiry and nobody to ask — the address either matches the bytes or
-it does not, and an implementation can check that on the device.
+The schemes in this chapter use public keys, content hashes or DNS names.
+Gemini is the DNS-based exception (§K.6). Each section identifies the accepted
+address forms and the checks performed by the handler or its dependencies.
 
 This chapter specifies, for each such namespace the browser speaks:
 
@@ -59,29 +55,19 @@ This chapter specifies, for each such namespace the browser speaks:
   **trusted** (a DHT, a tracker, a DNS resolver, a certificate nobody checked);
 - the **trust state** the namespace is entitled to expose.
 
-**Out of scope, and deliberately so.** The transport and the retrieval: piece
-selection, `Range` handling, streaming, rendering, caching, seeding policy,
-what an engine does with a socket. That is `docs/TORRENT-DESIGN.md`,
-`docs/BLOB-LAYER.md` and `docs/STREAMING-TRANSCODE.md` in the browser tree.
-This chapter ends at "which object does this address name, and how sure are
-we". Where a retrieval fact changes the *trust* answer — that a BitTorrent
-piece is checked against the infohash on arrival, for instance — it is stated
-once and cited, not specified.
+Transport and retrieval are outside this chapter: piece selection, ranges,
+streaming, rendering, caching and seeding policy. Browser documents
+`docs/TORRENT-DESIGN.md`, `docs/BLOB-LAYER.md` and
+`docs/STREAMING-TRANSCODE.md` cover those subjects. Retrieval checks that
+affect a trust claim are identified here.
 
-**A consequence worth stating plainly.** For three of these five schemes the
-browser is a *client of somebody else's engine*: `hyper-sdk` +
-`hypercore-fetch` for `hyper://`, `ssb-fetch` for `ssb://`, and `bt-fetch` for
-the mutable half of `bittorrent://`. The Wildroot modules that own them are ten
-to thirty lines each. Much of what this chapter specifies about those
-namespaces is therefore a description of a dependency's behaviour, verified by
-reading it, and the honest posture is to say so rather than to write it up as
-though we implemented it. Where the dependency does something we would not
-have chosen, it is in `../../DEVIATIONS.md`, not smoothed over.
+Hypercore uses `hyper-sdk` and `hypercore-fetch`; SSB uses `ssb-fetch`;
+mutable BitTorrent uses `bt-fetch`. Their network and verification behaviour
+is delegated to those engines. The extracted wrappers provide dispatch and
+lifecycle handling. Inherited limits are recorded in [DEVIATIONS.md](DEVIATIONS.md).
 
-The two namespaces with real code of our own are **BitTorrent** (§K.7) and
-**Gemini** (§K.6) — Gemini because the one decision that matters there, what a
-redirect does to an origin, cannot be delegated to a fetch wrapper. Those two
-are specified in detail.
+The package contains additional address and handler logic for BitTorrent
+(§K.7) and Gemini (§K.6), including origin-preserving redirect handling.
 
 ---
 
@@ -149,9 +135,8 @@ any key shape: a typed `c0ffee…` (40 hex), `dddd…` (64 hex) or a 52-characte
 z-base-32 string is a single label with a non-ICANN final label, so it
 classifies as a **Handshake name**, exactly as `pinner` does.
 
-This is a consequence, not a bug: no protocol was named, so there is nothing to
-infer from. An implementation **MAY** offer a key shape as an omnibox
-*suggestion*; it **MUST NOT** silently reclassify it.
+An implementation **MAY** suggest a protocol for a bare key-shaped string
+in the omnibox, but **MUST NOT** silently reclassify it.
 
 *(`tests/scheme-table.test.js`, "a bare key is NOT classified into any
 key-addressed namespace".)*
@@ -168,7 +153,7 @@ The one place this bites hardest is BitTorrent, which has two engines behind
 one scheme (§K.7.2): an infohash the streaming engine cannot serve **MUST NOT**
 be retried through the mutable-torrent engine. That would be a same-namespace
 fallback, which is permitted by L2 but forbidden here for a different reason —
-it would mask engine breakage forever.
+it would hide the selected engine's failure.
 
 ### K.3.4 Scheme privileges, and what canonicalisation does to a key
 
@@ -179,9 +164,8 @@ tuple origin `<scheme>://<host>`, service workers, `fetch`, CORS, streaming.
 `magnet:` URI has no host and no authority, and it is never an origin because
 it always redirects (§K.7.4).
 
-Being standard has a consequence this chapter has to state: **Chromium
-canonicalises the URL, and lowercases the host.** For these namespaces that is
-benign, and it is benign *by construction* rather than by luck:
+Chromium standard-scheme registration lowercases hosts. The address forms
+have these consequences:
 
 | Namespace | The host is | Case-safe? |
 |---|---|---|
@@ -206,15 +190,11 @@ Concurrent first requests share one construction. An engine that will not start
 produces a **500 carrying the engine's own message**, in that scheme's
 namespace, and is retried on the next request rather than latched as dead.
 
-The message matters. `hypercore`'s storage layer is a prebuilt native addon
-(`rocksdb-native`) that links `libatomic.so.1`; when that library is missing the
-loader throws away the real reason and reports `Cannot find addon '.'`, which
-sends a reader looking for a file that is sitting right there. The browser asks
-the loader directly on the failure path and rewrites the error with the
-library's name and the package to install
-(`src/protocols/native-addon-check.js`, not extracted — it is a diagnostic, not
-resolution). An implementation **SHOULD** surface the real dynamic-loader error
-rather than the loader wrapper's.
+For example, a missing `libatomic.so.1` dependency of `rocksdb-native` can
+surface as `Cannot find addon '.'`. The browser's
+`src/protocols/native-addon-check.js` reports the underlying library error.
+An implementation **SHOULD** expose the dynamic-loader error rather than only
+the wrapper's generic message.
 
 *(`tests/engine-lifecycle.test.js`.)*
 
@@ -250,11 +230,8 @@ switch is:
 > connection, so nothing was asked. Switch to Fast in Settings › Content
 > delivery to load it directly.
 
-Refusal rather than routing is not laziness: a swarm's UDP DHT and uTP cannot
-ride a SOCKS circuit at all, a TCP-only proxied swarm is a different and weaker
-engine, and the peer handshakes disclose the real address anyway (§K.11). The
-gate reads the live mode per request, so leaving Private mode lets the next
-request through with no restart.
+The current swarm transports are not routed through SOCKS. The gate reads
+the mode on each request, so switching to Fast takes effect without restart.
 
 **A named site is not refused.** The refusal is for *discovery* — asking
 strangers where content is. A Handshake name whose zone also states an
@@ -267,13 +244,9 @@ For a named site the private answer is a stated origin, not a mode; §K.8 is
 where a name reaches these namespaces, and this is the second half of what it
 inherits.
 
-`gemini://` is **routed**, and is therefore not behind the gate. Its transport
-is a single TCP connection to a single host, which is exactly what a SOCKS5
-proxy carries, so in Private mode the handler dials the capsule through the
-device-local Tor itself and refuses only when there is no Tor port to dial
-(§K.6.2). The two halves of the rule are both live in this chapter, which is
-the useful thing about it: the choice between them is made by what the
-transport *is*, not by how much trouble it is.
+`gemini://` uses Tor in Private mode. Its single TCP connection can be
+carried by SOCKS5; if no local Tor port is available, the handler refuses the
+request (§K.6.2).
 
 503 specifically in both cases, never an invented status: a protocol handler's
 status goes straight into Chromium's `net::GetHttpReasonPhrase()`, which
@@ -328,8 +301,7 @@ A host containing a `.` is treated as a DNS name and resolved:
 The answer is cached in memory and in a RocksDB store; when the DoH request
 fails, the cache answers.
 
-Three things about that are load-bearing and none of them is visible to the
-user:
+The DNSLink route has three relevant properties:
 
 - **The resolver is the engine's default and is not ours.** `hyperOptions` in
   `src/config.js` sets only `storage`, so `hyper-sdk`'s default resolver
@@ -382,11 +354,9 @@ The SSB URI specification's canonical form:
 ssb:<type>/<format>/<base64url-data>[/<base64url-extra>]
 ```
 
-Wildroot always presents the `ssb://…` variant (Chromium requires an authority
-for a standard scheme); `ssb-fetch` rewrites `ssb://` to `ssb:` before parsing,
-so the two are the same identifier. The URI *type* is therefore the URL's host
-and the key is in the path — which is what makes the scheme survive
-canonicalisation (§K.3.4).
+Wildroot uses `ssb://…`; `ssb-fetch` converts it to `ssb:` before parsing.
+The URI type occupies the host and the case-sensitive key stays in the path
+(§K.3.4).
 
 `ssb-uri2` validates the type/format pair and rejects anything else:
 
@@ -430,17 +400,14 @@ the URI form *before* they reach a URL parser.
 
 ## K.6 `gemini://`
 
-Gemini is the one namespace in this chapter that is **not** key-addressed. It
-is a name namespace with a TOFU trust model, and it is here because that trust
-model is the one place a name namespace behaves like a key namespace: the
-certificate's key becomes the identity after the first sight of it.
+Gemini uses DNS names and TLS. It is included here because its TOFU model
+can bind a host to a previously observed certificate key. This implementation
+does not yet store or compare that key (§K.6.2).
 
-The handler is the browser's own (`src/gemini-protocol.js`, byte-identical to
-`src/protocols/gemini-protocol.js` in the Wildroot tree) over the
-`@derhuerst/gemini` client. It exists rather than a library fetch wrapper for
-one reason: **a Gemini redirect is a resolution decision**, and on a scheme
-registered standard and secure it decides which host's bytes end up under which
-origin (§K.6.3).
+`src/gemini-protocol.js` is extracted from the browser's
+`src/protocols/gemini-protocol.js` and uses `@derhuerst/gemini`.
+The wrapper controls redirects so that cross-host responses do not retain the
+original host's origin (§K.6.3).
 
 ### K.6.1 Identifier syntax and lookup
 
@@ -451,7 +418,7 @@ The host is a DNS name, and **who resolves it depends on the mode**:
 
 | Mode | Who resolves the host | Consequence |
 |---|---|---|
-| Fast | Node's `tls.connect()`, i.e. the operating system's resolver | the lookup is in the clear: it does not go through the browser's DoH policy, its Oblivious DoH, or the Handshake resolver, so one scheme looks its hosts up in the open while every other lookup the browser makes is encrypted (D **KY-8**) |
+| Fast | Node's `tls.connect()`, i.e. the operating system's resolver | the lookup uses operating-system settings, outside the browser's DoH, ODoH and Handshake policies (KY-8) |
 | Private | the device-local Tor, from the name itself | no local lookup happens at all: the socket is dialled through SOCKS5 with the host as `ATYP` domain (§K.6.2), so the operating system's resolver is never asked |
 
 A Gemini host that is a Handshake name does not resolve on either route: nothing
@@ -494,38 +461,28 @@ implementation that routes this scheme through a proxy **MUST** hold all three:
    Falling back to a direct dial would leak the address the mode exists to
    hide, which is the rule of §K.3.6.
 
-Because the scheme is routed rather than gated, `gemini://` is the one namespace
-in this chapter that keeps working in Private mode. What it does not
-gain is any trust: the paragraphs below are unchanged by the route, and the
-capsule sees a Tor exit's address instead of the user's — an anonymity
-property, not an authentication one.
+Private mode changes the connection's route and visible client address.
+It does not authenticate the Gemini server.
 
 The Gemini specification's whole security model is TOFU: a client remembers the
 certificate (or its public key) it saw for a host and refuses a different one
 later, because Gemini servers are expected to use self-signed certificates and
 there is no CA to consult.
 
-**This implementation does the first half and not the second.** There is no
-certificate store, no fingerprint is recorded, and nothing is ever compared.
-Every certificate is accepted, on every connection. That is not
-trust-on-first-use; it is trust-always, which is the security of plain HTTP
-with the latency of TLS.
+The handler accepts every certificate on every connection. It has no
+certificate store, saved fingerprint or comparison with a previous visit.
+The connection is encrypted but unauthenticated.
 
-Everything that describes the scheme says exactly that and nothing more: the
-handler's own header comment, the scheme table's `verify` string (§K.3.1), the
-trust panel's step (§K.9) and `docs/Fetch-Gemini.md` in the browser tree all
-say the connection is encrypted, the certificate is not verified, and nothing
-is pinned. The gap is D **KY-1**; the store that would close it is
-`../../DEVIATIONS.md` §3, **KY-D1**.
+The handler, scheme table and trust panel report this lack of certificate
+verification. KY-1 records the gap; KY-D1 proposes a persistent store.
 
 There is consequently no Gemini identity: no client certificates, and no
 transient-certificate sessions. The underlying library carries a
 client-certificate store and the hooks for one; they are not enabled.
 
-An implementation **MUST NOT** describe a connection like this as TOFU, in a
-scheme table, a document or a padlock. Accepting the first certificate is the
-easy half; a client that does not remember it has implemented none of the
-model's security.
+An implementation **MUST NOT** describe this connection as TOFU in metadata,
+documentation or the interface. TOFU requires storing the first certificate
+or key and checking subsequent connections against it.
 
 ### K.6.3 Redirects, which are decided here
 
@@ -588,16 +545,15 @@ the words the capsule chose.
 | | |
 |---|---|
 | **Verified by construction** | Nothing. |
-| **Trusted** | The name→address answer — the operating system's resolver in the clear in Fast mode, the device-local Tor in Private mode (§K.6.1) — and the TLS peer (any certificate, remembered nowhere). |
+| **Trusted** | The name→address answer — the operating system's resolver in Fast mode, the device-local Tor in Private mode (§K.6.1) — and the TLS peer (any certificate, remembered nowhere). |
 | **Bounded rather than trusted** | Redirects: same-host only, five at most, and any other target is handed back to the browser as a navigation or refused (§K.6.3). |
-| **Trust state** | Open — encrypted, unauthenticated (§K.9). |
+| **Trust state** | `partial` / TRUSTED — encrypted, unauthenticated (§K.9). |
 
 ---
 
 ## K.7 `bittorrent://`, `bt://` and `magnet:`
 
-The namespace with real code of our own. `bittorrent` and `bt` are **one
-namespace** with **two engines behind it**, split on the shape of the key.
+`bittorrent` and `bt` share a namespace with two engines selected by key shape.
 
 ### K.7.1 Identifier syntax
 
@@ -618,10 +574,8 @@ export const INFO_HASH_MATCH = /^urn:btih:([a-f0-9]{40})$/i
 export const PUBLIC_KEY_MATCH = /^urn:btpk:([a-f0-9]{64})$/i
 ```
 
-Neither carries the `g` flag, deliberately: a global regular expression at
-module scope keeps `lastIndex` across calls, and a successful `.exec()` made
-the *next* identical magnet silently miss — every second navigation failed.
-A regular expression used as a validator **MUST NOT** be global.
+The regexes omit `g` because validators must not retain `lastIndex` between
+calls. A regular expression used as a validator **MUST NOT** be global.
 
 - **40 hex** — a BEP-3 v1 infohash: the SHA-1 of the bencoded `info`
   dictionary. Immutable: the address is the content.
@@ -633,14 +587,9 @@ Only the **hex** infohash form is accepted. BEP-9 also permits a 32-character
 base32 infohash in a magnet; it is refused (D **KY-2**). BitTorrent v2
 (`urn:btmh:`, BEP-52) is not served (D **KY-3**).
 
-Both are refused **by name**. A magnet carrying a `urn:btmh:` is told it
-carries only a BitTorrent v2 infohash, which this browser does not read; one
-carrying a base32 `urn:btih:` is told it writes its infohash in the base32
-form, which this browser does not read; and "Magnet has no bittorrent
-infohash" is kept for a magnet of which it is true. An implementation
-**SHOULD** refuse a form it recognises and cannot use by naming it: a refusal
-that describes a *different* identifier sends its reader looking for the wrong
-fault.
+Unsupported v2 and base32 magnets receive errors naming the unsupported
+form. "Magnet has no bittorrent infohash" is reserved for other invalid
+values. An implementation **SHOULD** name a recognized form it cannot use.
 
 ### K.7.2 Dispatch, and the boundary inside the namespace
 
@@ -651,11 +600,9 @@ fault.
 anything else  →  the mutable/petname engine (bt-fetch)
 ```
 
-This is scheme-**internal** dispatch on the key type, which is a resolution
-decision. It is not a failure fallback: an infohash the streaming engine cannot
-serve is returned as *that* engine's failure — a 502 tagged
-`X-Resolution-Namespace: bittorrent` — and is **never** retried through the
-other branch. A fallback there would mask engine breakage forever.
+Dispatch is selected before retrieval. A streaming-engine failure returns
+502 with `X-Resolution-Namespace: bittorrent` and is never retried through
+the mutable engine.
 
 `src/torrent-address.js` carries this decision (`infohashOf`) with the engine
 removed.
@@ -719,16 +666,14 @@ Two rules make that precedence stable, and both are pinned by tests:
 
 ### K.7.5 Consent: a clicked magnet adds nothing
 
-A magnet handled as above would start peer traffic the moment it was clicked,
-because the `bittorrent://` handler adds whatever infohash it is asked for so
-it can stream. Every other browser asks first.
+Following the redirect directly would start peer traffic because the torrent
+handler adds the infohash before streaming.
 
-So navigation is rewritten one layer up: `magnetToTorrentsPage()` maps an
-infohash magnet to `wildroot://torrents?add=<hash>[&dn=<name>]`, a page that
-shows an "Add this torrent?" card and adds **nothing** until the user says so.
-The display name rides along, truncated to 200 characters and percent-encoded,
-so the card can name the torrent before any metadata has been fetched —
-otherwise the user would be asked to approve a bare 40-hex string.
+`magnetToTorrentsPage()` rewrites an infohash magnet to
+`wildroot://torrents?add=<hash>[&dn=<name>]`. That page asks the user to add
+the torrent before starting it. The optional name is truncated to 200
+characters and percent-encoded, so the prompt can identify the link without
+fetching metadata.
 
 An implementation **MUST NOT** begin peer traffic for a magnet the user merely
 followed a link to. The rewrite **MUST** be applied at every navigation entry
@@ -794,10 +739,8 @@ bt=<40 hex | 64 hex>      infohash (immutable) or BEP-46 public key
 hyper=<52 z32 | 64 hex>   hypercore drive key
 ```
 
-with precedence `ipfs` → `ipns` → `bt` → `hyper` → `ar`: the peer-to-peer
-swarms come after IPFS because they need a peer to be online, and before
-Arweave because Arweave is the paid permanent backstop, not the thing you serve
-first.
+Precedence is `ipfs` → `ipns` → `bt` → `hyper` → `ar`, from the shared
+pointer table.
 
 Three properties an implementation **MUST** preserve:
 
@@ -822,12 +765,9 @@ agree. See `../../DEVIATIONS.md` §3, **KY-D6**.
 
 ## K.9 Trust states
 
-The spine defines the lock states and the five verdicts they aggregate to. What
-a *user* is told about an address in this chapter is produced by `schemeSteps()`
-in `../../src/trust-path.js`, and every scheme here has its own case: nothing in
-this chapter falls through to the default sentence, *"this browser has no
-verification path for this scheme"*, which is reserved for a scheme nobody has
-thought about.
+`schemeSteps()` in `../../src/trust-path.js` supplies the following trust
+steps. The routing specification defines their aggregation into a verdict and
+lock state.
 
 | Address | Steps | Verdict, and the lock |
 |---|---|---|
@@ -839,16 +779,10 @@ thought about.
 | `gemini://host/` | **Connection, unverified** — "Gemini over TLS, certificate not verified … neither checked against an authority nor remembered from a previous visit, so nothing establishes who answered." | `partial` — TRUSTED |
 | `magnet:…` | **Address, none** — "A magnet link is only a pointer to a torrent; nothing loads until it is added." | `partial` — TRUSTED |
 
-**No address in this chapter is OPEN, and `gemini://` is the interesting case.**
-The spine reserves OPEN for a `Connection` step of `none` — a transport that
-carries no protection at all — and Gemini's connection is TLS, so its step is
-`unverified` rather than `none` and the verdict is `partial`. The distinction is
-worth holding: "encrypted by nobody in particular" and "not encrypted" are
-different failures, and an implementation that collapsed them would either
-flatter plain HTTP or slander TLS. The scheme table's `trust` word for `gemini`
-is accordingly `trusted`, not `open`, and the reference tree holds the panel to
-that row for every scheme by test (`tests/hns/lock-semantics.test.js` in the
-browser tree).
+The reference model reserves OPEN for a `Connection` step of `none`.
+Gemini's encrypted but unauthenticated connection is `unverified`, producing
+`partial` / TRUSTED. The browser's `tests/hns/lock-semantics.test.js` checks
+the panel against the scheme table.
 
 Five properties of that table are normative for this chapter.
 
@@ -886,22 +820,17 @@ does.)*
 
 ## K.10 `web+…` and other registered schemes
 
-**There are none, and one cannot be added by accident.**
+The scheme table contains no `web+…` handlers.
 
-A reader arriving from the `web+…` custom-handler mechanism will want to know
-where it sits in this router. The scheme table has no `web+` row, `namespaceForScheme('web+…')`
-returns `null`, and `ProtocolRouter.register()` throws for any scheme without a
-row — so a handler cannot be wired in without first writing down its namespace
-and its verification story. A `web+…` URL therefore reaches dispatch, finds no
-handler, and is answered **501, tagged with its own scheme**: recognised,
-refused, and not reinterpreted as anything else.
+`namespaceForScheme('web+…')` returns `null`, and
+`ProtocolRouter.register()` rejects schemes without table rows. A `web+…`
+URL therefore returns 501 tagged with its own scheme and is not reclassified.
 
 The browser also does not call `navigator.registerProtocolHandler`, so no page
 can add one.
 
-The correct reading is that `web+…` is a *custom-handler* mechanism for web
-pages, not a namespace, and it has no place in a resolution router that
-requires a verification story per scheme.
+`web+…` is a custom-handler mechanism, not a namespace defined by this
+specification.
 
 *(`tests/scheme-table.test.js`, "no `web+…` scheme is registered".)*
 
@@ -909,9 +838,9 @@ requires a verification story per scheme.
 
 ## K.11 Security considerations
 
-**A self-authenticating address moves the attack, it does not remove it.**
-Every namespace here makes forged *bytes* impossible and leaves four things
-open, and an implementation should be explicit about all four:
+Integrity checks for key- and content-addressed forms do not establish
+availability, freshness or privacy. Gemini has no server authentication
+(§K.6.2). The remaining risks are:
 
 1. **Withholding.** A DHT, a swarm, a tracker or a set of SSB peers can simply
    not answer. Every namespace here fails open in the availability sense and
@@ -941,13 +870,8 @@ open, and an implementation should be explicit about all four:
    lookup, and nothing else: every Gemini connection in the session shares the
    same circuits, because no SOCKS credential is sent (Chapter 8, TO-3).
 
-**And one that is not about the network at all.** Four of these five schemes are
-registered *standard and secure*, which gives them a real, persistent tuple
-origin — storage, service workers, secure-context APIs. For a key address that
-is exactly right: the origin *is* the key, so the origin boundary is the
-cryptographic boundary. For `gemini://` the origin is a DNS host reached over a
-certificate nobody checked, so the boundary is only as good as the name — which
-is why the one thing that could *move* content across it, a redirect, is
-decided by this implementation rather than a library: same-host only, bounded
-at five, and any other target handed back to the browser as a navigation the
-address bar follows (§K.6.3).
+Scheme privileges also affect isolation. Standard, secure schemes receive
+persistent origins, storage and service-worker support. A key-addressed
+origin follows its key; Gemini's origin follows a DNS host whose certificate
+is not authenticated. The Gemini redirect rules keep cross-host responses
+from being served under the original origin (§K.6.3).

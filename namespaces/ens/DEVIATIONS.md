@@ -1,38 +1,37 @@
 # Chapter 5 — ENS and `web3://`: deviations and open questions
 
-Every place this chapter's implementation departs from a standard it cites,
-from common ENS-client practice, or from its own stated design — plus every
-place we are not sure we have made the right call, and every design item that
-is open.
+Known deviations, unresolved questions and proposed changes for ENS website resolution, CCIP-Read and the separate `web3://` handler.
 
-The rule this file serves is the spine's: **a deviation that is not written
-down is just a bug nobody has found yet.**
+Entries distinguish current behaviour from recommendations. Paths beginning
+`src/` or `tests/` are relative to this chapter; `../../src/` names shared
+modules. Browser paths refer to the Wildroot source tree. Historical line
+references may have moved since extraction.
+
+[Chapter specification](SPEC.md) · [References](REFERENCES.md)
 
 ---
 
 ## 1. Deviations
 
-### EN-1. Only `contenthash` is read; `addr`, `text` and the rest are not
+<a id="en-1-only-contenthash-is-read-addr-text-and-the-rest-are-not"></a>
 
-**What.** One record, one call. No address record, no text records, no avatar,
-no multichain address records, no ENS metadata.
+### EN-1. Website resolution with a limited text-record display
 
-**The standard says.** ENS resolvers expose a profile of records — EIP-137
-`addr(bytes32)`, ENSIP-5 `text(bytes32,string)` and ENSIP-9 multichain
-addresses among them — and a general ENS client reads whichever it needs.
+**Current behaviour.** Navigation resolves `contenthash`. Since 2026-09-06,
+the no-website page also reads seven ENSIP-5 text keys: `url`, `description`,
+`avatar`, `email`, `com.twitter`, `com.github` and `org.telegram`.
+Those values are displayed as escaped text, capped at 512 characters; only
+an HTTPS `url` becomes a link. They are not fetched. See SPEC §5.6a and
+`src/ens-protocol.js` (`textRecords`, `textRecordsHtml`).
 
-**Why.** The scheme's job is to open a name as a **website**. Every other
-record belongs to a wallet or a profile viewer, and reading them would put a
-per-navigation cost on every ENS name for data nothing renders.
+**Scope.** This remains a browsing client. It does not resolve payment
+addresses, multichain address records or primary names. The text display runs
+only for a `no-content` result, so successful website navigations do not incur
+those additional lookups.
 
-**Consequence.** A name that publishes only an address is reported as having no
-website — and the error page says so in those words, rather than implying the
-name does not exist. A user who wants the profile does not get one here.
-
-**Status: DELIBERATE.** This chapter specifies browsing, not ENS. Reading a
-record nothing displays would add a lookup, a failure mode and a disclosure to
-the RPC endpoint for no user-visible result. A "name info" panel would be the
-place for the rest, and there is no such panel.
+**Status: IMPLEMENTED WITH LIMITED SCOPE.** A name with no website can expose
+the selected descriptive records. Each value is read through the same trusted
+RPC and Universal Resolver path as the content pointer.
 
 ---
 
@@ -47,19 +46,14 @@ what the callback does with the gateway's answer is the contract's business;
 it defines no way to signal, and no obligation to distinguish, the strength of
 that check.
 
-**Why.** Without an Ethereum light client, the registry read, the resolver
-address, the revert and the callback result all arrive on the word of an RPC
-endpoint. **A "verified storage proof" we learned about from an endpoint that
-could equally have invented it is not evidence of anything.** Grading would
-show the user a difference the client cannot observe. Payload size and revert
-shape make the two partly distinguishable, which is exactly the temptation.
+**Why.** The RPC endpoint supplies the resolver address, revert and callback
+result without a locally verified Ethereum state. The client cannot establish
+which callback verification actually ran.
 
-**Consequence.** A genuinely rigorous offchain resolver gets no credit for it
-here.
+**Consequence.** Stronger checks performed by a resolver do not change this
+client's trust verdict.
 
-**Status: DELIBERATE**, and conditional on the light client — see §2.2. A lock
-that reports a distinction the client cannot check is worse than one that
-reports the weakest hop honestly.
+**Status: DELIBERATE**, conditional on the absence of a light client (§2.2).
 
 ---
 
@@ -74,9 +68,8 @@ reports the weakest hop honestly.
 resolution answers "what does this address call itself", which is a wallet's
 question.
 
-**Consequence.** None for resolution. Named because an ENS chapter that omitted
-it silently would look like it had forgotten it, and because reverse records are
-where a name-display feature would have to start.
+**Consequence.** Website resolution does not expose reverse names. A future
+address-display feature would need this record profile.
 
 **Status: DELIBERATE.**
 
@@ -103,8 +96,7 @@ differently on the two routes. No such name exists today (the label sets do not
 overlap in the deployed registries), but an implementer copying one route's
 normalisation into the other would be wrong in both directions.
 
-**Status: DELIBERATE**, and worth stating rather than leaving as an
-inconsistency a reader has to discover.
+**Status: DELIBERATE.** Each route uses its namespace's normalization rules.
 
 ---
 
@@ -150,13 +142,10 @@ any CCIP round trip. The ENS registry's own `ttl(bytes32)` is never read.
 **The standard says.** EIP-137 gives every node a TTL, `ttl(bytes32)` on the
 registry, for exactly this purpose.
 
-**Why.** No reason beyond that nothing builds it. The Handshake path next door
-has a flat 60-second positive cache and is the model.
+**Why.** A cache has not been implemented.
 
-**Consequence.** Latency, and — more importantly — **disclosure volume**: the
-RPC endpoint and any CCIP gateway see one request per navigation rather than
-one per cache lifetime. For a scheme whose stated privacy problem is "the
-endpoint learns which names you open", re-asking is the wrong default.
+**Consequence.** Repeated navigations increase latency and the number of
+requests observed by RPC endpoints and CCIP gateways.
 
 **Status: OPEN.** A short positive cache keyed by the normalised name,
 invalidated the way the Handshake resolver's `forget()` works, is the whole
@@ -172,7 +161,7 @@ answer.
 
 | Thing | Why not |
 |---|---|
-| **ENS text records** (`text(bytes32,string)`) — `url`, `description`, `com.twitter`, the avatar | Nothing renders them. They would be the natural content of a "name info" panel, which does not exist. |
+| **Full ENS text profile** (`text(bytes32,string)`) | Seven keys are read on the no-website page (EN-1). General profile browsing is not implemented. |
 | **Multichain address records** (ENSIP-9) | A wallet's job, not a browser's. |
 | **`Registry.ttl(bytes32)`** | Nothing caches (EN-6), so there is nothing for a TTL to govern. |
 | **ENS on an L2, read natively** | Reached through CCIP-Read (SPEC §6) like every other client without an L2 light client. Reading the L2 directly would swap one trusted RPC for another. |
@@ -181,8 +170,7 @@ answer.
 **The standard says.** Each row's own specification defines behaviour this
 implementation does not provide.
 
-**Consequence.** This is an ENS *browsing* client, not an ENS client. Anything
-that needs a record other than `contenthash` needs a different tool.
+**Consequence.** This is an ENS *browsing* client, not an ENS client. Wallet records and general profile browsing remain outside its scope.
 
 **Status: DELIBERATE** for every row except the light client, which is
 **OPEN** and is the only one that would change a trust state.
@@ -213,9 +201,8 @@ the resolver address, the record, and the CCIP callback, with nothing anchoring
 any of it. A reasonable implementer could hold that an entirely RPC-trusted
 answer should never close a lock.
 
-We ship TRUSTED and we are not certain. What we are certain of is that the
-verdict must be one thing everywhere — shipping one verdict while the comments
-describe another is worse than either answer — and it is.
+The current choice is TRUSTED. Any change needs to update the handler,
+metadata, trust panel, documentation and tests together.
 
 ### 2.2. Would grading CCIP rigour become right, with a light client?
 
@@ -250,13 +237,10 @@ age, and there is no mechanism here for noticing when it has.
 
 ### 2.5. Pinning the Universal Resolver address
 
-One address is hardcoded and the one in the bundled chain registry is ignored.
-Ours is verified and is the DAO-owned proxy; theirs is an older deployment. But
-"hardcode a contract address in a browser and ignore the registry that ships
-with your dependency" is a maintenance trap with a long fuse, and the failure
-mode when ENS moves is that every `.eth` name stops resolving at once. A
-verified-at-build-time list, or reading the registry and *checking* it against
-a known-good, would both be better. We have not decided which.
+The Universal Resolver address is pinned and the bundled registry entry is
+ignored. Maintaining that pin requires checking future ENS deployments. Options
+include a list verified at build time or validating the registry entry against
+a known deployment.
 
 ### 2.6. `web3://`'s privilege posture
 

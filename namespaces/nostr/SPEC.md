@@ -1,30 +1,24 @@
 # Chapter 6 — Nostr
 
 **Version:** 0.1 (draft for public comment)
-**Status:** Describes the behaviour of the reference implementation in
-`namespaces/nostr/src/`, which ships in the Wildroot browser. Not endorsed by
-any standards body, and emphatically not by the NIPs repository. Normative
-statements describe what an implementation must do *to interoperate with this
-one*; where a rule is inherited from a NIP or an RFC, that document is cited
-and its text governs.
+**Status:** Describes the reference implementation in `namespaces/nostr/src/`.
+Normative requirements define compatibility with this implementation. Cited
+standards govern requirements inherited from them. This is a project
+specification, without endorsement from a standards body or the NIPs maintainers.
+
 **Licence:** CC-BY-4.0 (`../../LICENSE-SPEC`). The reference implementation is
 licensed separately (Apache-2.0, `../../LICENSE`).
 
-This chapter is part of the integrated specification whose spine is
-[`../../SPEC.md`](../../SPEC.md), and namespace selection — which input reaches
-which chapter — is specified there.
+This chapter follows the namespace-selection and trust-state rules in
+[`../../SPEC.md`](../../SPEC.md). Nostr identifies authors by public key and
+authenticates individual events. Relays do not prove that their responses are
+complete or current.
 
-The spine's house rules apply here unchanged: its four trust states, its
-namespace-selection rule, its fail-closed requirement. This chapter says what
-they mean for Nostr, which is a different kind of naming system: it has no
-chain, no zone, no delegation and no authoritative server, and the honest
-answer it produces is weaker than a Handshake one in a way this chapter is
-written to make impossible to miss.
+See [DEVIATIONS.md](DEVIATIONS.md) for `NO-` deviations and open questions,
+and [REFERENCES.md](REFERENCES.md) for the cited standards.
 
-Every deviation from a cited standard, and every question we are unsure of, is
-in [`../../DEVIATIONS.md`](../../DEVIATIONS.md) under the `NO-` prefix. Every
-standard cited is listed with its purpose in `REFERENCES.md`. **Both are part
-of this specification, not appendices to it.**
+> **Review note:** [REVIEW.md](../../REVIEW.md) records contradictions and
+> technical claims awaiting a decision. This rewrite does not resolve them.
 
 ---
 
@@ -48,45 +42,19 @@ used as in RFC 2119 / RFC 8174.
 
 ## 1. What this specifies, and why
 
-Nostr has no names. It has **keys** — a 32-byte secp256k1 x-only public key is
-the whole of an identity — and **relays**, which are dumb stores that anyone
-can run and nobody is required to be honest. The interesting thing about the
-design, and the reason it belongs in a document about resolution, is that this
-combination gives a client an unusually clean guarantee and an unusually bad
-one at the same time:
+Nostr events identify their author with a 32-byte secp256k1 x-only public key.
+Each event carries an id derived from its contents and a BIP-340 signature.
+The client checks both locally (§6), then checks that the event matches the
+requested identifier (§9.3).
 
-- **Unusually clean:** every object is self-authenticating. An event carries
-  its author's public key and a BIP-340 signature over an id which is a hash of
-  the event's own contents. A client that recomputes the id and checks the
-  signature — *locally, in its own process* — needs to trust nothing about
-  where the bytes came from. A relay that alters one byte produces an id that
-  no longer matches. A relay that invents an event cannot sign it.
+These checks establish authorship and answer binding. They do not establish
+completeness or freshness: a relay can omit events or return an older matching
+event. Querying several relays improves coverage without proving that every
+matching event was found.
 
-- **Unusually bad:** nothing whatsoever is proven about *completeness* or
-  *currency*. A relay can withhold. A relay can answer a question with an
-  event other than the one asked for — which the client can and must catch by
-  matching the answer against the question (§9.3), because the signature never
-  will. The set of relays a client asks is a guess. There is no root, no
-  quorum, no proof of absence, and — this is the part that has no fix — **no
-  way to establish that you were shown everything, or the newest thing.** A
-  profile you are reading may have been replaced an hour ago on a relay you did
-  not ask.
-
-This chapter specifies what a client may therefore conclude. Its thesis is
-one sentence: **the protocol proves authorship, and everything about the
-*answer* is the client's own work.** The distinction is not pedantry. A green
-tick that means "this event is genuinely signed by *somebody*", placed next to
-a page headed "the note you asked for", is a lie by adjacency unless the client
-has itself established that the event is the one asked for. §9.3 is how that is
-established and §10.2 is the rule for showing it.
-
-It also specifies the two mappings that turn something a human can type into a
-key: **NIP-19** bech32 identifiers (`npub1…`, `note1…`, `nprofile1…`,
-`nevent1…`, `naddr1…`) carried in a **NIP-21** `nostr:` URI, and **NIP-05**
-`<local>@<domain>` addresses resolved over ordinary HTTPS. The second of those
-is not cryptographic at all, and §7 says so at length, because a name→key
-mapping that rests on WebPKI is the weakest link in every Nostr client and is
-routinely presented as if it were a verification.
+This chapter also specifies NIP-19 identifiers, the NIP-21 `nostr:` URI, and
+NIP-05 name-to-key lookups over HTTPS. A NIP-05 result is a domain's assertion
+of a mapping, with the WebPKI trust limits described in §7.
 
 ### 1.1 Scope
 
@@ -106,9 +74,8 @@ becomes one of
 together with the **trust state** that says which parts of that answer were
 proven and which were taken on somebody's word (§4).
 
-**Out of scope, explicitly.** Everything a *social client* does. The Wildroot
-browser contains one — `src/social.js`, `src/nostr/`, `src/pages/social/` — and
-it is not specified here and not extracted into `src/`:
+**Out of scope:** social-client features. The browser's `src/social.js`,
+`src/nostr/` and `src/pages/social/` implement these separately.
 
 | Out of scope | Why it is a different document |
 |---|---|
@@ -119,9 +86,7 @@ it is not specified here and not extracted into `src/`:
 | **The user interface** | §4 specifies the model an interface must be given and the claims it must not make. It does not specify a rendering. |
 | **Nostr itself** — relay operation, spam control, NIP process | Cited (`REFERENCES.md`), not restated. |
 
-A consequence worth stating plainly: an implementation of this specification is
-a **resolver**, not a Nostr client. It answers "what does this identifier
-name, and how sure are we?" and stops there.
+The resolver returns an identifier result and its trust state; social-client behaviour is outside this chapter.
 
 ---
 
@@ -157,9 +122,8 @@ Terms specific to this chapter:
 
 ## 3. Namespace selection
 
-Nostr is a namespace in the sense of the spine's `../../SPEC.md` §3
-and `docs/RESOLUTION-ROUTER.md`: a distinct address space with its own root of
-trust (a public key). The two structural rules apply unchanged.
+Nostr is a separate address space under `../../SPEC.md` §3 and
+`docs/RESOLUTION-ROUTER.md`. Its root of trust is a public key.
 
 **L1 — an explicit scheme selects the namespace.** An input beginning `nostr:`
 **MUST** be routed to a Nostr resolver and **MUST NOT** be re-inspected,
@@ -175,8 +139,7 @@ not decode, or that no relay can answer, **MUST** fail as a Nostr failure. It
 "try Nostr, then fall back". This is the rule of RFC 9498 §9.10, adopted
 repository-wide.
 
-**What is *not* a Nostr identifier.** Two boundaries are easy to get wrong and
-are drawn here explicitly:
+**Related inputs follow separate routing rules:**
 
 1. **A Handshake name that publishes a Nostr key is a Handshake name.** The
    Wildroot design has a name's zone answer for its owner's Nostr identity — a
@@ -194,12 +157,9 @@ are drawn here explicitly:
    answers; the omnibox classifier has no row for it at all — a scheme-less
    input carrying a single `@` is a search — and treats it as neither (NO-1).
 
-**A bare NIP-19 identifier is classified as Nostr.** `npub1…`, `note1…`,
-`nprofile1…`, `nevent1…`, `naddr1…` and `nsec1…` are self-describing: the
-human-readable part *is* the type, and a bech32 checksum makes a false positive
-a 1-in-2³⁰ event. A pasted identifier is the most common Nostr address there
-is, and almost nobody types the scheme, so an implementation **MUST** route one
-without requiring `nostr:`.
+**A bare NIP-19 identifier is classified as Nostr.** Implementations **MUST**
+route `npub1…`, `note1…`, `nprofile1…`, `nevent1…`, `naddr1…` and `nsec1…`
+without requiring `nostr:`, subject to the validation rules below.
 
 The rule, as the shared classifier applies it (`../../src/router.js`
 `classify`, and Part II §6.1 for where it sits in the order):
@@ -266,36 +226,22 @@ proxy.
 
 ### 4.1 Aggregating to a lock
 
-**A Nostr resolution MUST NOT produce a closed lock.** Step 4 is permanently
-`unverified` and no amount of verification elsewhere retires it, so the
-aggregate of the spine's §4.1 is `partial` — never `verified` — always, by
-construction rather than by policy.
+**A Nostr resolution MUST NOT produce a closed lock.** Completeness remains
+`unverified`, so the aggregate under the spine's §4.1 is `partial`.
 
-An implementation **MUST** additionally state, in whatever surface it gives
-the user, *which relays answered and which did not*, and *which relays it
-refused to ask*. This is the substitute for a proof of completeness: it cannot
-establish what you were not shown, but it can name who you asked. The reference
-implementation renders it as a collapsible "Where this came from" report on
-every page, including error pages, listing each relay, whether it was reached,
-its event count or its error, every relay hint that was refused and why, and
-every event that was discarded — as unverifiable, or as not an answer — and
-why. The one page without that report is the Private-mode refusal of §8.5,
-which asks no relay and says so in words instead.
+An implementation **MUST** report which relays answered, which failed, and
+which it refused to query. The reference page includes a collapsible relay
+report with reachability, event counts or errors, refused hints, and rejected
+events with reasons. Error pages include it too. The Private-mode refusal
+(§8.5) instead states that no relay was queried.
 
-**In the reference implementation the trust panel carries this as two steps.**
-`schemeSteps()` in the browser's `src/hns/trust-path.js` gives a `nostr:` page
-**Authorship — `verified`** ("Schnorr signature (BIP-340) checked in this
-browser") and **Completeness — `unverified`** ("whichever relays answered"),
-and the aggregate of a `verified` step and an `unverified` one is `partial`:
-a neutral indicator, never green. That is the whole trust story on one surface,
-and it is the shape the rest of this chapter is about.
+The browser's `schemeSteps()` in `src/hns/trust-path.js` reports two Nostr
+steps: **Authorship — `verified`** and **Completeness — `unverified`**. Their
+aggregate is `partial`.
 
-Two things are worth naming about how it is derived. The panel keys its arm on
-the URL's **scheme**, not on anything the response said — so it states the
-handler's contract rather than observing that this particular resolution kept
-it. And the handler emits `X-Nostr-Trust: signature-verified;
-completeness-unverified`, an accurate machine-readable version of exactly those
-two steps, which nothing reads. NO-9.
+The panel derives these steps from the URL scheme rather than the response.
+The handler also emits `X-Nostr-Trust: signature-verified;
+completeness-unverified`, but the panel does not read it. NO-9 tracks this gap.
 
 ---
 
@@ -363,25 +309,17 @@ A **secret** key is not an address. An implementation **MUST NOT** decode an
 `nsec` into a resolvable target, **MUST NOT** transmit it, and **MUST NOT**
 echo it back in an error message or a log line.
 
-It **SHOULD** refuse it *by name* rather than as an unknown prefix. The useful
-thing to tell someone who has just pasted their secret key into an address bar
-is that it is a secret and what to do about it — not that the browser lacks a
-handler for that prefix. The reference implementation's error text is:
+It **SHOULD** identify the input as a private key in the refusal. The reference
+implementation uses this message:
 
 > that is a PRIVATE KEY (nsec). It was not sent anywhere. Never paste it into
 > a browser or share it.
 
-and a test asserts both the "PRIVATE KEY" and the "not sent anywhere" halves,
-because the wording is the feature. NO-6 records why refusing by name is worth
-the small disclosure it makes.
+Tests check that the message identifies the secret and states that it was not
+sent. NO-6 records the rationale.
 
-The promise holds on **both** paths a secret can arrive on. A bare `nsec`
-typed into the address bar is classified into this namespace before any name
-rule sees it (§3), so it reaches this refusal rather than a chain lookup that
-would carry the secret to a resolver as a name. That is the reason the
-classifier claims an `nsec` on its prefix without waiting for a decode: the
-decode is *this* refusal, and it has to happen inside the namespace that can
-say what the string is.
+A bare `nsec` is routed here before name resolution (§3). The prefix rule
+ensures the refusal runs even though decoding intentionally returns an error.
 
 ### 5.4 The `nostr:` URI
 
@@ -406,10 +344,8 @@ The reference implementation additionally accepts:
 Comparison is case-insensitive on the scheme (`NOSTR:` works) and the
 identifier is lower-cased per BIP-173.
 
-**`nostr:` is not a registered URI scheme.** It is not in the IANA URI Schemes
-registry and there is no RFC 7595 registration to cite. It is a de-facto
-scheme with wide implementation. Stated because a specification that quietly
-implies otherwise is doing the reader a disservice.
+**`nostr:` is not a registered URI scheme.** It is a de-facto scheme, absent
+from the IANA URI Schemes registry; no RFC 7595 registration is cited here.
 
 ---
 
@@ -445,11 +381,8 @@ ECDSA and a generic secp256k1 verifier will not do.
 
 ### 6.3 The order, and the totality
 
-An implementation **MUST** check the id **before** the signature. The
-signature is over the id; an event whose id does not match its contents is one
-where a *valid* signature would still be signing something other than what is
-about to be displayed. Checking in the other order produces a green tick on
-altered content.
+An implementation **MUST** check the id **before** the signature. A signature
+over an id does not authenticate event contents unless the recomputed id matches.
 
 An implementation **MUST** validate the shape of every field before either
 check — `pubkey` and `id` 64 lowercase hex, `sig` 128 lowercase hex,
@@ -523,8 +456,9 @@ used**. It reads as a mailbox at a domain the user does not control, which is
 name confusion at the precise boundary where an identity is being asserted.
 
 The reverse direction — a stranger's kind:0 carrying an `hns` field claiming a
-Handshake name — is a **claim**, and becomes a verified name only when a NIP-05
-lookup against *that name's own zone* returns this exact key. The host for
+Handshake name — is a **claim**. A NIP-05 lookup must return this exact key before the client
+can report that the domain supports the mapping; the trust state remains
+`unverified` under §7.3. The host for
 that lookup **MUST** be derived from the claim by a function that refuses
 anything which is not purely a hostname (§10.5), and **MUST NOT** be assembled
 at the call site. One function, called from every site, is the difference
@@ -532,15 +466,12 @@ between one place to get this right and as many places as there are callers.
 
 ### 7.3 What a NIP-05 answer is worth
 
-This is the weakest step in the whole document and the one most often
-misrepresented.
+NIP-05 authenticates a domain assertion through HTTPS.
 
-A NIP-05 answer establishes: **whoever currently controls that domain's web
-server and holds a certificate a public CA issued for it says this name maps to
-this key.** That is the ordinary trust model of the web (WebPKI, RFC 5280,
-RFC 8446, RFC 9110) and nothing more. There is no signature by the key, no
-chain, no proof of absence, no history, and no way to detect that the answer
-changed a minute ago.
+A NIP-05 answer establishes that the HTTPS endpoint for a domain returned a
+name-to-key mapping. It relies on WebPKI (RFC 5280, RFC 8446, RFC 9110). It
+provides no keyholder signature, chain proof, authenticated history, or proof
+of absence.
 
 Three consequences an implementation **MUST** carry into its trust model:
 
@@ -560,8 +491,7 @@ Three consequences an implementation **MUST** carry into its trust model:
    takes the second route: it renders the field as *"claims `<handle>` (not
    verified — the handle was not looked up)"*, which is a true statement about
    what was and was not done. It does not make the lookup — NO-2 — while
-   Wildroot's social page does, so the resolver is honest and incomplete rather
-   than misleading.
+   Wildroot's social page performs the lookup separately.
 
 ---
 
@@ -584,13 +514,9 @@ frame it cannot parse, a frame that is not an array, and a frame whose
 subscription id is not one it opened. A relay that speaks nonsense is a relay
 with nothing to say, not an error.
 
-**A finished query MUST stop processing frames.** This is not an efficiency
-note. If the client answers `EOSE` with `CLOSE` and then processes the relay's
-reply to that `CLOSE`, a relay that replies gets answered again, and again:
-a **livelock**, and the cheapest denial of service a hostile relay has. The
-reference implementation guards it with a `done` flag checked at the top of
-the message handler, and the comment there records that it cost a hung test
-process to find.
+**A finished query MUST stop processing frames.** Otherwise a relay's response
+to `CLOSE` can trigger another `CLOSE` repeatedly. The reference message handler
+checks a `done` flag before processing a frame.
 
 **A relay is never allowed to hang a resolution.** Each socket carries its own
 deadline (6 seconds by default), a dead socket resolves as an error rather than
@@ -598,15 +524,10 @@ rejecting, and a query fanned out across several relays is not taken down by
 any one of them. A runtime with no WebSocket implementation is *reported*, never
 silently resolved as zero events (§9.4).
 
-**The WebSocket implementation is an injected seam.** `queryRelay` and
-`queryRelays` take a `WebSocketImpl` option, and `createHandler` takes
-`{ relays, timeout, WebSocketImpl }` and threads it through; the global is only
-the default. That is what lets the whole handler — status codes, escaping,
-hint refusal, answer binding — be driven against scripted, misbehaving relays
-under plain `node --test` without touching the network and without any test
-mutating a global that another test depends on. In Private mode the same seam
-is filled per request with a class that dials through Tor, and when no Tor is
-to hand the request is refused before the seam is reached (§8.5).
+`queryRelay` and `queryRelays` accept `WebSocketImpl`; `createHandler` accepts
+`{ relays, timeout, WebSocketImpl }` and passes those options through. Tests use
+scripted relays without replacing globals. Private mode injects the Tor client
+per request, or refuses when Tor is unavailable (§8.5).
 
 ### 8.2 Which relays
 
@@ -633,10 +554,9 @@ live". Wildroot *publishes* a NIP-65 list for every name it creates and its
 social client *reads* one; the `nostr:` resolver does neither. It asks four
 relays chosen by us and whatever the link's author chose. NO-3.
 
-**No NIP-42 AUTH.** A relay that requires authentication is, to this
-implementation, a relay that returned nothing — which is at least reported
-honestly (the relay report shows it failed), but is not a distinguishable
-condition. NO-7.
+**No NIP-42 AUTH.** The resolver does not answer authentication challenges.
+The report does not identify that requirement: the connection can finish with
+no events or time out. NO-7 tracks reporting the condition.
 
 ### 8.3 Fan-out, union, and why it is safe
 
@@ -644,22 +564,13 @@ Relays are queried **in parallel**, and the result is the **union** of the
 verified events from all of them, de-duplicated by event id and sorted newest
 first.
 
-Taking a union rather than a quorum is safe *because of §6 and §9.3*, and only
-because of both. Verification alone stops a relay altering or forging an event;
-answer binding alone stops it substituting a genuine event for the one asked
-for. With both, a hostile relay's options are limited to **omission** and
-**delay**: it cannot make the result worse than it would have been without it,
-it can only fail to improve it. With only the first, the union is worse than
-useless against a hostile relay — its substitute is *added* to the honest
-relays' answers rather than competing with them, and `created_at` ordering
-decides which is shown. Tests drive both halves: one honest relay against one
-tampering relay, and one honest relay against one answering a different
-question, with the honest event surviving each time and the other reported as
-discarded.
+The union contains only events that pass signature verification (§6) and
+filter matching (§9.3). A relay cannot add a forged event or substitute a
+non-matching event. It can still omit or delay matching events. Tests cover
+tampered events and valid events returned for the wrong query.
 
-The converse also holds and is why the fan-out exists at all: **adding a relay
-can only help.** This is unusual and worth noticing. It is the property that
-lets a client query a relay it has no reason to trust, including ours.
+Additional relays can supply matching events the existing set lacks. The
+privacy and availability costs of fan-out are covered in §10.3.
 
 ### 8.4 Failure is not silence
 
@@ -669,13 +580,10 @@ with nothing. They mean opposite things: one is "we have no idea", the other is
 URL, whether it was reached, its event count, and its error string, and never
 signals a relay failure by throwing.
 
-This matters most on a path this specification does not cover — publishing a
-**replaceable** event (kind:0, kind:3, kind:10002) assembled from a read. A
-read that reached no relay returns "nothing", and publishing a replacement
-built from that nothing destroys the previous one irrecoverably. That is the
-standard way Nostr clients lose people's follow lists. It is out of scope here
-and named anyway, because it is the reason the read API has to report
-reachability.
+Callers that publish replaceable events from a read must preserve the
+reachability distinction. Treating an unsuccessful read as an empty state can
+lead a caller to overwrite an existing profile or follow list. Publishing is
+outside this chapter.
 
 The reference `nostr:` handler carries this distinction into its **HTTP
 status**, not only into its prose. "Nothing was found" may be said only if at
@@ -686,11 +594,9 @@ least one relay answered:
   known about the address rather than that the address is empty — *"it was not
   found to be absent"*.
 
-An implementation **MUST NOT** emit a machine-readable "this does not exist"
-for "we could not ask anybody". Absence of proof is not proof of absence, and
-in a system with no proof of absence at all (§10.1) the distinction between
-"nobody answered" and "everybody who answered had nothing" is the only part of
-that question a client can answer honestly.
+An implementation **MUST NOT** report nonexistence when no relay was reached.
+Even a completed empty query proves only that the queried relays returned no
+matching event (§10.1).
 
 ### 8.5 Private mode: relays are dialled through Tor, or not at all
 
@@ -758,15 +664,11 @@ other page (§10.6):
 > Nothing was asked. Switch to Fast in Settings › Content delivery to ask them
 > directly.
 
-It names the mode, says what was not done, does not blame the address, and
-points at the one control — the shape every Private-mode refusal in this
-repository has (`SWITCH_HINT`). It is the one page without a relay report
-(§4.1): there is nothing to report, and the page says so. 503 and not an
-invented status, because a protocol handler's status goes straight into
-Chromium's reason-phrase lookup, which `NOTREACHED`s on a code it does not
-know. Because the refusal lives inside the handler, `nostr:` is **not** behind
-the non-proxied gate that refuses the peer-to-peer namespaces (Chapter 9
-§K.3.6); it is routed, and refuses only when the route is missing.
+The refusal states that no query was made and points to the mode control.
+It has no relay report because no relay was queried. The handler uses a known
+HTTP status, 503, to avoid Chromium's failure on unknown status codes.
+`nostr:` is therefore handled here rather than by the non-proxied gate of
+Chapter 9 §K.3.6.
 
 **What the route does not change.** A relay that blocks Tor exits is a relay
 that did not answer: it is reported as unreachable in the relay report and, if
@@ -876,10 +778,8 @@ match, so it **MUST** either implement the field or refuse to send it. Sending
 a constraint the client cannot check is asking a question whose answer it will
 believe unconditionally.
 
-NIP-01 says a relay *should* return matching events. Nothing makes it. A
-signature check does not do this job and cannot: an event by a different author
-is *validly signed by that author*, so it passes §6 with a green tick while
-answering a question nobody asked.
+A relay's compliance with NIP-01 is not trusted. A valid signature can belong
+to an event that does not match the request.
 
 **The check MUST live beside the signature check, not in the renderer.** In the
 reference implementation `matchesFilter` is applied in `src/relay.js`
@@ -887,12 +787,9 @@ immediately after `verifyEvent`, on the same event, in the same branch — so it
 holds for every caller rather than for whichever renderer remembers, and a new
 caller inherits it by construction.
 
-An event that fails it is **discarded and reported**, not dropped: it goes into
-the same `rejected` list as an event that failed verification, with the reason
-*"does not match the filter it was returned for"* and the relay that sent it,
-and the relay report names both. "This relay answered a different question" is
-the most useful thing a relay report can say about a relay, and a client that
-merely ignores the event throws that away.
+An event that fails filter matching is **discarded and reported** in the
+`rejected` list, with its relay and the reason "does not match the filter it
+was returned for".
 
 Three consequences follow, and the tests drive each:
 
@@ -904,16 +801,12 @@ Three consequences follow, and the tests drive each:
   that has an event with the right id but the wrong author, or the wrong kind,
   is answering a different question and is treated as such.
 
-One property is easy to lose and worth stating: an **empty filter matches
-everything**. That is correct — a query that asks nothing cannot be answered
-wrongly — and it means the guarantee of this section is exactly as strong as
-the filter the caller built, no stronger. §9.1 step 4 is where that strength
-comes from, and it is why an `nevent`'s author and kind TLVs are read rather
-than discarded.
+An **empty filter matches everything**. Answer binding therefore enforces only
+the constraints the caller supplies. The filters in §9.1 include the optional
+author and kind carried by an `nevent`.
 
-What this does **not** close is **currency** (§10.1): a relay may serve an older
-replaceable event that matches the filter perfectly and verifies perfectly.
-Answer binding closes substitution. Nothing closes staleness.
+A matching, valid event can still be stale. Filter matching does not establish
+currency (§10.1).
 
 ### 9.4 Failure kinds
 
@@ -959,12 +852,9 @@ the user can see the size of what they are trusting.
 
 ### 10.2 Authorship is proven per event, not per page
 
-The green tick belongs to the *event*, not to the *answer*. §9.3 is the
-mechanism; this is the presentational consequence, and it is a rule for the
-interface: an implementation **MUST NOT** place a verification indicator where
-it can be read as vouching for the *identifier→event* mapping unless §9.3 is
-actually enforced. A per-event badge next to an unbound answer is the exact
-shape of a lie by adjacency.
+An implementation **MUST NOT** display a verification indicator that implies
+the identifier-to-event mapping was checked unless §9.3 is enforced.
+Authorship verification alone applies only to the event.
 
 An implementation **MUST** display the author of every event it renders, and
 **MUST** say so when that author is not the key the page is about. A page
@@ -983,12 +873,10 @@ there is no page key to compare against.
 
 ### 10.3 Asking is disclosing
 
-A query tells every relay in the set which key, or which event, the user is
-interested in, from the user's IP address, at that moment. There is no
-oblivious transport for Nostr comparable to the ODoH path the Handshake section
-uses for DNS. Fanning out across more relays makes the answer better and the
-disclosure wider; that trade is real and this specification does not resolve
-it.
+A query discloses the requested key, event or filter to every queried relay.
+In Fast mode the relay also sees the user's IP address; Private mode changes
+that route (§8.5). Increasing the relay set broadens both coverage and query
+disclosure. Nostr has no oblivious query mechanism comparable to ODoH.
 
 The handler dials relays from the main process over a path the session proxy
 does not cover, so the route is its own responsibility. In Private mode it
@@ -1036,7 +924,7 @@ separated, which the WebSocket API does not offer.
 
 ### 10.5 Every fetched host is attacker-chosen
 
-The NIP-05 path takes a hostname from a stranger's profile and puts it in a URL
+The NIP-05 path takes a hostname from an untrusted profile and puts it in a URL
 this process fetches. Left unvalidated that is a server-side request forgery
 primitive pointed at whatever the user's machine can reach. Appending a
 suffix does not save you — every one of these already contains the character
@@ -1061,7 +949,7 @@ have produced something new. The reference implementation does this
 
 ### 10.6 Content is hostile bytes
 
-An event's `content` is a string a stranger chose. A resolver that renders it
+An event's `content` is a string the sender supplied. A resolver that renders it
 **MUST** escape it before it reaches any markup, and **SHOULD** serve the
 result under a content-security policy that grants no script and no network
 origin. The reference implementation escapes `& < > " '`, then linkifies
@@ -1074,11 +962,7 @@ stranger. Parsing it is another place to be total rather than clever.
 
 ### 10.7 A note on the three implementations
 
-The Wildroot tree contains **three** independent implementations of the NIP-01
-serialisation and signature check: the one specified here, one in the identity
-keystore that *signs*, and one vendored from a standalone package. They are
-held in agreement by a test that signs with each and verifies under the others,
-because the moment they drift our own posts fail our own verifier and nothing
-else notices. This is recorded as NO-9 rather than presented as a design:
-three copies with a test is better than three copies without one, and worse
-than one copy.
+The browser has three NIP-01 implementations: the resolver, the identity
+keystore, and a vendored package. Cross-verification tests check agreement.
+NO-9 tracks consolidation and the maintenance risk of applying fixes to
+separate copies.

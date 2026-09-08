@@ -3,8 +3,7 @@
 //
 //   DEVIATIONS.md   every chapter's DEVIATIONS.md, in chapter order, headings
 //                   demoted one level under a chapter heading, with a table of
-//                   contents listing every deviation, uncertainty and open
-//                   design item by id.
+//                   contents linking to each chapter.
 //   REFERENCES.md   an index of every identifier cited anywhere (one row per
 //                   identifier, naming the chapters that use it), followed by
 //                   each chapter's own tables — which carry what the standard
@@ -15,7 +14,7 @@
 // they are stale, so the consolidated view cannot drift from the chapters.
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -39,16 +38,24 @@ export const CHAPTERS = [
 const read = (p) => readFileSync(join(ROOT, p), 'utf8')
 
 /** Drop the chapter file's own H1 and demote every other heading one level. */
-function body (text) {
+function body (text, sourcePath) {
   return text
     .split('\n')
     .filter((line, i, all) => !(i === 0 && line.startsWith('# ')))
     .map((line) => (/^#{1,5} /.test(line) ? '#' + line : line))
     .join('\n')
     .replace(/^\n+/, '')
-    // Chapter files link to the consolidated files as ../../; here they are siblings.
-    .replace(/\.\.\/\.\.\/(DEVIATIONS|REFERENCES|SPEC)\.md/g, '$1.md')
-    .replace(/\.\.\/([a-z-]+)\/SPEC\.md/g, 'namespaces/$1/SPEC.md')
+    // Preserve each relative link's destination when including a chapter at root.
+    // A fragment-only link still refers to the original chapter, whose headings
+    // may also occur in another chapter of this consolidated document.
+    .replace(/(\]\()([^\s)]+)(\))/g, (whole, open, target, close) => {
+      if (/^(?:[a-z][a-z0-9+.-]*:|\/)/i.test(target)) return whole
+      const hash = target.indexOf('#')
+      const path = hash < 0 ? target : target.slice(0, hash)
+      const fragment = hash < 0 ? '' : target.slice(hash)
+      const rebased = path ? posix.normalize(posix.join(posix.dirname(sourcePath), path)) : sourcePath
+      return `${open}${rebased}${fragment}${close}`
+    })
 }
 
 const anchor = (heading) => heading.toLowerCase().replace(/[`*_]/g, '').replace(/[^a-z0-9 -]/g, '').trim().replace(/\s+/g, '-')
@@ -60,28 +67,25 @@ export function buildDeviations () {
     const file = `namespaces/${dir}/DEVIATIONS.md`
     if (!existsSync(join(ROOT, file))) continue
     const text = read(file)
-    const ids = [...text.matchAll(/^### ([A-Z]{2}-(?:D|U)?\d+|[A-Z]{2}-\d+\.\d+|\d+\.\d+)\.? (.*)$/gm)]
-      .map((m) => `  - ${m[1]} ${m[2].replace(/`/g, '')}`)
-    toc.push(`- [${label}](#${anchor(label)}) — [chapter file](${file})`, ...ids)
-    parts.push(`## ${label}\n\n_Source: [\`${file}\`](${file})._\n\n${body(text)}`)
+    toc.push(`- [${label}](#${anchor(label)}) — [chapter file](${file})`)
+    parts.push(`<a id="${anchor(label)}"></a>\n\n## ${label}\n\n_Source: [\`${file}\`](${file})._\n\n${body(text, file)}`)
   }
   // The cross-cutting divergence inventory closes the document.
   const divergence = read('DIVERGENCE.md')
-  toc.push('- [Cross-cutting — Divergence inventory: where privacy and speed pull apart](#cross-cutting-divergence-inventory-where-privacy-and-speed-pull-apart) — [source file](DIVERGENCE.md)')
-  parts.push(`## Cross-cutting — Divergence inventory: where privacy and speed pull apart\n\n_Source: [\`DIVERGENCE.md\`](DIVERGENCE.md)._\n\n${body(divergence)}`)
+  toc.push('- [Privacy and transport](#privacy-and-transport) — [source file](DIVERGENCE.md)')
+  parts.push(`<a id="cross-cutting-divergence-inventory-where-privacy-and-speed-pull-apart"></a>\n\n## Privacy and transport\n\n_Source: [\`DIVERGENCE.md\`](DIVERGENCE.md)._\n\n${body(divergence, 'DIVERGENCE.md')}`)
   return `# Deviations, uncertainties and open decisions
 
-Every departure from a cited standard, every place we are not sure we are
-right, and every design decision left open — per chapter, present tense, with
-a recommendation for each open item. A deviation is numbered with its chapter's
-prefix (\`HS-1\`, \`IC-3\`, …); an uncertainty is \`§2.n\` within its chapter;
-an open design item is \`<prefix>-Dn\`. **This document is generated from the
+Known departures from cited standards, uncertainties, and design decisions,
+organized by chapter. Identifiers use chapter prefixes such as \`HS-1\` and
+\`IC-3\`; open design items use \`<prefix>-Dn\`.
+**This document is generated from the
 chapter files by \`scripts/build-docs.mjs\`; edit those.**
 
-Two rules hold throughout. A deviation is recorded whether or not we think it
-is right — \`DELIBERATE\` says we would make the same choice again and why,
-\`OPEN\` says we would not and what we recommend. And nothing here is history:
-a departure that no longer exists is not described.
+\`DELIBERATE\` identifies an intentional departure; \`OPEN\` identifies an
+unresolved issue or proposed change. These labels describe project decisions,
+not approval by the authors of the cited standards. Remaining inconsistencies
+and proposed improvements are listed in [REVIEW.md](REVIEW.md).
 
 ## Contents
 
@@ -119,24 +123,22 @@ export function buildReferences () {
     const text = read(file)
     for (const r of rows(text)) {
       const key = keyOf(r.id)
-      if (!index.has(key)) index.set(key, { id: r.id, title: r.title, chapters: [] })
+      if (!index.has(key)) index.set(key, { id: body(r.id, file), title: body(r.title, file), chapters: [] })
       const entry = index.get(key)
       if (!entry.chapters.includes(label)) entry.chapters.push(label)
     }
-    parts.push(`## ${label}\n\n_Source: [\`${file}\`](${file})._\n\n${body(text)}`)
+    parts.push(`## ${label}\n\n_Source: [\`${file}\`](${file})._\n\n${body(text, file)}`)
   }
   const sorted = [...index.values()].sort((a, b) => keyOf(a.id).localeCompare(keyOf(b.id), 'en', { numeric: true }))
   const indexRows = sorted.map((e) => `| ${e.id} | ${e.title} | ${e.chapters.map((c) => c.replace(/ — .*/, '')).join(', ')} |`)
   return `# References
 
-Every standard, specification and document the implementation reads, with what
-each is used for. **Generated from the chapter files by \`scripts/build-docs.mjs\`;
+Standards, specifications, and other documents cited by the chapters, with
+their use in the implementation. **Generated from the chapter files by \`scripts/build-docs.mjs\`;
 edit those.**
 
-The index lists each identifier once, with the chapters that cite it. Each
-chapter's own table follows, because *what a standard is used for* differs by
-chapter — RFC 9110 is the tunnel's CONNECT in one chapter and a redirect rule in
-another — and that column is the point of the file.
+The index lists each identifier once and names the chapters that cite it.
+The chapter tables follow with section references and implementation details.
 
 ## Index
 

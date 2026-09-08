@@ -1,24 +1,23 @@
 # Web3 name resolution — a specification
 
 **Version:** 0.4 (draft for public comment)
-**Status:** Describes the behaviour of the reference implementation in this
-repository, which ships in the Wildroot browser. Not endorsed by any standards
-body. Normative statements describe what an implementation must do *to
-interoperate with this one*; where they are inherited from an existing
-standard, that standard is cited and its rule governs. One chapter (Chapter 10)
-is marked **experimental** and says what that means.
-**Licence:** CC-BY-4.0 (`LICENSE-SPEC`). The reference implementation is
-licensed separately (Apache-2.0, `LICENSE`).
+**Status:** Implementation-specific draft; not endorsed by a standards body.
+**License:** [CC BY 4.0](LICENSE-SPEC); code is [Apache-2.0](LICENSE).
 
-This document is the **spine**. Part I is the model every namespace shares.
-Part II is namespace selection — the one decision made before any resolution.
-Part III is one chapter per namespace; each chapter is its own file under
-`namespaces/<ns>/SPEC.md`, and each is normative for its namespace. Every
-deviation from a cited standard, every open question and every open design
-decision is in `DEVIATIONS.md`; every standard cited is in `REFERENCES.md`,
-with what it is used for; every place where privacy and speed pull apart is in
-`DIVERGENCE.md`. **Those files are part of this specification, not appendices
-to it.**
+This specification defines Wildroot's resolution model and the requirements
+for compatible implementations. It refers to the reference code in this
+repository. It does not identify a particular browser release.
+
+Part I defines the shared model. Part II summarizes namespace selection.
+Part III links to the individual chapters, including application integration
+and experimental conventions. [Deviations](DEVIATIONS.md),
+[references](REFERENCES.md), and the [privacy comparison](DIVERGENCE.md)
+form part of the specification. Cited external standards govern requirements
+inherited from them; departures are recorded in the chapter deviations.
+
+Unresolved inconsistencies between sections and source code are listed in
+[the content review](REVIEW.md). They need a technical decision before this
+draft can be treated as a consistent conformance target.
 
 Key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT** and **MAY** are
 used as in RFC 2119 / RFC 8174.
@@ -30,7 +29,7 @@ used as in RFC 2119 / RFC 8174.
 **Part I — The shared model**
 1. [What this specifies, and why it exists](#1-what-this-specifies-and-why-it-exists)
 2. [Terminology](#2-terminology)
-3. [The two laws](#3-the-two-laws)
+3. [Routing invariants](#3-routing-invariants)
 4. [Trust states](#4-trust-states)
 
 **Part II — Namespace selection**
@@ -61,51 +60,28 @@ below are the normative summary.
 
 ## 1. What this specifies, and why it exists
 
-A browser that resolves more than one naming system has a problem the single
-system never had: an address has to be assigned to exactly one system before
-anything else can happen, the systems have different roots of trust, and a
-failure in one must not quietly become a lookup in another. Handshake names are
-proven from a chain; ICANN names come from a resolver; a CID proves its own
-bytes; an ENS name is an RPC endpoint's word; an onion address must never be
-seen by a DNS server at all. A browser that blurs those together — by falling
-back from one to the next, or by drawing one padlock for all of them — is
-making claims it cannot support.
+A browser that supports several naming systems must decide which system
+owns an address before resolving it. Each system authenticates answers
+differently, and a failed lookup must not silently become a lookup in
+another namespace.
 
-This specification does three things.
+This specification defines:
 
-1. **It chooses one namespace for every input, once** (Part II). The scheme, if
-   there is one, decides. Without one, a fixed classification order decides,
-   and the decision is final: there is no "try Handshake, and if that fails,
-   try DNS".
-2. **It specifies each namespace's resolution** (Part III): the address grammar,
-   the algorithm, what is verified in this process and what is trusted, and
-   the failure modes — each in the namespace's own terms and against the
-   standards that define it.
-3. **It makes the trust state a first-class output** (§4). Every resolution
-   yields an ordered list of steps, each saying what was checked and *who told
-   us*. An interface is given that list, not a boolean, and three lock states
-   — trustless, trusted, open — are distinguished because the second one is
-   what the ordinary web is, and rendering it like the first is a lie.
+1. Namespace selection from a scheme or an ordered classification rule.
+2. Each namespace's address grammar, resolution steps, and failure modes.
+3. A trust report that distinguishes local verification from reliance on
+   an external service.
 
 ### 1.1 Scope
 
-**In scope:** everything between an address and an answer. Which namespace an
-input belongs to; the grammar of each address form; the resolution algorithm of
-each namespace; what is cryptographically verified in this process and what is
-taken on somebody's word; how a failure is reported without becoming a lookup
-in another namespace; the transport a lookup travels over and what that
-transport discloses.
+The specification covers address classification, lookup algorithms,
+verification, failure handling, and lookup transport. It also defines
+integration requirements where browser behavior affects those guarantees.
 
-**Out of scope:** content transport (fetching and rendering bytes once a name
-has resolved — the chapters state what is and is not *verified* about those
-bytes, never how they are fetched); publishing (how a record gets into a zone,
-a registry or a relay); the trust user interface (this document specifies the
-model an interface is given and the claims it must not make, not a rendering);
-and the composition layer that wires these modules to a session, a proxy and a
-window (each chapter specifies its policy normatively).
-
-An implementation of this specification is a **resolver**, not a browser. It
-answers "what does this address mean, and how sure are we?" and stops there.
+Content engines, publishing systems, interface rendering, and Electron
+session wiring are implemented in the browser. The chapters describe what
+those components must provide where needed, without including their complete
+implementations here.
 
 ## 2. Terminology
 
@@ -131,11 +107,12 @@ answers "what does this address mean, and how sure are we?" and stops there.
   those of **RFC 4033 §5** (Chapter 1 §2 states the mapping this document
   makes).
 
-## 3. The two laws
+<a id="3-the-two-laws"></a>
 
-Everything in Part II, and the boundaries of every chapter, follow from two
-rules, which an implementation **MUST** hold structurally — in the one place
-that routes — rather than as a convention each handler is trusted to keep.
+## 3. Routing invariants
+
+An implementation **MUST** enforce these two rules in its routing layer.
+Individual handlers must not be able to bypass them.
 
 **L1 — An explicit scheme selects the protocol, always.** `ipfs://vitalik.eth`
 is an IPFS request whose host happens to look like an ENS name; it goes to the
@@ -152,8 +129,7 @@ traffic); an onion address is never sent to a resolver, valid or not. RFC 9498
 its suffix matches and do not continue into DNS on failure — and this document
 adopts it for every namespace it dispatches.
 
-Two things are **not** breaches of L2 and are called out so nobody mistakes
-them for one. A **search** for a scheme-less input that classifies to no
+L2 permits two cases: A **search** for a scheme-less input that classifies to no
 namespace (§6) is not a fallback: no protocol was named, so there is nothing to
 fall back *from*. A **transport downgrade inside one namespace** — Chapter 1's
 retry of a failed chain lookup over DoH, resolving the same Handshake name in
@@ -162,14 +138,13 @@ fallback either: L2 governs a named protocol failing into another.
 
 ## 4. Trust states
 
-A resolution does not produce a boolean. It produces an ordered list of
-**steps**, each of which says what was checked, who said so, and one of four
-states:
+A resolution produces an ordered list of **trust steps**. Each step records
+the check, its source, and one of four states:
 
 | State | Meaning |
 |---|---|
 | `verified` | checked cryptographically, in this process, in this resolution |
-| `unverified` | taken on somebody's word — a resolver, a CA, an RPC endpoint, a directory, a relay, a gateway, the network |
+| `unverified` | accepted from an external source, such as a resolver, CA, RPC endpoint, directory, relay, or gateway |
 | `failed` | checked and did not pass |
 | `none` | does not apply, or is absent and *known* to be absent |
 
@@ -184,8 +159,7 @@ rules are these.
   address they were requested by. Anything read from a server, an endpoint or
   a relay and believed is `unverified`, however reputable the source and
   however encrypted the transport.
-- **Under-claiming is as misleading as over-claiming.** A scheme with a real
-  verification story (a CID, a Nostr signature) MUST NOT fall through to "no
+- A scheme with local verification (a CID, a Nostr signature) MUST NOT fall through to "no
   verification path"; a scheme with none (a gateway's bytes, a directory's
   document) MUST NOT borrow a content-addressed sentence.
 - The source of an `unverified` step MUST be named (which resolver, which RPC,
@@ -198,22 +172,20 @@ rules are these.
 An implementation that shows a single indicator SHOULD distinguish **three**
 states, not two:
 
-- **TRUSTLESS** (closed, and marked as such — the "verified" verdict): every
-  step is `verified` or `none`. Nobody was believed. A chain-proven Handshake
-  name resolving to a content pointer, or to an address with a matched DANE
-  pin under a validated zone; an `ipfs://` CID; a `hyper://` key.
-- **TRUSTED** (closed, but not trustless — the "partial" verdict): the
-  transport is confidential and authenticated, but at least one step is
-  `unverified`. **This is what an ordinary `https://` page is**, and it is
-  where `ens://`, `ar://`, `did:`, `nostr:`, a DNSLink-resolved `hyper://` name
-  and Chapter 10's `_op` resolution sit. An indicator that renders this state
-  identically to the one above is lying by omission.
+- **TRUSTLESS** (the `verified` verdict): every supplied step is `verified`.
+  The reference aggregator does not ignore a step in state `none`.
+- **TRUSTED** (the `partial` verdict): at least one supplied step is
+  `unverified` or `none`, unless a failure or unprotected connection takes
+  precedence. This label includes ordinary HTTPS, which validates WebPKI
+  certificates, and Gemini, which does not authenticate its certificate in
+  this implementation. The individual steps must make that difference clear;
+  the label alone is not a guarantee of endpoint authentication.
 - **OPEN**: the connection itself carries no protection (a `Connection` step
   of `none`: plain HTTP; an onion service's HTTP inside the tunnel is reported
   as `unverified`, not `none`). A step that `failed` is its own verdict.
 
 The rule is the weakest link: a `failed` step MUST NOT aggregate to a closed
-lock; a single `unverified` step MUST NOT aggregate to trustless; a plaintext
+lock; a single `unverified` or `none` step MUST NOT aggregate to trustless; a plaintext
 connection MUST NOT aggregate to the same verdict an encrypted one gets. The
 reference implementation's aggregation is `summarize()` in
 `src/trust-path.js` — five states: `verified`, `partial`, `open`, `failed`,
@@ -223,10 +195,11 @@ best reach (`trust`: trustless, trusted, open, refused, builtin), which
 
 ### 4.2 Modes: Fast and Private
 
-Privacy and speed pull apart in five places across the namespaces this
-document specifies ([`DIVERGENCE.md`](DIVERGENCE.md) rows 3, 7, 10, 15 and
-19); everywhere else the private path is also the fast one, by construction.
-For those five an implementation **MAY** offer two modes, and if it does:
+An implementation **MAY** offer Fast and Private delivery modes.
+[DIVERGENCE.md](DIVERGENCE.md) compares their routes, disclosures, and
+limitations. An implementation that offers these modes must follow the rules
+below. Conflicting status claims in the comparison are tracked in
+[REVIEW.md](REVIEW.md).
 
 - There **MUST** be exactly **one** control. IP Protection (the session proxy
   through the device-local Tor) and every other private path move together;
@@ -281,7 +254,7 @@ considerations and the conformance clauses.
 ## 5. The scheme registry
 
 An implementation **MUST** keep one table mapping every scheme it dispatches to
-exactly one namespace, with a stated verification story, and **MUST** refuse to
+exactly one namespace, with a description of its verification, and **MUST** refuse to
 wire a handler for a scheme absent from it. The reference table is
 `SCHEME_TABLE`; its namespaces are:
 
@@ -289,12 +262,12 @@ wire a handler for a scheme absent from it. The reference table is
 |---|---|---|
 | `hns` | `hns` | SPV chain proof + DANE `3 1 1`, or a content pointer's own hash (Chapter 1) |
 | `ipfs` | `ipfs`, `ipns`, `ipld`, `pubsub` | CID; an IPNS record + CID; a pubsub topic is **not** a content address — a message carries only its publisher's libp2p signature (Chapter 3) |
-| `arweave` | `ar` | the transaction id's shape and canonical spelling only; bytes are gateway-trusted (Chapter 4) |
-| `ens` | `ens` | an EIP-1577 contenthash read over a public Ethereum RPC — RPC-trusted, not chain-proven; the content it names is CID-verified (Chapter 5) |
+| `arweave` | `ar` | transaction-ID syntax; optional signature-to-ID comparison and conditional byte-to-data-root checks, with authentication limits (Chapter 4) |
+| `ens` | `ens` | an EIP-1577 contenthash read over a public Ethereum RPC — RPC-trusted, not chain-proven; content verification depends on the pointer type (Chapter 5) |
 | `web3` | `web3` | an ERC-4804 EVM read over a public RPC (Chapter 5); there is deliberately **no** `w3://` — `.w3` is a Handshake TLD |
 | `nostr` | `nostr` | BIP-340 signature and event id recomputed locally, answer bound to the query; relay completeness not proven (Chapter 6) |
 | `atproto` | `at` | recognised and refused: 501 with no network request (Chapter 7) |
-| `did` | `did` | a DID document fetched from a directory or the named host, its `id` checked; not proven (Chapter 7) |
+| `did` | `did` | local derivation for `did:key`, `did:jwk`, and `did:pkh`; directory or HTTPS retrieval with an `id` check for `did:plc` and `did:web` (Chapter 7) |
 | `activitypub` | `activitypub` | recognised and refused: 501 with no network request (Chapter 7) |
 | `tor` | `onion` | the onion-service key, reached only through the device-local Tor; never DNS (Chapter 8) |
 | `web` | `https`, `http`, `https+raw` | WebPKI; none for `http`. An ICANN name's navigation is an `https://` URL and so carries this namespace on dispatch, while classification reports the finer `icann` (Chapter 2) |
@@ -335,7 +308,7 @@ this order; the first match is final.
    deliberately **not** sniffed: `Qm…` is both a legacy IPNS key and a CIDv0.
 5. **`/ipfs/…` and `/ipns/…`** gateway paths are `ipfs://` and `ipns://`.
 6. **`localhost[:port]`** is `http://`.
-7. **Host classification** (`src/classify-host.cjs`, the ONE implementation
+7. **Host classification** (`src/classify-host.cjs`, the shared implementation
    the router and the omnibox both load), in this order:
    1. any whitespace → no namespace (a search);
    2. `*.onion` → `tor`, valid or not — a mistyped onion address leaks to a
@@ -353,14 +326,14 @@ this order; the first match is final.
       checked *before* the label count so that `::1` is an address and not a
       bare label;
    6. a single label → step 8;
-   7. an all-numeric final label → `hns` (ICANN has no numeric TLDs).
-      **Experimental:** whether numeric Handshake TLDs are supported at all is
-      undecided, and the URL form such a name needs is Chapter 10 Part B;
+   7. an all-numeric final label → `hns` only when numeric names are enabled;
+      otherwise → `web`. Numeric names are off by default. Chapter 10 Part B
+      defines the optional URL marker;
    8. a final label in the ICANN root → `icann`, navigated as `https://`;
    9. any other final label → `hns`.
-8. **A single bare label** is a Handshake name unless the label is itself an
-   ICANN TLD (`com`, `org`, `app` — a word somebody is mid-way through typing),
-   which is a **search**.
+8. **A single bare label** is a Handshake name unless it is an ICANN TLD
+   (`com`, `org`, `app`) or is purely numeric while numeric names are disabled.
+   Those inputs are **searches**.
 
 The ICANN root used in 6.8 is a bundled snapshot of IANA's list of delegated
 TLDs, held to the live root by a test (Chapter 2 §2). An internationalized host
@@ -368,7 +341,7 @@ is converted to A-labels before comparison (the reference implementation does
 so through the WHATWG URL parser; `DEVIATIONS.md` RT records what that means).
 The same rule **MUST** be applied on every path that classifies a host — typed
 input, a link click, an `http(s)`→`hns` rewrite, a subresource load, a
-WebSocket. The reference implementation has one implementation of the host
+WebSocket. The reference implementation shares the host
 rule, loaded by the router and the omnibox; the WebSocket PAC script, which
 runs in a sandbox with no URL parser, carries an ASCII-only form of it and is
 held to the shared answer by a test.
@@ -414,28 +387,23 @@ chapter's prefix.
 
 | Chapter | Namespace | Root of trust | Verdict when it succeeds |
 |---|---|---|---|
-| [1 — Handshake](namespaces/handshake/SPEC.md) (`HS`) | `hns` | a chain proof from a local SPV node; DNSSEC anchored to the on-chain DS; DANE `3 1 1`; content pointers read from `ipfs=`/`ar=` records AND from DNSLink — the migration path from every other IPFS client | TRUSTLESS for a content pointer or a pinned, validated address; TRUSTED over the DoH fallback; OPEN for a proven-unpinned name over plain HTTP |
-| [2 — ICANN names](namespaces/icann/SPEC.md) (`IC`) | `icann` / `web` | WebPKI; the address from encrypted DNS (plain or oblivious) per a transport plan decided once and reported truthfully | TRUSTED |
+| [1 — Handshake](namespaces/handshake/SPEC.md) (`HS`) | `hns` | a chain proof from a local SPV node; DNSSEC anchored to the on-chain DS; DANE `3 1 1`; content pointers read from `ipfs=`/`ar=` records AND from DNSLink — the DNSLink content-pointer convention | TRUSTLESS for a content pointer or a pinned, validated address; TRUSTED over the DoH fallback; OPEN for a proven-unpinned name over plain HTTP |
+| [2 — ICANN names](namespaces/icann/SPEC.md) (`IC`) | `icann` / `web` | WebPKI; the address from encrypted DNS (plain or oblivious) using the selected DNS transport policy | TRUSTED |
 | [3 — IPFS, IPNS and DNSLink](namespaces/ipfs/SPEC.md) (`IP`) | `ipfs` | the CID: every block hash-checked by the local node; an IPNS record's signature | TRUSTLESS |
-| [4 — Arweave](namespaces/arweave/SPEC.md) (`AR`) | `arweave` | the transaction id names immutable bytes, but the bytes are fetched from an ar.io gateway and **not** checked against it | TRUSTED |
-| [5 — ENS and `web3://`](namespaces/ens/SPEC.md) (`EN`) | `ens`, `web3` | an EIP-1577 contenthash read over a public Ethereum RPC (with ERC-3668 CCIP-Read and a local ENSIP-21 batch); the content it names is CID-verified | TRUSTED |
+| [4 — Arweave](namespaces/arweave/SPEC.md) (`AR`) | `arweave` | gateway retrieval; optional signature-to-ID comparison and conditional Merkle checks for complete transaction data up to 8 MiB; header signature authentication remains open | TRUSTED |
+| [5 — ENS and `web3://`](namespaces/ens/SPEC.md) (`EN`) | `ens`, `web3` | an EIP-1577 contenthash read over a public Ethereum RPC (with ERC-3668 CCIP-Read and a local ENSIP-21 batch); content verification depends on the pointer type | TRUSTED |
 | [6 — Nostr](namespaces/nostr/SPEC.md) (`NO`) | `nostr` | every event's id recomputed and BIP-340 signature checked here, and bound to the question asked; relays are a transport | TRUSTED (authorship proven, completeness not) |
-| [7 — DID, AT Protocol and ActivityPub](namespaces/did/SPEC.md) (`DI`) | `did`, `atproto`, `activitypub` | a DID document fetched from `plc.directory` or the `did:web` host and checked to be about the DID asked for; `at://` and `activitypub:` recognised and refused | TRUSTED for `did:`; a refusal for the other two |
+| [7 — DID, AT Protocol and ActivityPub](namespaces/did/SPEC.md) (`DI`) | `did`, `atproto`, `activitypub` | local documents for `did:key`, `did:jwk`, and `did:pkh`; remote `did:plc` / `did:web` documents checked for a matching ID; `at://` and `activitypub:` refused | TRUSTED in the current shared indicator; local methods return `derived` (see REVIEW.md); refusal for the other two |
 | [8 — Tor](namespaces/tor/SPEC.md) (`TO`) | `tor` | the onion-service key, at the Tor layer, over the device-local Tor only; the page is HTTP inside the tunnel | TRUSTED |
 | [9 — Key-addressed](namespaces/keys/SPEC.md) (`KY`) | `hyper`, `ssb`, `gemini`, `bittorrent`, `magnet` | a hypercore key, an SSB feed key, an infohash or a BEP-46 key verify their own content; Gemini verifies nothing | TRUSTLESS for a key or a hash; TRUSTED for a DNSLink-resolved hyper name and for Gemini |
-| [10 — Experimental](namespaces/experimental/SPEC.md) (`OP`, `NT`) | Part A: HIP-5 `_op`, a route within `hns`; Part B: numeric Handshake TLDs and the `_` URL marker | A: the chain proves *which* Optimism registry contract answers; the contract's answer arrives over a public RPC and is taken on its word. B: a URL-form convention forced by the URL Standard's IPv4 host rule | A: TRUSTED (never TRUSTLESS), lock closed on the chain proof for a content pointer or with a DANE pin for an address. B: as the Handshake chapter, for a name whose support is undecided |
+| [10 — Experimental](namespaces/experimental/SPEC.md) (`OP`, `NT`) | Part A: HIP-5 `_op`, a route within `hns`; Part B: numeric Handshake TLDs and the `_` URL marker | A: the chain proves *which* Optimism registry contract answers; the contract's answer arrives over a public RPC and is taken on its word. B: an optional URL marker for the registered Chromium scheme's numeric-host parsing | A: TRUSTED (never TRUSTLESS), lock closed on the chain proof for a content pointer or with a DANE pin for an address. B: as the Handshake chapter, with numeric-name classification off by default |
+| [11 — Native applications on a Handshake name](namespaces/apps/SPEC.md) (`AP`) | `hns` as an origin | registered custom-scheme origin, scoped authentication provider, and a loopback CONNECT route for DANE-checked WebSockets; service workers are disabled and the native fetch path omits cookies | as Chapter 1 for the name; the tunnel itself adds no authentication |
 
-| [11 — Native applications on a Handshake name](namespaces/apps/SPEC.md) (`AP`) | `hns` as an origin | `hns://` is a standard, secure scheme, so a name is a real origin with storage, cookies and service workers; a `wss://` upgrade to a Handshake name goes through a loopback CONNECT tunnel that resolves the name by chain proof and pins the TLS with DANE, and is fenced to loopback, Handshake hosts, public addresses and the anonymization gate; sign-in with a name from a page on another name goes through the browser as mediator | as Chapter 1 for the name; the tunnel adds no trust of its own and is never a proxy for anything but a Handshake host |
+Chapter 11 describes the browser integration required by an application that
+stores state, opens WebSockets, and signs users in with a Handshake name.
 
-Chapter 11 is where this specification's pieces meet: a **native application**
-— one that lives at a bare Handshake name, keeps state in that origin, holds a
-WebSocket to it, and signs its users in with the names they hold — needs
-Chapters 1, 2 and Part II to hold at once, and the chapter records what that
-takes and what it cost.
-
-**Experimental** (Chapter 10, and the sections so marked inside Chapters 3 and
-7) means: shipped in the browser, reached only behind a record, a setting or a
-name shape that opts into it, not yet a proposed standard, and liable to change
-— and, for numeric Handshake TLDs, whether they are supported at all is
-undecided. The non-experimental chapters describe behaviour this
-implementation commits to interoperating on.
+Sections marked **experimental** describe optional mechanisms whose
+interoperability is not settled. Numeric-name classification is off by default;
+explicit marked URLs and the opt-in classifier remain implemented. The other
+chapters define the project's current compatibility requirements, subject to
+the limitations and review items linked above.

@@ -1,24 +1,12 @@
 # Chapter 11 — Native applications on a Handshake name: deviations and open questions
 
-Every place this chapter's implementation departs from a standard it cites,
-from common practice, or from its own stated design — plus every place we are
-not sure we have made the right call, and the design work we know is still to
-do.
+This file records limitations, departures from cited standards, and open
+questions about the application integration in [SPEC.md](SPEC.md).
 
-The rule this file serves: **a deviation that is not written down is just a bug
-nobody has found yet.**
-
-A note on proportion before the list. The property this chapter exists to
-provide — that a WebSocket from a Handshake page is end-to-end TLS pinned to the
-same on-chain key material as the document, through a tunnel that never holds a
-key — holds, and the pin is proven through a real spliced connection by
-`tests/ws-proxy.test.js` ("e2e: the tunnel preserves end-to-end TLS so a DANE
-pin verifies through it"). The five fences hold and each is pinned by a test,
-including on the anonymized route, where the upstream is dialled through the
-device-local Tor by address and the name is never given to the proxy.
-Everything below is about the *other* things: the authentication that cannot
-exist, the service worker we do not allow, the origin the token is bound to, the
-manifest nobody signs, and a long list of what we have not measured.
+The tunnel tests cover its connection restrictions and end-to-end TLS through
+the splice. They do not establish every browser behavior discussed below.
+The entries distinguish tested behavior, reported observations, and work
+that still needs verification.
 
 Paths written `../../src/…` are shared modules of the top-level package; paths
 written `src/…` and `tests/…` are this chapter's, under `namespaces/apps/`.
@@ -40,15 +28,13 @@ check is implemented and constant-time (`src/ws-proxy.js:217`, `:276-280`,
 
 **The standard says.** RFC 9110 §11 (with RFC 7235's mechanism) defines exactly
 this: a proxy answers `407` with `Proxy-Authenticate` and the client retries
-with `Proxy-Authorization`. RFC 1928/1929 define the SOCKS5 equivalent. Both
-are available on paper and neither is reachable in practice: Chromium's SOCKS5
+with `Proxy-Authorization`. RFC 1928/1929 define the SOCKS5 equivalent. The reference browser integration cannot use either mechanism: Chromium's SOCKS5
 client offers only the "no authentication" method, and Chromium does not
 surface a proxy-auth challenge to its embedder for a `wss://` handshake, so the
 `407` is never answered and the socket dies instead of retrying.
 
-**Why.** Two implementations were built and neither could connect once. The
-choice is between a fence that cannot be enforced and an honest statement that
-the boundary is the loopback bind plus the four content fences.
+**Why.** Two implementations were built and neither could connect once. The reference implementation relies on the loopback bind and the four
+connection checks described in the specification.
 
 **Consequence.** Any local process can use the tunnel to resolve a Handshake
 name and open a TCP connection to its public address on port 443. That is a real
@@ -88,14 +74,13 @@ installed as a progressive web app, and cannot use push or background sync at
 its Handshake name — while the same application at its `https://` gateway
 mirror can. That is a real asymmetry between the two origins of one
 application, and it points the ambitious version of an application at the ICANN
-address, which is the opposite of what this chapter is for.
+address, which limits native applications.
 
 **Status: OPEN.** We recommend enabling service workers at `hns://` once two
 questions are answered: what a cached, self-persisting copy of a page means for
 a name whose records (and therefore its DANE pin) can change under it, and
 whether a worker's own fetches take the same header allowlist as the page's
-(SPEC §3.4). Both are answerable; neither has been answered, and shipping a
-worker that outlives a pin rotation would be worse than not shipping one.
+(SPEC §3.4). These questions need answers before changing the registration.
 
 ### AP-4. WebSocket routing is decided by the target host, not by the initiating origin
 
@@ -121,9 +106,7 @@ application's own `Origin` check is the defence the platform intends — but a
 Handshake application author should know that their socket is reachable from
 the whole web, not only from their own origin.
 
-**Status: DELIBERATE.** Matching the web platform is right here; diverging would
-make Handshake sockets behave unlike every other socket, which is a worse trap
-than the one it closes. Applications must check `Origin` as they would anywhere.
+**Status: DELIBERATE.** The implementation follows the web platform's target-based routing. Applications must check `Origin` as they would anywhere.
 
 ### AP-5. A native page's sign-in token is bound to a URL the request is not sent to
 
@@ -223,19 +206,17 @@ Handshake name (SPEC §4.8), which is what every reference deployment does
 anyway, and a non-default port is a dead end with a bad error. The cost is
 carried by the deployment, not by the trust story.
 
-**Status: DELIBERATE**, with a clean fix if a port ever needs to be. Give the
+**Status: DELIBERATE.** A broader port policy would require changes in both resolution and certificate verification. Give the
 resolution a port parameter, read `_<port>._tcp.<name>`, and thread the port
 from the CONNECT through to the certificate check; until the engine's
-verification callback carries the port, the honest set is the one port the pin
-covers, and refusing is better than splicing unpinned. Both halves must move
+verification callback carries the port, the supported set remains the one port covered by the pin lookup. Both halves must move
 together, or the port becomes reachable before it becomes pinned.
 
 ---
 
 ## 2. Things we are not sure about
 
-These are the ones we would most like other implementers to argue with, and the
-claims we could not verify against either the code or a measurement.
+These claims need additional implementation evidence or measurement.
 
 ### 2.1. Whether the `101` is checked for `Sec-WebSocket-Accept` in our stack
 
@@ -348,8 +329,7 @@ the memory of one successful run is not one.
 
 ## 3. Open design items
 
-Work we know is worth doing and have not done. Each names the file and lines to
-start from.
+Proposed changes and the relevant implementation locations follow.
 
 ### AP-D1. Give the PAC a loopback and private-literal branch
 
@@ -384,8 +364,7 @@ The store supports `revoke` and `uninstall`
 grant made once at install is, in practice, permanent. **Recommendation.** A
 settings page listing installed applications, their entry origins, the names
 granted to each and the manifest hash, with revoke and uninstall. Until it
-exists the consent at install is a decision the user cannot take back, which is
-the strongest possible reason to keep that consent narrow.
+exists the consent at install is a decision the user cannot take back, so the installation grants should remain limited.
 
 ### AP-D7. Native discovery for a dotted Handshake name
 
