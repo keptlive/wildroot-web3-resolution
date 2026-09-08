@@ -1,7 +1,7 @@
 # Chapter 10 — Experimental: references
 
-Every standard, draft or interface this chapter's implementation actually
-reads, with what it is used for and where. Module paths are relative to this
+Standards, drafts, and interfaces used by this chapter, with their purpose
+and implementation locations. Module paths are relative to this
 file; the code lives at the repository root because it is entered from
 Chapter 1.
 
@@ -28,6 +28,6 @@ Chapter 1.
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [WHATWG URL Standard](https://url.spec.whatwg.org/) | URL Standard — [host parsing](https://url.spec.whatwg.org/#host-parsing), the ["ends in a number" checker](https://url.spec.whatwg.org/#ends-in-a-number-checker), the [IPv4 parser](https://url.spec.whatwg.org/#concept-ipv4-parser) and [forbidden host code points](https://url.spec.whatwg.org/#forbidden-host-code-point) | §B.1, §B.2: **the reason the convention exists.** A standard scheme's host whose last label is all ASCII digits is parsed as an IPv4 address, so `hns://14898/` becomes `hns://0.0.58.50/` and `hns://hello.14898/` is not a URL; and `_` is usable as the marker because it is not a forbidden host code point. `../../src/hns-url.cjs`, `NT-2` |
+| [WHATWG URL Standard](https://url.spec.whatwg.org/) | URL Standard — [host parsing](https://url.spec.whatwg.org/#host-parsing), the ["ends in a number" checker](https://url.spec.whatwg.org/#ends-in-a-number-checker), the [IPv4 parser](https://url.spec.whatwg.org/#concept-ipv4-parser) and [forbidden host code points](https://url.spec.whatwg.org/#forbidden-host-code-point) | §B.1, §B.2: A standard scheme's host whose last label is all ASCII digits is parsed as an IPv4 address, so `hns://14898/` becomes `hns://0.0.58.50/` and `hns://hello.14898/` is rejected by the reference browser's registered scheme; and `_` is usable as the marker because it is not a forbidden host code point. `../../src/hns-url.cjs`, `NT-2` |
 | [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123) | Requirements for internet hosts — application and support | §B.2, §2.1 host label syntax: why a Handshake label can never contain `_`, which is what makes the marker unambiguous. `../../src/hns-url.cjs` |
 | [Chromium URL / scheme registry](https://chromium.googlesource.com/chromium/src/+/main/url/) | The implementation of the above | §B.1: a registered standard scheme cannot opt out of IPv4 host parsing, which is why this is not fixable in the embedder. — |

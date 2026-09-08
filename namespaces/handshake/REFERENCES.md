@@ -1,118 +1,117 @@
 # Chapter 1 — Handshake: references
 
-Every standard this chapter's implementation actually reads, with what it is
-used for and where. Nothing is listed that the code does not touch: a padded
-bibliography is worse than none, because it makes the real dependencies
-impossible to see. Where a row says *parsed, not queried* or *not implemented*,
-that is the row's point.
+Standards and implementation references used by this chapter. Each row states
+its role; unsupported features are labelled explicitly. Paths below are relative
+to the repository root unless a browser-only path is identified.
 
-Module paths are relative to this file: `../../src/` is this chapter's
-reference implementation.
+See [DEVIATIONS.md](DEVIATIONS.md) for limitations and
+[REVIEW.md](../../REVIEW.md) for unresolved claims.
 
 ## DNS: messages, terminology, transport
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [RFC 1034](https://www.rfc-editor.org/rfc/rfc1034) | Domain names — concepts and facilities | §6.5c, the rule that tells a **referral** from a **NODATA** (§4.3.2: NS in AUTHORITY with no SOA is a referral), which is what makes the registry-TLD walk possible; §6.5f, §3.6.2 — a CNAME stands alone, so a validated CNAME needs no separate NSEC proving the `A` absent. §HS-15 cites it for the NS set. `../../src/resolver.js` (`referralIn`, the CNAME branch of `_fromZone`) |
-| [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035) | Domain names — implementation and specification | The wire format used throughout §6: header, question, name compression, RR encoding. **§3.3.14** is the TXT rule of §10: a record's `<character-string>`s are **one** value, concatenated, and separate records are separate values — applied identically to the pointer TXT at the name, to the DNSLink TXT at `_dnslink.<name>` (§10.1), on the DoH route and on the `_op` route, so one record cannot mean different things on different paths. It is also why a pointer over 255 bytes is read at all. `../../src/dns-query.js`, `../../src/pointers.js` (`txtStringsFrom`) |
-| [RFC 2181](https://www.rfc-editor.org/rfc/rfc2181) | Clarifications to the DNS specification | §5.2 TTL rules, cited by the caching deviation of §6.8. `../../src/resolver.js` — see HS-1 |
-| [RFC 4343](https://www.rfc-editor.org/rfc/rfc4343) | DNS case insensitivity clarification | Owner names are compared case-insensitively and trailing-dot-stripped wherever a comparison happens, including the question-section check of §6.10. `../../src/resolver.js`, `../../src/dns-query.js`, `../../src/nsec.js`, `../../src/dnssec.js` |
-| [RFC 6891](https://www.rfc-editor.org/rfc/rfc6891) | Extension mechanisms for DNS (EDNS(0)) | The OPT pseudo-record of §6.5, emitted solely to carry the DO bit. **Partial**: not read back, no large-UDP advertisement (UDP is never used), no extended RCODEs. `../../src/dns-query.js` — see HS-11 |
-| [RFC 7766](https://www.rfc-editor.org/rfc/rfc7766) | DNS transport over TCP | Queries in §6 go over **TCP always**, which is why the truncation (TC) rule is moot here by construction rather than unhandled. `../../src/dns-query.js` |
-| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS protocol version 5 | §6.11: the `dial` seam. A CONNECT request (`no authentication` method only) to a device-local SOCKS port carries the authoritative TCP query of §6.5 while an anonymizing proxy is on, so the chain proof and the DNSSEC validation are kept rather than traded away. A dotted quad goes out as ATYP `0x01`; anything else as ATYP `0x03`, a domain name, resolved by the proxy and never locally. §8.1: in Private mode the same dialler carries the A-record site's TLS socket, **by address** (ATYP `0x01`), so Tor learns an IP and no name while the DANE pin is checked on that handshake. Which proxy, and what it is worth, is Chapter 8. `../../src/socks-dial.js`, `../../src/dns-query.js` (`query`'s `dial` option), `../../src/dane-connect.js` (`connectDane`'s and `connectPlain`'s `dial`) |
-| [RFC 8499](https://www.rfc-editor.org/rfc/rfc8499) | DNS terminology | The vocabulary of §2: *authoritative server*, *zone cut*, *delegation*, *referral*, *NODATA*, *validating resolver*, *insecure delegation*, *bailiwick*. §2 |
-| [RFC 3596](https://www.rfc-editor.org/rfc/rfc3596) | DNS extensions to support IPv6 (AAAA) | §6.5f: `AAAA` is asked beside `A` and validated by the same rule; §6.4 reads `GLUE6`, §6.2 `SYNTH6`. The family rule (IPv4 when the name has one) is HS-2. `../../src/resolver.js`, `../../src/spv.js` |
-| [RFC 8914](https://www.rfc-editor.org/rfc/rfc8914) | Extended DNS Errors | **Not implemented.** Would improve the failure reporting of §6.9 and §11.1. HS-11 |
-| [draft-ietf-dnsop-deleg](https://datatracker.ietf.org/doc/draft-ietf-dnsop-deleg/) | Extensible delegation for DNS | **Watched, not implemented**; the RR type is not allocated at IANA, so nothing can interoperate. HS-11 |
+| [RFC 1034](https://www.rfc-editor.org/rfc/rfc1034) | Domain names — concepts and facilities | Delegation and referral handling (§4.3.2), CNAME semantics (§3.6.2), and authoritative-server selection. `src/resolver.js`. |
+| [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035) | Domain names — implementation and specification | DNS message and RR encoding. §3.3.14 permits one or more character-strings in a TXT RR; joining them is the pointer convention used by this implementation. `src/dns-query.js`, `src/pointers.js`. |
+| [RFC 2181](https://www.rfc-editor.org/rfc/rfc2181) | Clarifications to the DNS specification | RRset TTL rules (§5.2), compared with the fixed positive cache (HS-1). |
+| [RFC 4343](https://www.rfc-editor.org/rfc/rfc4343) | DNS case insensitivity clarification | Case-insensitive DNS owner comparison, including matching responses to questions. `src/classify-host.cjs`, `src/dns-query.js`. |
+| [RFC 6891](https://www.rfc-editor.org/rfc/rfc6891) | Extension mechanisms for DNS (EDNS(0)) | EDNS OPT and the DO bit. Extended RCODEs are not read by the shared DNS parser (HS-11). |
+| [RFC 7766](https://www.rfc-editor.org/rfc/rfc7766) | DNS transport over TCP | Authoritative DNS transport uses TCP. `src/dns-query.js`. |
+| [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS protocol version 5 | SOCKS5 CONNECT for injected authoritative and site sockets. `src/socks-dial.js`, `src/dane-connect.js`; Handshake SPEC §6.11 and §8.1. |
+| [RFC 8499](https://www.rfc-editor.org/rfc/rfc8499) | DNS terminology | DNS terminology used across these chapters. Superseded by RFC 9499; retained here for consistency with existing references. |
+| [RFC 3596](https://www.rfc-editor.org/rfc/rfc3596) | DNS extensions to support IPv6 (AAAA) | AAAA records and IPv6 resolution. The current IPv4-first selection policy is recorded in HS-2. |
+| [RFC 8914](https://www.rfc-editor.org/rfc/rfc8914) | Extended DNS Errors | Extended DNS Errors, currently not parsed (HS-11). |
+| [draft-ietf-dnsop-deleg](https://datatracker.ietf.org/doc/draft-ietf-dnsop-deleg/) | Extensible delegation for DNS | Delegation extensions considered but not implemented (HS-11). Draft and allocation status require a dated check. |
 
 ## DNSSEC
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [RFC 4033](https://www.rfc-editor.org/rfc/rfc4033) | DNS security introduction and requirements | The security-state vocabulary (*Secure*, *Insecure*, *Bogus*, *Indeterminate*) that §2 maps the trust states onto, and the fail-closed requirement of §11.1. §2 |
-| [RFC 4034](https://www.rfc-editor.org/rfc/rfc4034) | Resource records for the DNS security extensions | §6.7: DNSKEY (§2), RRSIG (§3) including the **Labels** rule of §3.1.3, DS (§5), NSEC (§4), canonical RR form (§6.2) and canonical NAME ordering (§6.1); §2.1.1 is the Zone Key flag; §3.1.5 the validity window (HS-10). `../../src/dnssec.js`, `../../src/nsec.js` |
-| [RFC 4035](https://www.rfc-editor.org/rfc/rfc4035) | Protocol modifications for the DNS security extensions | The validator's whole job in §6.5–§6.7: §5.2 DS→DNSKEY authentication including that a missing DS must be proven missing, §5.3 RRSIG validation, §5.3.1 CNAME handling (HS-9), §5.3.2 wildcard signature reconstruction, §5.3.4 the wildcard-answer proof, §5.4 authenticated denial, §5.5 "unvalidatable ⇒ Bogus", §3.1.3.4 wildcard NODATA. `../../src/dnssec.js`, `../../src/denial.js`, `../../src/resolver.js` |
-| [RFC 4592](https://www.rfc-editor.org/rfc/rfc4592) | The role of wildcards in the DNS | §6.7: §3.3.1 source of synthesis, `*.<closest encloser>` — the name both wildcard proofs are built around. `../../src/nsec.js`, `../../src/nsec3.js` |
-| [RFC 5011](https://www.rfc-editor.org/rfc/rfc5011) | Automated updates of DNSSEC trust anchors | §6.7, §2.1 only: the **REVOKE** bit; a revoked key anchors nothing. Anchor rollover is structurally inapplicable (HS-11). `../../src/dnssec.js` |
-| [RFC 5155](https://www.rfc-editor.org/rfc/rfc5155) | DNSSEC hashed authenticated denial of existence (NSEC3) | §6.7: hashing (§5), the closest-encloser proof (§8.3), NXDOMAIN (§8.4), NODATA (§8.5) and its wildcard form (§8.7), and §8.9 — Opt-Out proves an insecure delegation and nothing else (§6.6). `../../src/nsec3.js`, `../../src/denial.js` |
-| [RFC 9276](https://www.rfc-editor.org/rfc/rfc9276) | Guidance for NSEC3 parameter settings | §6.7: iterations are the validator's cost to bear, so a hostile zone must not impose an unbounded one; capped at 100. `../../src/nsec3.js` |
-| [RFC 8624](https://www.rfc-editor.org/rfc/rfc8624) | Algorithm implementation requirements for DNSSEC | §6.7: §3.1 signing algorithms and §3.3 DS digest algorithms, and which are MUST / RECOMMENDED / MUST NOT for a **validator** — the list supported and the list refused. `../../src/dnssec.js` |
-| [RFC 3110](https://www.rfc-editor.org/rfc/rfc3110) | RSA/SHA-1 SIGs and RSA keys in the DNS | §6.7, §2 only: the **RSA public key wire format** reused by RSASHA256. The SHA-1 signature scheme itself is refused. `../../src/dnssec.js` |
-| [RFC 5702](https://www.rfc-editor.org/rfc/rfc5702) | Use of SHA-2 algorithms with RSA in DNSKEY and RRSIG | §6.7: algorithm 8, RSASHA256, over the RFC 3110 key format. `../../src/dnssec.js` |
-| [RFC 6605](https://www.rfc-editor.org/rfc/rfc6605) | Elliptic curve digital signature algorithm (DSA) for DNSSEC | §6.7: §4 algorithms 13 (P-256/SHA-256) and 14 (P-384/SHA-384) — key X‖Y uncompressed, signature R‖S fixed-width — and §5 DS digest type 4 (SHA-384). `../../src/dnssec.js` |
-| [RFC 8080](https://www.rfc-editor.org/rfc/rfc8080) | Edwards-curve DSA for DNSSEC | §6.7: algorithm 15, the 32-byte Ed25519 public key as-is. Algorithm 16 (Ed448) is refused. `../../src/dnssec.js` |
-| [RFC 4509](https://www.rfc-editor.org/rfc/rfc4509) | Use of SHA-256 in DNSSEC delegation signer (DS) resource records | §6.7: DS digest type 2. `../../src/dnssec.js` |
-| [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) | The Base16, Base32 and Base64 data encodings | §7 base32hex, uppercase and unpadded, is the NSEC3 hashed-owner encoding (§6.7); §5 base64url is the DoH GET parameter (§9.1) and the Arweave transaction id form (§10). `../../src/nsec3.js`, `../../src/doh.js`, `../../src/pointers.js` |
+| [RFC 4033](https://www.rfc-editor.org/rfc/rfc4033) | DNS security introduction and requirements | DNSSEC security states and the distinction between secure, insecure, bogus, and indeterminate results. |
+| [RFC 4034](https://www.rfc-editor.org/rfc/rfc4034) | Resource records for the DNS security extensions | DNSKEY, RRSIG, NSEC, DS, canonical signing input, label counts, and signature validity windows. `src/dnssec.js`, `src/nsec.js`. |
+| [RFC 4035](https://www.rfc-editor.org/rfc/rfc4035) | Protocol modifications for the DNS security extensions | DS/DNSKEY anchoring, RRset validation, CNAME and wildcard processing, authenticated denial, and validation failure. `src/dnssec.js`, `src/denial.js`, `src/resolver.js`. |
+| [RFC 4592](https://www.rfc-editor.org/rfc/rfc4592) | The role of wildcards in the DNS | Wildcard source of synthesis and closest-encloser semantics. `src/nsec.js`, `src/nsec3.js`. |
+| [RFC 5011](https://www.rfc-editor.org/rfc/rfc5011) | Automated updates of DNSSEC trust anchors | REVOKE-bit handling (§2.1). The rollover procedure is not used; Handshake anchors change through chain records (HS-11). |
+| [RFC 5155](https://www.rfc-editor.org/rfc/rfc5155) | DNSSEC hashed authenticated denial of existence (NSEC3) | NSEC3 closest-encloser, NXDOMAIN, NODATA, wildcard, and insecure-delegation proofs. `src/nsec3.js`, `src/denial.js`. |
+| [RFC 9276](https://www.rfc-editor.org/rfc/rfc9276) | Guidance for NSEC3 parameter settings | NSEC3 parameter guidance. The validator caps iterations at 100. `src/nsec3.js`. |
+| [RFC 8624](https://www.rfc-editor.org/rfc/rfc8624) | Algorithm implementation requirements for DNSSEC | The cited DNSSEC algorithm implementation requirements underlying the supported/refused lists in Handshake SPEC §6.7. |
+| [RFC 3110](https://www.rfc-editor.org/rfc/rfc3110) | RSA/SHA-1 SIGs and RSA keys in the DNS | RSA DNSKEY wire format reused for RSASHA256. The SHA-1 signature algorithm is not supported. `src/dnssec.js`. |
+| [RFC 5702](https://www.rfc-editor.org/rfc/rfc5702) | Use of SHA-2 algorithms with RSA in DNSKEY and RRSIG | RSASHA256 (algorithm 8), using the RSA key format from RFC 3110. `src/dnssec.js`. |
+| [RFC 6605](https://www.rfc-editor.org/rfc/rfc6605) | Elliptic curve digital signature algorithm (DSA) for DNSSEC | P-256/SHA-256, P-384/SHA-384, and DS digest type 4. `src/dnssec.js`. |
+| [RFC 8080](https://www.rfc-editor.org/rfc/rfc8080) | Edwards-curve DSA for DNSSEC | Ed25519 DNSSEC (algorithm 15). Ed448 is not supported. `src/dnssec.js`. |
+| [RFC 4509](https://www.rfc-editor.org/rfc/rfc4509) | Use of SHA-256 in DNSSEC delegation signer (DS) resource records | DS digest type 2, SHA-256. `src/dnssec.js`. |
+| [RFC 4648](https://www.rfc-editor.org/rfc/rfc4648) | The Base16, Base32 and Base64 data encodings | Base32hex for NSEC3 names and base64url for DoH queries and transaction IDs. |
 
 ## TLS and certificates
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [RFC 6698](https://www.rfc-editor.org/rfc/rfc6698) | The DNS-based authentication of named entities (DANE) transport layer security protocol: TLSA | §8: the TLSA record and its four parameters. One profile is implemented — usage 3 (DANE-EE), selector 1 (SPKI), matching type 1 (SHA-256). §3 gives the owner-name form `_<port>._tcp.<host>`; `_443._tcp` is always used (HS-6). The check is the same on both routes of §8.1 — direct, or through the device-local Tor by address — because `connectDane` hands `verifyDane` the peer certificate of whichever socket carried the handshake. `../../src/dane.js`, `../../src/resolver.js`, `../../src/dane-connect.js` |
-| [RFC 7671](https://www.rfc-editor.org/rfc/rfc7671) | The DANE protocol: updates and operational guidance | §8: §4.1 unusable TLSA records (deviation, HS-5), §5.1 DANE-EE ignores PKIX expiry (followed deliberately), §7.2 the TLSA base domain across a CNAME, §8.1 operator key rotation and what a client does on a mismatch (HS-12). The pin is applied on the one handshake the request rides, whichever route carried it (this chapter's §8.1), and the socket is never pooled. `../../src/dane.js`, `../../src/resolver.js`, `../../src/dane-connect.js` |
-| [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280) | Internet X.509 public key infrastructure certificate and CRL profile | §8, only to **parse** a certificate and extract its SubjectPublicKeyInfo for hashing. No chain is built and no CA is consulted on the `hns://` path — that is the point of DANE-EE. `../../src/dane.js` (Node `X509Certificate`) |
-| [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446) | The transport layer security (TLS) protocol version 1.3 | §8, §8.1: the transport an `hns://` fetch runs over, terminated by Node's TLS stack; the peer certificate it yields is what the pin is checked against. `connectDane` sets `servername` to the Handshake name, turns PKIX verification off, and layers the handshake over a direct socket or the SOCKS tunnel alike. `../../src/dane-connect.js`; the request written over it is the composition layer's (DEVIATIONS §4) |
-| [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110) | HTTP semantics | §8: the application protocol carried over that connection, and the semantics of the status codes the resolution layer reports. The composition layer |
+| [RFC 6698](https://www.rfc-editor.org/rfc/rfc6698) | The DNS-based authentication of named entities (DANE) transport layer security protocol: TLSA | TLSA records and port-derived owner names. Handshake supports the `3 1 1` profile; ICANN navigation does not use this DANE path. |
+| [RFC 7671](https://www.rfc-editor.org/rfc/rfc7671) | The DANE protocol: updates and operational guidance | Unusable TLSA records (§4.1), DANE-EE certificate checks (§5.1), CNAME base domains (§7.2), and key rotation (§8.1). See HS-5, HS-9, and HS-12. |
+| [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280) | Internet X.509 public key infrastructure certificate and CRL profile | X.509 certificate structure. The DANE path extracts SPKI; the loopback bridge generates a certificate. Ordinary HTTPS uses the engine’s separate WebPKI validation. |
+| [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446) | The transport layer security (TLS) protocol version 1.3 | TLS 1.3. The runtime provides the TLS implementation; this repository configures connections and applies DANE pins. |
+| [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110) | HTTP semantics | HTTP semantics used by transport handlers and error responses. |
 
 ## Encrypted DNS transport
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [RFC 8484](https://www.rfc-editor.org/rfc/rfc8484) | DNS queries over HTTPS (DoH) | §9.1: wire-format DoH, GET with `?dns=<base64url>` and `application/dns-message`; §4.1 is why the message id is fixed at zero and the question section is the only binding (§6.10). Several Handshake DoH servers reject POST, which is why GET is used. §9.3: the plain transport is used in Fast mode only; in Private it is never taken (`DoHResolver`'s `strictOblivious`). `../../src/doh.js` |
-| [RFC 9230](https://www.rfc-editor.org/rfc/rfc9230) | Oblivious DNS over HTTPS | §9.2: §6 the message format and HPKE parameters, §6.3 the response AEAD key derivation from the HPKE exporter secret plus a target-chosen nonce, and the ODoH configuration record. §9.3: in Private mode the only transport a Handshake name may take over DoH. `../../src/odoh.js`, `../../src/odoh-bridge.js` |
-| [RFC 9180](https://www.rfc-editor.org/rfc/rfc9180) | Hybrid public key encryption | §9.2: the construction ODoH is built on — X25519-HKDF-SHA256 / HKDF-SHA256 / AES-128-GCM, over WebCrypto. `../../src/odoh.js` |
-| [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) | HMAC-based extract-and-expand key derivation function (HKDF) | §9.2: §2.2/§2.3 extract-and-expand over WebCrypto HMAC-SHA256, for the ODoH response key and nonce. `../../src/odoh.js` |
-| [RFC 9462](https://www.rfc-editor.org/rfc/rfc9462) | Discovery of designated resolvers | **Not implemented**; an available upgrade not taken. HS-11 |
+| [RFC 8484](https://www.rfc-editor.org/rfc/rfc8484) | DNS queries over HTTPS (DoH) | Wire-format DoH, HTTP templates, and media types. §4.1 recommends ID zero for cache compatibility; the client uses zero and separately matches the reply question. `src/doh.js`. |
+| [RFC 9230](https://www.rfc-editor.org/rfc/rfc9230) | Oblivious DNS over HTTPS | ODoH messages, configuration structures, and response key/nonce derivation (§6.3). `src/odoh.js`, `src/odoh-bridge.js`. |
+| [RFC 9180](https://www.rfc-editor.org/rfc/rfc9180) | Hybrid public key encryption | HPKE construction used by ODoH: X25519-HKDF-SHA256, HKDF-SHA256, AES-128-GCM. `src/odoh.js`. |
+| [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) | HMAC-based extract-and-expand key derivation function (HKDF) | HKDF extract/expand used in ODoH key derivation. `src/odoh.js`. |
+| [RFC 9462](https://www.rfc-editor.org/rfc/rfc9462) | Discovery of designated resolvers | Discovery of Designated Resolvers. Not implemented; resolver templates are configured. |
 
 ## Service binding, ECH, and records read but not queried
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [RFC 9460](https://www.rfc-editor.org/rfc/rfc9460) | Service binding and parameter specification via the DNS (SVCB and HTTPS RRs) | §2.2 the RDATA format. A complete parser exists — SvcPriority, TargetName, `alpn`, `port`, `ipv4hint`, and the `ech` SvcParam — tested against real Cloudflare rdata. **Type 65 is never queried during resolution.** `../../src/dns-query.js`, `../../tests/svcb.test.js` — HS-3 |
-| [RFC 9848](https://www.rfc-editor.org/rfc/rfc9848) | TLS encrypted client hello | The reason the SVCB parser exists; blocked on the record not being queried *and* on Node exposing no ECH option. HS-3, §11.6 |
-| [RFC 7929](https://www.rfc-editor.org/rfc/rfc7929) | DNS-based authentication of named entities (DANE) bindings for OpenPGP | RR type 61 is parsed (§2.3: the whole RDATA is the transferable public key). Used by the browser's mail client, not by resolution; it lives in the DNS client because that is the only one in the tree. `../../src/dns-query.js` |
+| [RFC 9460](https://www.rfc-editor.org/rfc/rfc9460) | Service binding and parameter specification via the DNS (SVCB and HTTPS RRs) | SVCB/HTTPS RDATA and service parameters. The shared parser supports them; the Handshake resolution algorithm does not query type 65. |
+| [RFC 9848](https://www.rfc-editor.org/rfc/rfc9848) | Bootstrapping TLS Encrypted ClientHello with DNS Service Bindings | Obtaining ECH configuration through DNS service bindings. Handshake does not currently query the required HTTPS record; engine HTTPS capabilities are separate. |
+| [RFC 9849](https://www.rfc-editor.org/rfc/rfc9849) | TLS Encrypted Client Hello | ECH protocol itself; RFC 9848 specifies its DNS service-binding bootstrap. |
+| [RFC 7929](https://www.rfc-editor.org/rfc/rfc7929) | DNS-based authentication of named entities (DANE) bindings for OpenPGP | OPENPGPKEY RR parsing for the browser’s mail functionality, outside this resolution algorithm. `src/dns-query.js`. |
 
 ## Special-use and reserved names
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [RFC 6761](https://www.rfc-editor.org/rfc/rfc6761) | Special-use domain names | §3: `localhost` (the whole subtree), `invalid`, `test`, `example` are never Handshake names. `../../src/reserved-names.cjs`, consulted by `../../src/router.js` |
-| [RFC 6762](https://www.rfc-editor.org/rfc/rfc6762) | Multicast DNS | §3: `local` is mDNS. Without this carve-out every NAS and printer name on a home network would be sent to whoever registers the Handshake TLD `local`. `../../src/reserved-names.cjs` |
-| [RFC 7686](https://www.rfc-editor.org/rfc/rfc7686) | The `.onion` special-use domain name | §3: `onion` is Tor's, never Handshake's, on every path. `../../src/reserved-names.cjs`, `../../src/router.js` (the Tor test runs first) |
-| [RFC 8375](https://www.rfc-editor.org/rfc/rfc8375) | Special-use domain `home.arpa.` | §3: together with `arpa`, `internal`, `home`, `lan`, `corp`, `intranet`, `private` — the labels home routers and corporate networks actually use. `../../src/reserved-names.cjs` |
-| [RFC 5737](https://www.rfc-editor.org/rfc/rfc5737) | IPv4 address blocks reserved for documentation | §11.2: the documentation addresses (`203.0.113.0/24`) used throughout the test fixtures. `../../tests/fixtures/resolver/` |
-| [RFC 6890](https://www.rfc-editor.org/rfc/rfc6890) | Special-purpose IP address registries | §11.2: the registry the SSRF guard rejects — loopback, private, link-local (including `169.254.169.254`), CGNAT, benchmarking, multicast, reserved, and the IPv6 equivalents. `../../src/safe-address.js` |
+| [RFC 6761](https://www.rfc-editor.org/rfc/rfc6761) | Special-use domain names | Special-use treatment for localhost and its subtree, invalid, test, and example. `src/reserved-names.cjs`. |
+| [RFC 6762](https://www.rfc-editor.org/rfc/rfc6762) | Multicast DNS | The `.local` multicast-DNS namespace. Excluded from Handshake classification. `src/reserved-names.cjs`. |
+| [RFC 7686](https://www.rfc-editor.org/rfc/rfc7686) | The `.onion` special-use domain name | Onion addresses remain in the Tor namespace, including malformed inputs. `src/classify-host.cjs`. |
+| [RFC 8375](https://www.rfc-editor.org/rfc/rfc8375) | Special-use domain `home.arpa.` | The `home.arpa` special-use domain. It does not reserve `.home` or the other local-network conventions in this client’s list. |
+| [RFC 5737](https://www.rfc-editor.org/rfc/rfc5737) | IPv4 address blocks reserved for documentation | Documentation IPv4 ranges used by test fixtures. |
+| [RFC 6890](https://www.rfc-editor.org/rfc/rfc6890) | Special-purpose IP address registries | Special-purpose address registries consulted when defining the Handshake address guard. `src/safe-address.js`. |
 
 ## Internationalized names
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [RFC 5890](https://www.rfc-editor.org/rfc/rfc5890) | Internationalized domain names for applications (IDNA): definitions and document framework | §3: a Unicode host is converted to A-labels before it reaches the resolver or the ICANN comparison, so a name is compared in one canonical form. `../../src/router.js` — see HS-14 |
-| [RFC 5891](https://www.rfc-editor.org/rfc/rfc5891) | Internationalized domain names in applications (IDNA): protocol | §3: what IDNA2008 requires, and what is therefore *not* what this implementation performs. HS-14 |
-| [UTS #46](https://www.unicode.org/reports/tr46/) | Unicode IDNA compatibility processing | §3: what the WHATWG URL Standard actually requires, and therefore what the conversion actually is. `../../src/router.js` — HS-14 |
+| [RFC 5890](https://www.rfc-editor.org/rfc/rfc5890) | Internationalized domain names for applications (IDNA): definitions and document framework | A-label and U-label terminology for internationalized domain names. |
+| [RFC 5891](https://www.rfc-editor.org/rfc/rfc5891) | Internationalized domain names in applications (IDNA): protocol | IDNA2008 registration/lookup rules. The implementation instead uses WHATWG UTS #46; compatibility differences remain under review. |
+| [UTS #46](https://www.unicode.org/reports/tr46/) | Unicode IDNA compatibility processing | Compatibility processing required by the WHATWG host parser. Used for A-label conversion before ICANN classification. |
 
 ## Handshake
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [hsd](https://github.com/handshake-org/hsd) and [hsd-dev.org](https://hsd-dev.org/) | Handshake protocol implementation and documentation | §6.1, §6.11, §11.5: the SPV node — header sync, `getnameresource`, and the Urkel tree proof verified against the committed tree root in a verified header; `--proxy` is how the node's own peer traffic is put through a SOCKS proxy, and `--memory` the backend used where no native LevelDB build is available, which is what makes the restart of HS-16 a full re-sync. hsd is an optional runtime dependency, spawned as a child process. `../../src/spv.js`, `../../src/hsd-spv-launcher.cjs` |
-| [Handshake resource format](https://hsd-dev.org/api-docs/) | The on-chain `Resource` | §2, §6.1–§6.4: what a name's chain record can carry — `NS`, `GLUE4`/`GLUE6`, `SYNTH4`/`SYNTH6`, `DS`, `TXT`. The `DS` is the anchor this design substitutes for the ICANN root. `../../src/resolver.js` |
-| [Urkel tree](https://github.com/handshake-org/urkel) | The authenticated data structure | §11.5: what the name proof is against. Via hsd |
-| [HIP-0005](https://github.com/handshake-org/HIPs/blob/master/HIP-0005.md) | Pseudo-TLD delegation to alternative naming systems | §6.3: why an `NS` target under a `_<chain>` pseudo-TLD is not a host and is removed from the nameserver list. The `_op` route itself is Chapter 10; `_eth` is not implemented (HS-13). `../../src/resolver.js` |
+| [hsd](https://github.com/handshake-org/hsd) and [hsd-dev.org](https://hsd-dev.org/) | Handshake protocol implementation and documentation | SPV headers, resource proofs, and process configuration. `src/spv.js`, `src/hsd-spv-launcher.cjs`. |
+| [Handshake resource format](https://hsd-dev.org/api-docs/) | The on-chain `Resource` | On-chain Resource records: NS, glue, synthetic addresses, DS, and TXT. `src/resolver.js`. |
+| [Urkel tree](https://github.com/handshake-org/urkel) | The authenticated data structure | Authenticated tree used for Handshake name inclusion/exclusion proofs, via hsd. |
+| [HIP-0005](https://github.com/handshake-org/HIPs/blob/master/HIP-0005.md) | Pseudo-TLD delegation to alternative naming systems | Pseudo-TLD delegation. `_op` is specified in experimental Chapter 10; other pseudo-TLDs are excluded from ordinary nameserver queries. |
 
 ## URL and browser integration
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [WHATWG URL Standard](https://url.spec.whatwg.org/) | URL Standard | §5: a *standard* (special) scheme's host is parsed by the host parser, which is what makes `hns://` a real web origin and also what constrains the host form. The numeric-label consequence is Chapter 10, Part B. `../../src/router.js` |
-| [Electron `protocol.registerSchemesAsPrivileged`](https://www.electronjs.org/docs/latest/api/protocol#protocolregisterschemesasprivilegedcustomschemes) | Electron protocol API | §5: registering `hns:` as a **standard**, **secure** scheme is what buys origins, `fetch`, service workers and secure-context features — and is the same decision that subjects the host to the URL Standard's parsing. The browser's `main.cjs`, not in this tree |
-| [RFC 7595](https://www.rfc-editor.org/rfc/rfc7595) | Guidelines and registration procedures for URI schemes | §3.8, the provisional registration `hns:` does not yet have. HS-D2 |
+| [WHATWG URL Standard](https://url.spec.whatwg.org/) | URL Standard | URL syntax, host parsing, origins, and numeric-host handling. Electron’s custom `standard` flag is an implementation extension, not membership in WHATWG’s fixed special-scheme list. |
+| [Electron `protocol.registerSchemesAsPrivileged`](https://www.electronjs.org/docs/latest/api/protocol#protocolregisterschemesasprivilegedcustomschemes) | Electron protocol API | Electron custom-scheme declarations and privileges before startup. `standard`, `secure`, and service-worker permissions are separate flags. |
+| [RFC 7595](https://www.rfc-editor.org/rfc/rfc7595) | Guidelines and registration procedures for URI schemes | URI-scheme registration procedures, including provisional registration proposed for `hns` (RT-D4, HS-D2). |
 
-## Not standards, but load-bearing
+## Implementation and interoperability references
 
 | Identifier | Title | Used for |
 |---|---|---|
-| [DNSLink](https://dnslink.dev/) | The `_dnslink.<name> TXT dnslink=/ipfs/<cid>` convention | §10.1: the **second pointer source**, and the reason a site published for kubo, IPFS Companion or Brave opens here unchanged. Defines the `_dnslink.` owner prefix, the `dnslink=/<namespace>/<address>[/path]` value grammar and the one-value-per-name rule this implementation reads it by; only `/ipfs/` and `/ipns/` are pointers here. Read on both routes, under the same DNSSEC and proven-absence rules as the pointer at the name (§6.5d–e), and written at publish beside `ipfs=`. `../../src/pointers.js` (`parseDnslink`, `dnslinkPointerFrom`, `mergePointers`, `dnslinkValue`, `dnslinkOwner`), `../../src/resolver.js` (`_fromZone`), `../../src/doh.js` |
-| [IANA root zone database](https://data.iana.org/TLD/tlds-alpha-by-domain.txt) | Delegated top-level domains | §3: the ICANN snapshot that decides ICANN-vs-Handshake for every name, checked against the live list by a network test in the browser tree. `../../src/icann-tlds.cjs` |
-| [RFC 9498](https://www.rfc-editor.org/rfc/rfc9498) | The GNU Name System | §3, §9.10: namespace precedence — resolve in the alternative namespace when its suffix matches, and do not continue into DNS on failure. Adopted as a normative rule because it is the only place this is written down in an RFC. `../../src/router.js` |
-| [`../../SPEC.md` §4.2](../../SPEC.md) | The Fast / Private switch | §4.1, §8.1, §9.3, §10.2, §11.6: the one control whose policy table (`policyFor`) this chapter's consumers read — `strictOblivious` for the DoH resolver, the route for the site socket and the pointer decisions — and the one builder of every mode-caused page, `privateRefusal('lookup' \| 'site' \| 'ipfs' \| 'p2p')`. The disclosure the control carries is `DISCLOSURE`, in full. `../../src/delivery-mode.js`, `../../tests/delivery-mode.test.js` |
+| [DNSLink](https://dnslink.dev/) | The `_dnslink.<name> TXT dnslink=/ipfs/<cid>` convention | The `_dnslink.<name>` TXT pointer convention. Supported namespaces are `/ipfs/` and `/ipns/`; Handshake SPEC §10.1 defines merging and conflict handling. `src/pointers.js`. |
+| [IANA root zone database](https://data.iana.org/TLD/tlds-alpha-by-domain.txt) | Delegated top-level domains | The delegated-TLD list used for classification. The bundled snapshot contains 1,438 labels, version 2026090500. `src/icann-tlds.cjs`. |
+| [RFC 9498](https://www.rfc-editor.org/rfc/rfc9498) | The GNU Name System | Namespace precedence (§9.10), adopted from GNS as the router’s no-cross-namespace-fallback rule L2. |
+| [`../../SPEC.md` §4.2](../../SPEC.md) | The Fast / Private switch | Shared Fast/Private policy and trust model. `src/delivery-mode.js` and its tests define policy; browser composition applies it. |

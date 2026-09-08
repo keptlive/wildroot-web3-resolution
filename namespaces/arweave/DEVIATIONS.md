@@ -1,79 +1,48 @@
 # Chapter 4 — Arweave: deviations and open questions
 
-Every place this chapter's implementation departs from a specification it
-cites, from common practice, or from its own stated design — plus every place
-we are not sure we have made the right call, and every design item still open.
+Known deviations, unresolved questions and proposed changes for Arweave identifiers, gateway retrieval and verification limits.
 
-The rule this file serves, inherited from the spine: **a deviation that is not
-written down is just a bug nobody has found yet.**
+Entries distinguish current behaviour from recommendations. Paths beginning
+`src/` or `tests/` are relative to this chapter; `../../src/` names shared
+modules. Browser paths refer to the Wildroot source tree. Historical line
+references may have moved since extraction.
 
-Everything measured below was measured against
-`namespaces/arweave/src/ar.js`, which is byte-identical to `src/hns/ar.js` in
-the Wildroot tree, and against `../../src/pointers.js` and
-`../../src/trust-path.js`, which this chapter shares with its siblings.
+[Chapter specification](SPEC.md) · [References](REFERENCES.md)
 
 ---
 
 ## 1. Deviations
 
-### AR-1. The BYTES are verified against the transaction for a top-level transaction under 8 MiB (resolved 2026-09-06, with a stated limit)
+<a id="ar-1-the-bytes-are-verified-against-the-transaction-for-a-top-level-transaction-under-8-mib-resolved-2026-09-06-with-a-stated-limit"></a>
 
-*SPEC §9.2 · `src/ar.js` (whole module)*
+### AR-1. Conditional body checks and the remaining authentication gap
 
-**What.** No chunk proof is checked and `data_root` is never compared with
-anything. The transaction *header* is checked — fetched from a second gateway
-and required to hash to the identifier (SPEC §9.1.1), which is where the
-`data_root` arrives, authenticated — and then the bytes that were served are
-not measured against it. For the content itself the answering gateway is
-trusted like any HTTPS host.
+*SPEC §9 · `src/ar.js`, `src/ar-merkle.js`*
 
-**The standard says.** An Arweave transaction id is the SHA-256 digest of the
-transaction's signature, and a format-2 transaction's data is committed by the
-`data_root` Merkle root inside that signed header (the Arweave reference
-implementation's documentation; ANS-104 states the same derivation verbatim for
-a bundled data item: *"The id of the DataItem, is the SHA256 digest of this
-signature."*). The identifier is therefore checkable, and a client that does
-not check it is trusting whoever answered.
+**Current behaviour.** Since 2026-09-06, the handler compares eligible response
+bodies with a gateway-supplied `data_root`. The header's signature must first
+hash to the txid. A body is eligible when the request has no path or range,
+the header's declared size is at most 8 MiB, and the buffered body has exactly
+that size. A root mismatch returns 502; a match returns
+`X-Arweave-Verified: bytes`.
 
-**Why.** Full chunk verification is a real amount of work — the chunk endpoint,
-the Merkle proof format, and a bounded buffer to hash against — where the header
-check was one hash and one request. The cheap half was therefore done first
-(AR-D1), and the expensive half is what is left. The scheme's namespace-table
-row still records `status: 'partial'` rather than `live` for exactly this
-reason, which is the model this file wants: the deviation lives in the code's
-own metadata, not only in prose.
+**Limits.** A length mismatch is reported as `header` so gateway-rendered index
+pages can be served. Large declared transactions, ranges, manifest paths and
+bundled items without a top-level header remain unchecked. The body is buffered
+before its length is compared; 8 MiB is a declared-size threshold, not a bound
+on a hostile response.
 
-**Consequence.** SPEC §11.7: a successful `ar://` fetch establishes that a
-TLS-authenticated host from a list we shipped returned these bytes for this
-identifier, and — with the header check — that a second, independent host agrees
-the identifier names a real transaction. Neither is a statement about the bytes.
-A hostile or compromised gateway still serves arbitrary content for the right
-transaction and nothing notices. Contrast `ipfs://`, where the local node checks
-every block hash, and `bittorrent://`, where the infohash does it — Arweave is
-the one content scheme in this browser whose bytes are not checked. What limits
-the damage is that the claim is not overstated anywhere: the trust panel calls
-the content step `unverified`, the aggregate verdict is `partial`, the scheme
-table says `partial`, and the response header says `header`, never `bytes`
-(SPEC §9.2, §9.1.1).
+**Authentication gap.** `headerMatchesId()` hashes the signature bytes but does
+not verify that the signature covers the supplied header fields. Changing
+`owner`, `data_root`, `data_size` or `tags` while preserving `signature`
+does not change the result. The conditional body check therefore establishes
+agreement with the supplied root, not the complete binding to the Arweave id.
 
-**Status: RESOLVED for the common case, with the limit stated.** Since
-2026-09-06 `../../src/ar-merkle.js` computes the chunk Merkle root (256 KiB
-chunks, the last two rebalanced; leaf `H(H(H(chunk))‖H(note))`, branch
-`H(H(l)‖H(r)‖H(note))`; validated live against top-level transactions) and
-`../../src/ar.js` holds a whole body of a proven header's transaction up to
-`MAX_VERIFY_BYTES` (8 MiB), refuses one that does not hash to `data_root`,
-and answers `X-Arweave-Verified: bytes`. The body is checked only when its length is
-the header's `data_size`: a gateway RENDERS a bundle or a path manifest as an
-index page (arweave.net: a 10,386-byte bundle answered with a 2,285-byte page),
-and that page is the gateway's, not the data the root commits to — reported
-`header`, never refused; a body of the right length that does not hash is the
-one case refused. Above the limit, on a Range request, and for a bundled data
-item (no top-level header: `/tx/<id>` is 404 on every gateway), the header
-check stands alone and the header says `header` or
-`none` — the label never claims what was not checked. The trust panel's
-content step remains `unverified` because it is written at resolution time,
-before the fetch; the response header is the per-fetch truth. What remains:
-chunk proofs for bodies above the limit, and bundled items via their bundle.
+**Status: PARTIALLY IMPLEMENTED.** The small-body comparison is implemented.
+Header authentication, bounded response buffering, larger-body verification and
+bundled-item verification remain open. The resolution-time trust panel stays
+`unverified` / `partial`; the response header reports the fetch check. See
+[REVIEW.md](../../REVIEW.md) and AR-D1.
 
 ---
 
@@ -90,21 +59,14 @@ RFC 7595 §3 sets out the guidelines and the IANA registration procedure for a
 new URI scheme, including a provisional registration for exactly this kind of
 established-but-unregistered convention. `ar` appears in no IANA registry.
 
-**Why.** Adopting the ecosystem's form unchanged is better than inventing a
-second one. This is the same reasoning the spine applies elsewhere, and the
-opposite of the case where no convention existed at all and one had to be
-invented.
+**Why.** The handler follows the existing ecosystem URL form.
 
-**Consequence.** Interoperability rests on convention. If ar.io changed the
-form, or if a registration standardised a different one, we would follow rather
-than argue. Nothing in this implementation depends on the scheme being
-registered, and the parsing rule that matters — read the identifier from the
-raw string, never from a URL host accessor (SPEC §4.2) — is ours to keep
-either way.
+**Consequence.** Interoperability depends on convention. A future ecosystem
+standard may require updating the URL form. The case-preserving parsing rule
+is specified in SPEC §4.2.
 
-**Status: DELIBERATE.** Registering `ar` is not ours to do: the scheme belongs
-to the Arweave ecosystem, and a registration filed by a browser vendor that did
-not define it would be presumptuous. We would support and follow one.
+**Status: DELIBERATE.** This project follows the ecosystem convention and
+does not propose its own scheme registration.
 
 ---
 
@@ -122,24 +84,19 @@ resolver honours it.
 
 **Why.** Inherited from the spine's D-1; no Arweave-specific decision was made.
 
-**Consequence.** Worth naming separately only because Arweave is the one kind
-where a *longer* cache would be safe by construction: the identifier is
-immutable, so the answer cannot go stale in a way that matters until the name's
-owner republishes, and a republish already calls `forget()`. The deviation here
-is that we are more conservative than we need to be, which costs lookups and
-nothing else.
+**Consequence.** The transaction id is immutable, but the name-to-id binding
+can change. Caching that binding still needs the authoritative TTL. Local
+republishing calls `forget()`; that does not invalidate other clients' caches.
 
-**Status: DELIBERATE** as an Arweave decision — there is nothing to change in
-this chapter. The underlying flat-60-second cache is the spine's D-1 and is
-open on its own terms; when it starts honouring TTLs, an `ar=` pointer is the
-safest kind to give a generous ceiling.
+**Status: OPEN in the shared resolver.** The flat positive-cache policy is
+tracked as D-1 in the Handshake deviations. Arweave does not define a separate
+cache policy.
 
 ---
 
 ## 2. Things we are not sure about
 
-These are not settled positions. They are the places where we think the
-implementation may be wrong and would like to be told so.
+The questions below remain unresolved.
 
 ### AR-U1. Is delegating manifest resolution to the gateway defensible at all?
 
@@ -158,8 +115,8 @@ about, so a site served through a manifest — which is most published sites —
 the weakest form of every guarantee in this chapter. Even a client that verified
 bytes (AR-1) would still be trusting the mapping.
 
-We do not know whether the right answer is "parse manifests client-side" (real
-work, real drift risk) or "keep delegating and be loud about it" (what we do).
+The choice is between client-side manifest parsing and continued delegation
+with an explicit trust limit.
 
 ### AR-U2. We have not verified the manifest version 0.2.0 clauses
 
@@ -182,11 +139,8 @@ has no way to tell which. A correct ArNS client probably has to read the ANT
 itself, which makes it a chain-reading namespace like HIP-5 `_op` and not a
 gateway-fetching one like this.
 
-There is a second, sharper question underneath. We hold `<label>_persist.ar.io`
-and it resolves through ordinary DNS and an ordinary CA-issued certificate —
-which is *precisely* the trust model this whole project exists to improve on.
-Presenting an ar.io URL as a durability story while it is CA-authenticated
-deserves a clearer statement than it currently gets anywhere.
+The documentation should also distinguish ArNS durability claims from the
+ordinary DNS and CA authentication used for `<label>_persist.ar.io`.
 
 ### AR-U4. Is one hardcoded gateway list the right shape?
 
@@ -225,30 +179,17 @@ us.
 
 ### AR-D1. The `data_root` half of the cheap check
 
-This item had two steps and the first is built. The header is fetched from a
-gateway other than the one that served the bytes and required to hash to the
-identifier (SPEC §9.1.1, `headerMatchesId`, `tests/arweave-header.test.js`); a
-mismatch is a 502 in the Arweave namespace, and `X-Arweave-Verified` reports
-which of `header` and `none` happened.
+The small-body Merkle comparison is implemented (AR-1). The original proposal
+for a 4 MB threshold is superseded by `MAX_VERIFY_BYTES = 8 MiB`.
 
-**What is left.** The header carries a `data_root`, authenticated, and nothing
-compares the bytes with it. Recommendation, in order: buffer the body when it is
-small enough (a threshold — 4 MB covers a manifest and most pages) and hash it
-against `data_root` for a single-chunk transaction; above the threshold, or for a
-multi-chunk transaction, compare the body with the same path fetched from the
-second gateway; then, and only if it is worth it, the chunk endpoint and the
-Merkle proof format for the general case. Prove it with a mock gateway returning
-tampered bytes for a valid header, which must fail closed as an Arweave-namespace
-failure and never as a fall-through — the mirror of the case
-`tests/arweave-header.test.js` already pins. The response header gains a `bytes`
-value at that point and not before, and only then may the trust step change
-(AR-1, AR-U5).
+**Remaining work.** Verify the transaction signature over its fields before
+treating `data_root` as authenticated. Bound response buffering independently
+of the gateway-supplied size. Define verification for larger transactions,
+bundled items and manifest mappings.
 
-**One thing to preserve.** The header request must keep coming from a gateway
-other than the one that served the bytes, for the same reason it does now: a
-lying gateway would supply a matching `data_root` too. When the body comparison
-is added, the *bytes* must come from the two hosts in the other order, or one
-operator answers for both halves of its own proof.
+Cross-gateway byte comparison can detect disagreement, but agreement is not a
+cryptographic proof. Keep that distinction in any future response-header or
+trust-panel change. [REVIEW.md](../../REVIEW.md) records the decisions needed.
 
 ### AR-D2. `Config.arOptions` has no schema, default or validation
 
@@ -261,7 +202,7 @@ whole fetch in plaintext, which SPEC §6.1 requires against.
 
 **Recommendation.** Declare `arOptions` in the configuration schema with
 `AR_GATEWAYS` as its documented default; validate that every entry parses as an
-`https:` URL and reject the configuration loudly when one does not; report an
+`https:` URL and reject the configuration with an error when one does not; report an
 unrecognised key rather than ignoring it. Then either surface the list in
 settings or state in the documentation that it is rc-only. AR-U4 is the
 question of what the list *should* be; this is only about making the existing

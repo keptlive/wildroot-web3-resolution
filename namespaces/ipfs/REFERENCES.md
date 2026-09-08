@@ -1,16 +1,13 @@
 # Chapter 3 — IPFS, IPNS and DNSLink: references
 
-Every specification this chapter's implementation reads, with what it is used
-for and where. Nothing is listed that the code does not touch: a padded
-bibliography is worse than none, because it makes the real dependencies
-impossible to see. Where a row says *delegated*, *written not read* or *not
-implemented*, that is stated in the row — it is here because the behaviour
-depends on the document, not because we implement it.
+Specifications and implementation documents used by this chapter. Each row
+identifies the relevant behaviour and source. Delegated checks and
+unimplemented features are labelled explicitly.
 
-Paths beginning `src/` or `tests/` are in this chapter's directory. Paths
-beginning `../../src/` are the package's shared modules. Paths named as *the
-Wildroot tree* are in the browser this package is extracted from and are out of
-scope here (SPEC §1.1).
+`src/` and `tests/` paths are relative to this chapter; `../../src/` names
+shared modules. Browser paths refer to the Wildroot source tree.
+
+[Chapter specification](SPEC.md) · [Deviations and open questions](DEVIATIONS.md)
 
 ---
 
@@ -71,14 +68,16 @@ local convention (IP-9).
 | [WHATWG URL](https://url.spec.whatwg.org/) ([host parsing](https://url.spec.whatwg.org/#host-parsing)) | URL Living Standard | SPEC §3, §4.2, §4.4 — an identifier in this namespace lives in a URL **host**, and a host is subject to whatever canonicalisation the parser applies. Node treats `ipfs:` as a non-special scheme and preserves case; a browser that registers it as a *standard* scheme does not. This split is IP-5, and it is why a pasted CIDv0 is re-spelled as base32 CIDv1. `src/ipfs-url.js`, `../../src/router.js`; the registration is in the Wildroot tree's `src/main.cjs` |
 | [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986) §3.3 | Uniform Resource Identifier (URI): Generic Syntax | SPEC §8.2 — path segments, and percent-encoding each segment of a gateway path rather than the path as a whole. `src/origin-warm.js` |
 
-## Not a standard, but load-bearing
+<a id="not-a-standard-but-required"></a>
+
+## Implementation dependencies
 
 | Identifier | Title | Used for |
 |---|---|---|
 | [ipfs/kubo](https://github.com/ipfs/kubo) | kubo (go-ipfs) | SPEC §5, §7.3, §12.4, §12.5 — the node every retrieval goes through, and therefore the implementation whose IPNS record checking, block verification and DAG defaults this chapter relies on. Version 0.43 defaults are what `src/cid.js` reproduces and `tests/cid.test.js` pins; its privacy configuration is the subject of SPEC §12.4 |
 | [RangerMauve/js-ipfs-fetch](https://github.com/RangerMauve/js-ipfs-fetch) | js-ipfs-fetch | SPEC §4.3, §4.4 — the handler behind `ipfs://`, `ipns://`, `ipld://` and `pubsub://` in the Wildroot tree, and therefore the definition of what `ipld://`'s `Accept` re-encoding and `pubsub://`'s event stream do. Not respecified here |
 | `STORAGE-PUBLISH-SHARE.md` decision **D-P2** (as amended) | The stated origin: what `car=` is for | SPEC §8 — the provenance of the EXPERIMENTAL section, and the amendment that a stated origin is only ever a gateway-form HTTPS URL. Not a public document; cited because it governs IP-9 |
-| The spine: [`../../SPEC.md`](../../SPEC.md), [`../../DEVIATIONS.md`](../../DEVIATIONS.md), [`../../REFERENCES.md`](../../REFERENCES.md) | The integrated specification | SPEC §3, §6, §7.2, §10 — namespace selection and the two routing laws, the chain proof and DNSSEC anchored to the on-chain DS, the pointer-record grammar (spine §10), and the trust-state model this chapter maps onto |
+| [Routing](../router/SPEC.md), [Handshake resolution](../handshake/SPEC.md#6-the-resolution-algorithm), [Handshake content pointers](../handshake/SPEC.md#10-content-pointers), [shared trust states](../../SPEC.md#4-trust-states) | Shared resolution rules | Namespace selection, chain proofs, DNSSEC anchored to the on-chain DS, pointer grammar and trust-state aggregation. Applied in this chapter at SPEC §3, §6, §7.2 and §10. |
 
 ---
 

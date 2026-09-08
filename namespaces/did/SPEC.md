@@ -1,19 +1,18 @@
 # Chapter 7 — DID, AT Protocol and ActivityPub
 
-This chapter is part of the integrated Wildroot resolution specification whose
-spine is `../../SPEC.md`, and namespace selection — which address space an
-input belongs to, before any resolution — is specified there.
+This chapter follows the namespace-selection and trust rules in
+[`../../SPEC.md`](../../SPEC.md). It describes the reference implementation in
+`namespaces/did/src/`. Normative requirements define compatibility with this
+implementation; cited standards govern requirements inherited from them.
 
-Everything below describes the behaviour of the reference implementation in
-`namespaces/did/src/`, which ships in the Wildroot browser. Normative
-statements describe what an implementation must do *to interoperate with this
-one*; where a rule is inherited from an existing standard, that standard is
-cited and its text governs. Every departure from a cited standard, and every
-question we are unsure of, is in `../../DEVIATIONS.md`. Every standard cited is
-listed with its purpose in `REFERENCES.md`.
+See [DEVIATIONS.md](DEVIATIONS.md) for `DI-` deviations and open questions,
+and [REFERENCES.md](REFERENCES.md) for sources.
 
 Key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT** and **MAY** are
 used as in RFC 2119 / RFC 8174.
+
+> **Review note:** [REVIEW.md](../../REVIEW.md) records contradictions and
+> technical claims awaiting a decision. This rewrite does not resolve them.
 
 ---
 
@@ -34,49 +33,23 @@ used as in RFC 2119 / RFC 8174.
 
 ## 1. What this specifies, and why it exists
 
-Three naming systems in this family answer the same question — *given a string
-a human typed, who is that, and where does their data live?* — and answer it in
-three incompatible ways:
+This chapter covers three identity systems:
 
-- a **DID** (`did:plc:…`, `did:web:…`) is an identifier that resolves to a
-  **DID document**: a JSON object listing the subject's keys and services;
-- an **AT Protocol handle** (`alice.bsky.social`) resolves to a DID, which
-  resolves to a **PDS**, which holds the repository an `at://` URI addresses;
-- an **ActivityPub actor** (`@alice@example.social`) resolves through
-  **WebFinger** to an actor document URL.
+- A **DID** resolves to a document describing keys and services.
+- An **AT Protocol handle** resolves to a DID, whose document names a personal
+  data server (**PDS**).
+- An **ActivityPub address** uses WebFinger to locate an actor document.
 
-All three share one structural property that this chapter exists to exploit and
-to be honest about: **the identifier is anchored in a domain name, and
-therefore in whatever authenticates that domain name.** `did:web` is a domain
-plus a well-known path. AT Protocol handle resolution is a DNS `TXT` record or
-a well-known path on the handle's own domain. WebFinger is a well-known path.
-In every case the identity is exactly as strong as the DNS answer and the TLS
-certificate underneath it — which, on the ordinary internet, means "as strong
-as the ICANN root plus every CA your system trusts".
+The implementation fetches `did:plc` and `did:web` documents over HTTPS and
+checks their `id` fields (§5). It derives documents locally for the additional
+methods listed in §5.1. AT Protocol handle lookup uses Bluesky's public AppView;
+PDS lookup reads the DID document (§6). The `at://` and `activitypub:` handlers
+return local 501 refusals (§§7–8).
 
-That is why this chapter sits inside a Handshake resolution specification
-rather than beside it. A Handshake name resolved the way `../../SPEC.md`
-specifies — from a chain proof, DNSSEC-validated against an **on-chain** DS,
-TLS pinned with DANE — is a domain anchor with a *different and stronger* root
-of trust. A client that can resolve one can make a `_atproto.<hns-name>` TXT
-record mean something no stock client can check.
-
-**This chapter describes an implementation that does not yet do that.** What it
-does is:
-
-- resolve `did:plc` and `did:web` to a DID document, over HTTPS, with the
-  document **checked to be about the identifier asked for** and otherwise
-  unproven (§5);
-- resolve an AT Protocol handle to a DID by **asking Bluesky's public AppView**,
-  and a DID to a PDS from its DID document (§6);
-- **recognise and refuse** `at://` and `activitypub:` — a visible 501 inside
-  their own namespace, with no network request of any kind (§7, §8);
-- read a **`_hns.<name>`** control record, DNSSEC-validated against the chain,
-  to learn which key controls a Handshake name, and sign the receipt that
-  authorises an **`_atproto.<name>`** binding (§9, experimental).
-
-Saying which of those is a proof and which is somebody's word is most of the
-work, and §4 and §10 are where it is said.
+The experimental identity-anchor section (§9) covers `_hns.<name>` control
+records and receipts authorising `_atproto.<name>` bindings. These depend on
+the Handshake validation path in the integrated specification. The ordinary
+HTTPS and AppView lookups do not inherit that path's guarantees.
 
 ### 1.1 Scope
 
@@ -88,11 +61,11 @@ one of
 - a **DID document** (or the PDS endpoint read out of one),
 - a **control key** for a Handshake name, with the strength of the answer,
 - an **authorisation receipt** binding a name to a DID, or
-- a **failure**, distinguished by kind and tagged with its namespace,
+- a **failure**, with its kind and namespace,
 
 together with what an implementation may and may not conclude from it.
 
-**Out of scope, explicitly:**
+**Out of scope:**
 
 | Out of scope | Where it belongs |
 |---|---|
@@ -103,9 +76,7 @@ together with what an implementation may and may not conclude from it.
 | **The user interface** — the padlock, the security panel, the address bar | §4 specifies the model an interface must be given and the claims it must not make. It does not specify a rendering. |
 | **Other naming systems** — Handshake, ENS, Nostr, Tor, IPFS, the ICANN DNS path | Each has its own chapter and its own trust model. |
 
-A consequence worth stating plainly: an implementation of this chapter is an
-**identity resolver**, not a social client. It answers "who is this, and how
-sure are we?" and stops there.
+This chapter ends with identity-resolution results. Social-client behaviour is outside its scope.
 
 ---
 
@@ -206,7 +177,7 @@ rules of `../../SPEC.md` (Handshake or ICANN) even when the name is a social
 identity. The `did:`, `at:` and `activitypub:` schemes address the **native
 objects** directly.
 
-This is not a cosmetic split. It is the layering the whole design rests on:
+The two layers establish different facts:
 
 > **The name system authenticates the mapping. The native layer authenticates
 > the object.**
@@ -233,12 +204,10 @@ namespace's* failure. Specifically:
   `X-Resolution-Namespace: <namespace>`, which is the trust interface's
   evidence that no fallback occurred.
 
-The reason is a real cross-namespace hijack, which is why §8 exists: before
-`.eth` and `.onion` had handlers, an input whose TLD was not in the ICANN root
-was assumed to be Handshake, so `vitalik.eth` was resolved on-chain (handing
-the traffic to whoever owns the Handshake TLD `eth`) and an onion address left
-the machine in a DNS query. A namespace that can be *named* but not *resolved*
-must fail inside itself.
+These rules prevent colliding names from being resolved in another system.
+For example, treating `.eth` as an unknown ICANN suffix can route it to the
+owner of a Handshake `eth` TLD, while routing `.onion` to DNS discloses the
+requested service.
 
 ---
 
@@ -249,30 +218,30 @@ This chapter uses the four-valued per-step model of `../../SPEC.md`:
 as such), **failed** (checked and did not pass), **none** (no verification
 exists for this step). The lock closes only if **every** step is verified.
 
-The honest assignment for this family, as implemented:
+The documented trust assignments are:
 
 | Step | State | Because |
 |---|---|---|
-| `did:plc` → DID document | **unverified** | `plc.directory` is asked, and the document it returns must be about the DID asked for — a check that catches a wrong answer but proves nothing about a consistent lie. The PLC operation log that would make the method self-certifying is not fetched (`../../DEVIATIONS.md` DI-2). |
-| `did:web` → DID document | **unverified** | The document is whatever the domain served over WebPKI TLS, from a public host, without redirects, within a deadline — and it must be about the DID asked for. WebPKI is the ICANN root plus every CA (§10.3). |
+| `did:plc` → DID document | **unverified** | The document must have a matching `id`, but its operation history is not verified. The directory remains trusted (DI-2). |
+| `did:key`, `did:jwk`, `did:pkh` → DID document | **derived** (response metadata) | Constructed locally from the identifier; no directory or domain is queried (§5.1). The current scheme-based panel still reports `unverified`; this mismatch is in REVIEW.md. |
+| `did:web` → DID document | **unverified** | The HTTPS endpoint supplies the document. The handler checks the host, deadline, redirects and matching `id`, but adds no proof beyond WebPKI (§10.3). |
 | handle → DID | **unverified** | Bluesky's public AppView is asked (§6.1). Neither authoritative method from the AT Protocol handle specification is used. |
-| DID → PDS | **unverified** | Read out of an unverified document; and an unresolvable document silently becomes `bsky.social` (§6.2). |
+| DID → PDS | **unverified** | Read from an unverified document. Failed resolution returns `bsky.social` with `assumed: true` and a reason (§6.2). |
 | `at://` → record | **none** | Not resolved. Refused (§7, §8). |
 | `activitypub:` → actor | **none** | Not resolved. Refused (§7, §8). |
 | `_hns.<name>` → control key, via the chain | **verified** | DNSSEC-validated to the on-chain DS, *and* the embedded receipt verified against the name, key and epoch (§9.2). |
 | `_hns.<name>` → control key, via DoH | **unverified** | The record's signature still verifies, but the resolver chose which record to show. Labelled `via: 'doh'` and never silently substituted (§9.2). |
 
-An implementation MUST NOT report a closed lock for any resolution in the
-`did`, `atproto` or `activitypub` namespaces as specified here. The `did:`
-step has one real check and no proof, so the lock it earns is **TRUSTED**,
-never green.
+An implementation MUST NOT report a closed lock for the fetched `did:plc`
+and `did:web` paths or the unresolved `atproto` and `activitypub` handlers.
+Local derivation is a separate path: the response says `derived`, while the
+shared scheme-based trust panel still describes all DIDs as HTTPS-fetched and
+unverified. [REVIEW.md](../../REVIEW.md) records that implementation mismatch;
+this chapter does not assign a new aggregate state to resolve it.
 
-An implementation SHOULD give the interface a `did`-specific step rather than a
-generic "no verification path for this scheme". The reference implementation
-does: the panel names the identifier step, marks it unverified, and says in
-words that the document was checked to be about the identifier asked for and
-that for `did:plc` the operation log which would prove it was not audited — so
-this is that server's word.
+An implementation SHOULD provide a `did`-specific trust step. The reference
+panel marks fetched documents unverified and explains the `id` check and the
+absence of PLC operation-log verification.
 
 ---
 
@@ -294,23 +263,24 @@ An implementation MUST:
   **400** and no network request;
 - refuse a method it does not implement with a **400** and no network request.
 
-The reference implementation fetches documents for two methods, `plc` and
-`web`, and DERIVES them — no network, no trust decision — for three whose
-identifier is the key or the account itself: `did:key` (a multibase
-multicodec public key → a `Multikey` document), `did:jwk` (a base64url JSON
-Web Key → `JsonWebKey2020`; a key carrying private material is refused) and
-`did:pkh` (a CAIP-10 account id → `EcdsaSecp256k1RecoveryMethod2020` for
-`eip155`/`bip122`, `Ed25519VerificationKey2018` for `solana`/`tezos`). Those
-answer with `X-Resolution-Trust: derived`, the one DID document a browser can
-call verified, because nobody was asked (`../src/did-local.js`, pinned to
-the specifications' own vectors in `../tests/did-local.test.js`). Everything
-else — `did:ion`, `did:ethr` — is refused, and the refusal names the
-supported set so a user sees why.
+The reference implementation fetches documents for `plc` and `web`, and
+derives documents locally for three methods in `src/did-local.js`:
 
-**Refusing before the network is normative, not an optimisation.** A malformed
-or unsupported DID that reaches `fetch` is a request an attacker chose the
-shape of; refusing it locally is the same discipline §8 applies to a whole
-namespace.
+| Method | Accepted input and generated document |
+|---|---|
+| `did:key` | A base58btc multibase key with a recognised multicodec prefix and expected byte length for fixed-size keys (RSA length is not checked); generates a `Multikey` verification method. Supported key types are Ed25519, X25519, secp256k1, P-256, P-384, P-521 and RSA. X25519 is used only for key agreement. |
+| `did:jwk` | A base64url JSON object with `kty`; generates a `JsonWebKey2020` method. Objects containing `d`, `p`, `q`, `dp`, `dq`, `qi` or `k` are refused as private material. The `use` field controls verification relationships. |
+| `did:pkh` | A CAIP-10 account identifier in `eip155`, `bip122`, `solana` or `tezos`, checked against the implementation's chain-reference and address patterns. Generates `EcdsaSecp256k1RecoveryMethod2020` for the first two and `Ed25519VerificationKey2018` for the latter two. |
+
+These paths make no network request. A successful response includes
+`X-Resolution-Trust: derived`; malformed input returns 400. Derivation produces
+the document encoded by the identifier; it is not a proof that the user
+controls the key or account. `tests/did-local.test.js` covers the local paths.
+Other methods, including `did:ion` and `did:ethr`, return 400 with the supported
+method list.
+
+Malformed and unsupported identifiers must be refused before a request is
+issued, limiting attacker-controlled fetch targets (§8).
 
 ### 5.2 `did:plc`
 
@@ -328,9 +298,7 @@ GET <plcDirectory>/<did>
 default plcDirectory: https://plc.directory
 ```
 
-The directory URL is configurable, which matters for two reasons: a self-hosted
-or mirrored directory is a supported deployment, and a test can drive every
-path with no network.
+The directory URL is configurable to support mirrors and tests with an injected transport.
 
 An implementation that wants the method's actual guarantee MUST fetch the audit
 log and verify the operation chain to the genesis operation, checking that the
@@ -343,7 +311,7 @@ party, and §4 says so.
 
 `did:web` locates a DID document by an HTTPS `GET` on the domain named in the
 identifier. The **did:web method specification §3.2** gives the read algorithm,
-and its order is load-bearing:
+and requires this order:
 
 1. Replace every `:` in the method-specific identifier with `/`, producing a
    fully qualified domain name and an optional path. This happens **before**
@@ -381,22 +349,20 @@ A hostname that *resolves* to a private address is not caught, because that
 needs a connect-time check; the limitation is stated here and in the browser's
 conformance record beside the ERC-3668 row that shares it.
 
-**There is one `did:web` reader.** The other caller that needs a DID document
-— `resolvePds` in `src/bsky.js`, §6.2, which is looking for a PDS rather than
-publishing the document as a page — imports `didWebUrl` and `isSafeDidWebHost`
-from this module rather than building a URL of its own. An implementation MUST
-have one reader: two implementations of a three-line read algorithm in one
-program produce a DID that resolves one way for an identity panel and another
-way for a sign-in path, which is the class of inconsistency nobody can
-reproduce.
+`resolvePds` in `src/bsky.js` imports `didWebUrl` and `isSafeDidWebHost` from
+this module (§6.2). An implementation MUST use one reader for both paths so
+document display and PDS lookup apply the same URL and host-validation rules.
 
 ### 5.4 The response
 
-The transport is **injected**, not global. `createHandler({ fetchImpl })` takes
-the function that makes the request, so the browser hands it the proxied
-session fetch and a test hands it a fake. An implementation SHOULD do the same:
-it is what lets DID resolution ride the user's configured proxy (§10.4) and
-what lets every path in this section be exercised without a socket.
+This section describes fetched `did:plc` and `did:web` documents. Local methods
+return the generated document as JSON with namespace `did`, trust `derived`,
+`Access-Control-Allow-Origin: *`, and `Content-Security-Policy: default-src 'none'`.
+
+`createHandler({ fetchImpl })` accepts an injected transport. The browser
+supplies its session-bound fetch, and tests supply a fake. An implementation
+SHOULD use this pattern to apply the configured proxy and test request handling
+without network access.
 
 Every request an implementation makes here MUST carry:
 
@@ -406,7 +372,7 @@ Every request an implementation makes here MUST carry:
 - a deadline. The reference implementation aborts after 10 seconds, so a
   hostile host cannot hold the handler open.
 
-On a successful upstream `200`, the body is parsed as JSON and **checked to be
+On a successful upstream response (`response.ok`), the body is parsed as JSON and **checked to be
 about the identifier asked for**: the document MUST be an object whose `id`
 equals the DID (DID Core §7.1.3 — a resolver answers with the document *for*
 the input DID). A directory or host answering with somebody else's document,
@@ -414,9 +380,8 @@ with a body that is not an object, or with no `id` at all, is a wrong answer
 and MUST be refused. The reference implementation answers **502** naming both
 the DID asked for and the `id` received.
 
-That check is the strongest cheap check DID resolution has, and it is the only
-one made. It catches a wrong answer; it does not prove a consistent lie
-(§5.5, §10.3).
+Matching `id` catches a document for another subject. It does not authenticate
+the remaining fields or prevent the server from fabricating a matching document.
 
 On success the document is re-serialised and answered:
 
@@ -430,7 +395,7 @@ Access-Control-Allow-Headers: *
 Access-Control-Allow-Methods: *
 ```
 
-On an upstream non-`200` the answer carries **the upstream status**, clamped to
+On an unsuccessful upstream response the answer carries **the upstream status**, clamped to
 a status the rendering engine knows, and a `text/plain` body naming the DID,
 the status and the URL tried. Clamping is not cosmetic: a protocol handler's
 status goes straight into Chromium's reason-phrase lookup, which is
@@ -439,11 +404,9 @@ becomes a `502`, not a crash. On a transport error the answer is **502**
 carrying `e.message` and nothing else: a stack would disclose this
 installation's filesystem paths to whoever caused the navigation.
 
-**Every response carries `X-Resolution-Namespace: did`** — the successful one,
-the `400` refusals, the upstream-status failure and the `502`. A handler's own
-responses pass through the router verbatim, so a handler that does not tag
-itself leaves a hole in the L2 evidence chain exactly where the commonest
-failures are (§3.3).
+**Every response carries `X-Resolution-Namespace: did`**, including 400
+refusals, upstream-status errors and 502 failures. The router passes handler
+responses through, so handlers must supply their own namespace tag (§3.3).
 
 Two things a conforming implementation SHOULD do that this one does not:
 
@@ -459,8 +422,8 @@ Two things a conforming implementation SHOULD do that this one does not:
 
 ### 5.5 What is and is not verified
 
-An implementation of this chapter MUST NOT claim that a resolved DID document
-is authentic. What the reference implementation establishes:
+For a fetched `did:plc` or `did:web` document, an implementation MUST NOT claim
+authenticity beyond the checks described here. The reference implementation establishes:
 
 - **the document is about the identifier asked for** — its `id` equals the DID,
   and a mismatch is a failure rather than a warning (§5.4);
@@ -480,8 +443,7 @@ Specifically it does **not**:
   ICANN root plus every CA the system trusts (§10.3);
 - **catch a hostname that resolves to a private address**, which needs a
   connect-time check (§5.3);
-- **validate the document's structure** beyond `id`. Any other JSON the host
-  returns with a `200` is passed through.
+- **validate the document's structure** beyond `id`. Other fields in a successful JSON response are passed through.
 
 ---
 
@@ -515,17 +477,11 @@ bidirectional verification.** `resolveHandle` calls
 GET https://public.api.bsky.app/xrpc/com.atproto.identity.resolveHandle?handle=<handle>
 ```
 
-This is `../../DEVIATIONS.md` DI-5, and it is the largest single gap in this
-chapter. Why it costs more here than elsewhere: the AppView is a free service
-run for the whole network and a perfectly ordinary thing for a client to use,
-but it is *a third party being trusted for a mapping the client could check
-itself* — and in a browser that already resolves Handshake names from a chain
-proof and validates DNSSEC, the DNS method is not merely implementable, it is
-the one thing this client can do that no stock client can (§9.4). An
-implementation of this chapter SHOULD implement the DNS TXT method against its
-own validating resolver, fall back to the well-known method, and perform
-bidirectional verification; and MUST report the AppView path, if it keeps one,
-as **unverified**.
+This is DI-5. The AppView is trusted for a mapping that the client could check
+through the handle's authoritative DNS or HTTPS endpoint. An implementation
+SHOULD implement DNS TXT resolution with its validating resolver, fall back to
+the well-known method, and verify the reverse `alsoKnownAs` binding. It MUST
+report any retained AppView path as **unverified**.
 
 ### 6.2 DID → PDS
 
@@ -567,17 +523,11 @@ Four rules decide whether what comes back is an answer, and an implementation
    `{ did, pds: DEFAULT_PDS, assumed: true, reason }`. `assumed` is the
    distinct state; `reason` says which path it was, in words.
 
-Rule 4 is the one that needs stating as a rule. The AT Protocol DID
-specification makes an unresolvable DID a resolution **failure**, and this
-implementation keeps a default (`https://bsky.social`) for the sign-in path it
-was written for, where a wrong host fails loudly and the default is right for
-almost everyone. That argument does not survive contact with the question
-"where does this account live", which is the question a self-hoster's page is
-answering. So an implementation **MUST NOT** present a substituted PDS as the
-account's own: a caller signing in may ignore `assumed`, and a caller
-answering for the account, or rendering it, **MUST NOT**. Silently naming the
-network's largest operator when a self-hoster's document is momentarily
-unreachable is the one substitution that must never be silent.
+The AT Protocol DID specification treats an unresolvable DID as a failure.
+This adapter retains `https://bsky.social` as a labelled default for sign-in.
+An implementation **MUST NOT** present that default as the account's resolved
+PDS. A sign-in caller may ignore `assumed`; a caller displaying or answering
+for the account **MUST NOT**.
 
 ### 6.3 `at://` is recognised and refused
 
@@ -588,8 +538,7 @@ the repository and a signature check on the record.* The canonical
 `at://did:plc:…` form reaches that refusal even though it is not a WHATWG URL
 (§3.1).
 
-That is the right requirement and worth stating normatively, because it is what
-makes `at://` resolution meaningfully different from asking an AppView:
+Implementations that enable AT-URI resolution must satisfy this requirement:
 
 > An implementation that resolves `at://` MUST obtain the record from the
 > repository named by the identifier's own DID document, and MUST verify the
@@ -623,7 +572,7 @@ Normatively, for an implementation that enables it:
 - An implementation MUST NOT present an actor as verified on the strength of
   the WebFinger hop alone. **ActivityPub** itself specifies no client-side
   object authentication; HTTP Signatures authenticate *delivery* between
-  servers, not a document a client fetched. So the honest trust state for a
+  servers, not a document a client fetched. The trust state for a
   fetched actor is **unverified**, and an implementation MUST report it as such.
 
 `REFERENCES.md` lists these as *what an implementation must do*; nothing in
@@ -661,26 +610,20 @@ Such a handler MUST:
    `fetch`. A page that serves one static error message must never become an
    origin worth attacking.
 
-One point that is easy to read as bureaucracy and is not: **the scheme MUST be
-registered with the browser engine even though it resolves nothing.** A scheme
-the engine does not know is not merely unhandled — loading one as a main-frame
-document has hard-crashed this application on Windows. Registration is what
-makes "recognised and refused" a state the engine can be in.
+The scheme MUST be registered with the browser engine even while unresolved.
+Unregistered main-frame schemes have crashed this application on Windows;
+registration lets the handler return the intended refusal.
 
 ---
 
 ## 9. Experimental: identity anchors under a Handshake name
 
-**This section is EXPERIMENTAL.** The `_hns` control record and the claim and
-binding receipts are shipped: the browser's keystore builds and signs them, and
-`src/record.js` and `src/receipt.js` verify them. The `_nostr` sibling record
-is designed and not published (`../../DEVIATIONS.md` DI-11). None of it is a
-proposed standard, none of it has been reviewed outside this project, and the
-record formats **may change** — a field may be added, renamed or given
-different semantics, and the version tag `v=hns1` exists so that a change is a
-refusal rather than a misparse. Read this section as a description of what is
-running, not as a format to build an interoperating implementation against yet.
-Everything in §§3–8 is stable by comparison.
+**This section is EXPERIMENTAL.** The browser creates claim and binding
+receipts, and `src/record.js` and `src/receipt.js` verify them. `_nostr` is a
+design without a published record (DI-11). These project-specific formats have
+not received external review and may change. The `v=hns1` tag lets a reader
+refuse an unsupported format version. Treat this section as an implementation
+description rather than a stable interoperability target.
 
 This section is also the seam with `../../SPEC.md`. It specifies records
 **published under a Handshake name** that bind that name to a key or to an
@@ -718,15 +661,12 @@ v=hns1;pubkey=<64 lowercase hex>;epoch=<integer ≥ 1>;receipt=<created_at>.<bas
 - `epoch` — integer ≥ 1, incremented on key change.
 - `receipt` — the compact claim receipt: the decimal `created_at` of the claim
   event, a `.`, and the raw 64-byte BIP-340 signature in **base64url**
-  (RFC 4648 §5). This is the whole point of the compact form: the signed event
+  (RFC 4648 §5). In the compact form, the signed event
   is *reconstructible* from `(name, pubkey, epoch, created_at)`, so a 255-byte
   TXT record can carry an offline-verifiable proof.
 
-The record carries no variable-length field — `pubkey` is 64 hex, `receipt` is
-a fixed-width base64url signature after a decimal timestamp, and the name is
-not in the record at all — so its length is a fact, not a risk: the longest
-string any accepted `(epoch, created_at)` pair can produce fits one
-`<character-string>` with room to spare.
+The key and signature have fixed lengths. With the accepted numeric bounds on
+`epoch` and `created_at`, the encoded record fits in one 255-byte TXT string.
 
 Parsing rules an implementation MUST follow:
 
@@ -735,8 +675,8 @@ Parsing rules an implementation MUST follow:
   Two records each carrying `pubkey=` is an attempt to have a validator pick
   one, and there is no safe pick.
 - A string longer than **255 bytes**, the maximum of a TXT
-  `<character-string>` (RFC 1035 §3.3.14), is refused. It is input no
-  nameserver could have served.
+  `<character-string>` (RFC 1035 §3.3.14), is refused by this record format, even though DNS TXT records can contain
+  several character-strings.
 - Each TXT *record*'s `<character-string>`s are concatenated into one value
   before parsing (RFC 1035 §3.3.14). Separate records are separate values, and
   a field is **never** merged across two records — merging would let anyone who
@@ -755,13 +695,10 @@ content:    ""
 tags:       [["v","hns1"], ["d","hns:<name>"], ["epoch","<epoch>"]]
 ```
 
-The `v` tag is **first and load-bearing**. Kind 30078 is a generic
-application-data kind, and users are encouraged to carry these keys into other
-Nostr apps; without an explicit version tag in the preimage, any app that will
-sign a kind-30078 event with a chosen `d` tag could be walked into producing a
-valid claim receipt for an attacker's name. The `d` tag makes the event
-parameterised-replaceable per name, so a relay keeps only the newest claim —
-which is the semantics a transfer wants.
+The `v` tag is first and separates this use of kind 30078 from other
+applications. Without that tag in the signed preimage, another application's
+event could be accepted as a claim receipt. The `d` tag makes the event
+parameterised-replaceable per name, so a relay retains the newest claim.
 
 Verification is: rebuild the event from `(name, pubkey, epoch, created_at)`,
 recompute its id as sha256 of the canonical NIP-01 serialisation, and check the
@@ -786,11 +723,9 @@ Given a name, an implementation resolving `_hns.<name>` MUST:
    verify MUST be treated as **no record**, not as a binding.
 4. Report the strength of the answer alongside it.
 
-**9.2a The DoH downgrade.** A Handshake SPV node cannot answer at all until it
-reaches the chain tip, which takes about an hour on a fresh install. Being
-locked out of a product for an hour is not an acceptable way to be secure, so
-when the **chain could not be asked** — and only then — an implementation MAY
-re-read the same record over DoH/ODoH. If it does:
+**9.2a The DoH downgrade.** A new SPV node cannot answer until it reaches the
+chain tip. When the **chain could not be asked**, and only then, an
+implementation MAY retry the record over DoH/ODoH, with these restrictions:
 
 - it MUST label the answer as the weaker one (`via: 'doh'`,
   `dnssecValidated: false`) and MUST NOT silently substitute it;
@@ -809,13 +744,11 @@ dynamic-import wiring. It is specified here because it is the only
 security-relevant consumer of `record.js`, and a reader who takes `record.js`
 without it has taken the verifier and left the policy behind.
 
-**What is not specified, because it is not implemented.** Nothing anywhere
-enforces that `epoch` moves forward. A receipt for epoch 1 verifies for ever,
-so a record from a previous holder, if it is ever served again, verifies again.
-The defence is entirely that the registry publishes the current record under
-DNSSEC. A resolver SHOULD report the epoch it accepted alongside the key, so a
-caller with durable memory can apply a floor; `../../DEVIATIONS.md` DI-10 and
-§2.4 there explain why a client-side floor is not obviously the right fix.
+The implementation does not enforce monotonic `epoch` values. An older receipt
+still verifies if served again. Publication of the current record under DNSSEC
+is the existing rollback defence. A resolver SHOULD report the accepted epoch
+so callers with durable state can apply a floor. DI-10 and DEVIATIONS §2.4
+discuss the limitations of that approach.
 
 ### 9.3 The atproto binding, and `_atproto.<name>`
 
@@ -848,13 +781,11 @@ registry that accepts the binding can therefore prove it was authorised by the
 key that holds the name, and a stray write to the registry's own store cannot
 forge it.
 
-**The published record is out of scope.** `_atproto.<name>` `TXT` `"did=…"` is
-written by the registry and served by the gateway; its exact form is the AT
-Protocol handle specification's (§6.1), and neither the record nor the
-`/.well-known/atproto-did` endpoint is produced or **read** by anything in this
-chapter. The asymmetry is worth stating plainly rather than leaving implied:
-**this implementation signs the authorisation for an anchor it never verifies.**
-Closing that loop is §6.1's requirement (`../../DEVIATIONS.md` DI-D1).
+**The published record is out of scope.** The registry writes
+`_atproto.<name> TXT "did=…"`, and the gateway serves it and the
+`/.well-known/atproto-did` endpoint. Their format follows §6.1. This chapter's
+code signs the binding authorisation but does not publish or read the resulting
+anchor. DI-D1 proposes the missing read path.
 
 ### 9.4 `did:web:<name>.hns.one`
 
@@ -897,12 +828,8 @@ dotted one without ever changing its DID.
 
 ### 10.1 Fail closed, and inside your own namespace
 
-Every refusal in this chapter is *inside* the namespace that was named. That is
-not politeness. The concrete failure it prevents was live: an input whose TLD
-was not in the ICANN root was assumed to be a Handshake name, so an address
-meant for another naming system was resolved on-chain and its traffic delivered
-to whoever owned the colliding Handshake TLD. The general rule (§3.3) and the
-specific contract (§8) are the same rule at two altitudes.
+Keeping failures inside their namespace prevents cross-namespace collisions
+from redirecting traffic to a different owner (§3.3, §8).
 
 An implementation MUST NOT "helpfully" retry a failed identity resolution as
 something else. There is no safe fallback from "I could not resolve this DID"
@@ -922,11 +849,8 @@ implementation MUST treat the resulting URL as hostile input:
   choice of host made by the first one;
 - it MUST bound the request in time.
 
-Both readers do all three, and they do it with the **same** code: `didWebUrl`
-builds the URL and `isSafeDidWebHost` guards the host for the `did:` handler
-and for the PDS lookup alike. That is the structural form of the fix, and it is
-the form to insist on — a guard that has to be remembered at each call site is
-a guard that will be missed at one of them.
+Both DID readers use `didWebUrl` and `isSafeDidWebHost`, so the same URL and
+host checks apply to document display and PDS lookup.
 
 A hostname that resolves to a private address remains uncaught by an
 address-literal test; catching it needs a check at connect time, and the same
@@ -947,11 +871,9 @@ log makes the current document verifiable against the DID itself, because the
 DID *is* a hash of the genesis operation. Until that log is checked, "did:plc
 resolved" means "plc.directory said so".
 
-For `did:web` no stronger claim is available at all. The method's security is
-the domain's security, and the domain's security is WebPKI — which is exactly
-the trust model this project exists to offer an alternative to. §9.4 accepts
-that trade deliberately, for reach; a specification should say so rather than
-let a reader assume a self-certifying identifier is self-certifying.
+For `did:web`, the method relies on the domain's security. The ordinary HTTPS
+path here uses WebPKI. The deployment choice in §9.4 accepts that dependency
+for compatibility with clients outside Wildroot.
 
 ### 10.4 Privacy: asking is a disclosure
 
@@ -1023,8 +945,7 @@ four states applies and why. Concretely, the minimum bar for each:
    authenticate a fetched object, and an implementation MUST NOT borrow HTTP
    Signatures' server-to-server delivery guarantee to imply one.
 
-Until then, the refusal is the honest answer, and it is a better answer than a
-rendered page with a lock nobody can justify.
+Until these requirements are met, the handlers return the refusals in §8.
 
 ---
 
@@ -1035,7 +956,8 @@ SPEC.md          this chapter
 REFERENCES.md    what it is built on
 ../../DEVIATIONS.md  where it departs, and what we are unsure of (DI-n)
 src/
-  did-protocol.js            the did: handler — did:plc, did:web (§5)
+  did-protocol.js            the did: handler — fetched and local methods (§5)
+  did-local.js               local did:key, did:jwk and did:pkh derivation (§5.1)
   unimplemented-protocol.js  the fail-closed contract for at:/activitypub: (§7, §8)
   gate.js                    the Private-mode gate for non-proxied handlers (§10.4)
   bsky.js                    the AT Protocol adapter; resolveHandle/resolvePds are §6
@@ -1046,27 +968,21 @@ src/
   keys.js  nostr-event.js    the signature primitives those two import
 tests/
   did-protocol.test.js       §5, with the transport injected
+  did-local.test.js          local method vectors and refusal cases (§5.1)
   unimplemented.test.js      §8, including "no network request of any kind"
   atproto-identity.test.js   §6
   identity-anchor.test.js    §9.1, §9.3
   namespace-routing.test.js  §3, against the shared classifier at ../../src/router.js
 ```
 
-Every file in `src/` is **byte-identical** to its counterpart in the Wildroot
-tree modulo import paths. A fix in one is provably the same fix in the other.
+Source files are retained from the browser with import-path adjustments; see the repository provenance checks.
 
-**Two files reach past the scope line, and are kept whole rather than trimmed
-for that reason.** `bsky.js` is the entire Bluesky adapter, of which §6
-specifies two functions; `xrpc.js` is there only because `bsky.js` imports it.
-`bsky.js` also imports `did-protocol.js`, which is the point of §5.3's one
-reader — the dependency edge is what makes the single reader structural rather
-than a convention.
-Forking either to make the package tidier would break byte-identity, and a
-divergent copy of a security-relevant module is a worse problem than an
-over-broad dependency. `keys.js` and `nostr-event.js` are the signature
-primitives `record.js` and `receipt.js` import; their own design is out of
-scope (§1.1). `gate.js` is extracted because §10.4 specifies the rule it
-encodes; the `did:` handler itself does not use it.
+`bsky.js` contains the full Bluesky adapter; only `resolveHandle` and
+`resolvePds` are specified here. `xrpc.js` supplies its transport, and
+`did-protocol.js` supplies the shared `did:web` reader. `keys.js` and
+`nostr-event.js` provide receipt signature primitives. These files are kept
+whole for source comparison with the browser. `gate.js` implements §10.4;
+the `did:` handler does not use it.
 
 **Nothing here is Electron-bound.** Two things this chapter describes *are*,
 and are therefore specified but not extracted: the scheme registration and

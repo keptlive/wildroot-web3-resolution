@@ -1,5 +1,8 @@
 # Chapter 3 — IPFS, IPNS and DNSLink
 
+> **Review pending:** [REVIEW.md](../../REVIEW.md) records unresolved questions
+> about Private-mode origin handling and pointer validation. The rewrite does not change runtime behaviour.
+
 **Version:** 0.1 (draft for public comment)
 **Status:** Describes the behaviour of the reference implementation in this
 directory and in the Wildroot browser it is extracted from. Not endorsed by any
@@ -9,15 +12,10 @@ standard, that standard is cited and its text governs.
 **Licence:** CC-BY-4.0 (`../../LICENSE-SPEC`). The reference implementation is
 licensed separately.
 
-This chapter is part of the integrated specification whose spine is
-[`../../SPEC.md`](../../SPEC.md), where namespace selection — which identifier
-belongs to which namespace, and the two routing laws that keep the boundary —
-is specified. Where a Handshake name carries a content pointer, the spine gets
-the name to the pointer and this chapter says what the pointer *is*; deviations
-and open questions for this chapter live in
-[`../../DEVIATIONS.md`](../../DEVIATIONS.md) under the `IP-` prefix, and its
-references in `REFERENCES.md` beside this file. Both are part of the
-specification, not appendices to it.
+The [routing specification](../../SPEC.md) defines namespace selection and
+the Handshake name-to-pointer lookup. This chapter defines the IPFS-side
+identifiers and their trust properties. See [deviations](DEVIATIONS.md) (`IP-`
+entries) and [references](REFERENCES.md) for limits and supporting sources.
 
 Key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT** and **MAY** are used
 as in RFC 2119 / RFC 8174. **§8 is marked EXPERIMENTAL**: it ships in the
@@ -46,35 +44,22 @@ interoperating implementation must do.
 
 ## 1. What this specifies, and why it exists
 
-IPFS is the one namespace in this stack where the *address is the proof*. A CID
-is a hash; bytes that do not hash to it are not the content it names. That makes
-the resolution question unusually sharp, and unusually easy to get subtly wrong:
-everything interesting happens in the step **before** the hash check — deciding
-*which* CID an identifier means.
+This chapter covers four entry points:
 
-This chapter specifies that step, in four places where it happens:
+- URLs using `ipfs`, `ipns`, `ipld` or `pubsub` (§4);
+- Handshake TXT content pointers (§6.1);
+- EIP-1577 `contenthash` values returned through HIP-5 `_op` (§6.4);
+- the experimental `car=` hint for locating a CAR archive (§8.1).
 
-- a URL in one of the four IPFS schemes (§4),
-- a `TXT` content pointer on a Handshake name (§6.1),
-- an EIP-1577 `contenthash` read from a registry contract on the HIP-5 `_op`
-  route (§6.4),
-- and a **stated origin** (`car=`) that says where an archive of that CID can be
-  fetched from — a hint about location that MUST NOT become a claim about
-  content (§8.1, **EXPERIMENTAL**).
-
-It also specifies the boundary that keeps the design honest: an IPNS name, an
-IPLD path and a pubsub topic are *not* CIDs, and three of the four schemes in
-this namespace need something other than a hash before a hash can be checked.
+The rules distinguish content addresses from mutable IPNS names and pubsub
+topics. A `car=` location **MUST NOT** be treated as evidence about content.
 
 ### 1.1 Scope
 
-**In scope: turning an identifier into a verified content address.** Precisely:
-which identifiers belong to this namespace, what each one denotes, which of them
-authenticate themselves and which rest on somebody's word, what a Handshake name
-publishes to point into the namespace, and what an implementation is entitled to
-tell a user about the result.
+**In scope:** identifier membership and parsing, content-pointer records, CID
+computation, and the trust claims attached to a resolution.
 
-**Out of scope, explicitly.**
+**Out of scope:**
 
 | Out of scope | Where it lives |
 |---|---|
@@ -85,27 +70,25 @@ tell a user about the result.
 | **The Handshake half of a `hns://` resolution** — the chain proof, DNSSEC, DANE | The Handshake chapter, reached from the spine `../../SPEC.md`. |
 | **The user interface** | §10 specifies the model a panel is given and the claims it must not make, never a rendering. |
 
-A consequence worth stating: an implementation of this chapter answers *"which
-bytes does this identifier name, and how sure are we that this is the right
-question?"*. It does not fetch anything.
+The resolution result identifies a CID and path, a mutable pointer, a topic,
+or a failure. Retrieval is handled separately.
 
-**One thing is in scope that looks like transport and is not.** Computing the
-CID *of* a set of bytes (§5) is the definition of the address, and the reference
-implementation includes it (`src/cid.js`) precisely so that "verified by hash"
-can be tested without a daemon.
+`src/cid.js` computes CIDs from local bytes (§5), allowing the address
+calculation to be tested without a daemon.
 
-**Layout of the reference implementation.** `src/cid.js` computes the CID of a
-set of bytes (§5) and `src/origin-warm.js` is the stated origin and its byte
-window (§8), both whole modules. Four smaller modules are factored out
-of larger files whose remainder is transport or an unrelated subsystem, so that
-the resolution half can be read and tested on its own: `src/ipfs-url.js` (a URL
-in this namespace to its root CID, §4.1), `src/byte-range.js` (the `Range`
-header a windowed read is derived from, §8.2), `src/car-roots.js` (the roots an
-archive claims, and the minimal dag-cbor header reader that gets them, §12.2)
-and `src/source-error.js` (the typed refusal `src/cid.js` raises). The pointer
-grammar (`CID_RE`, `IPNS_RE`, `car=`), the EIP-1577 decoder and the scheme
-table are shared with the rest of the specification and are used from
-`../../src/pointers.js`, `../../src/contenthash.js` and `../../src/router.js`.
+The reference implementation contains:
+
+| Module | Responsibility |
+|---|---|
+| `src/cid.js` | CID computation (§5) |
+| `src/origin-warm.js` | Origin hints and byte windows (§8) |
+| `src/ipfs-url.js` | URL-to-root-CID parsing (§4.1) |
+| `src/byte-range.js` | Range parsing (§8.2) |
+| `src/car-roots.js` | CAR header roots and minimal dag-cbor decoding (§12.2) |
+| `src/source-error.js` | Typed errors from CID computation |
+| `../../src/pointers.js` | Pointer grammar |
+| `../../src/contenthash.js` | EIP-1577 decoding |
+| `../../src/router.js` | Scheme classification |
 
 ---
 
@@ -131,16 +114,17 @@ spine's (RFC 8499). Terms specific to this chapter:
   CIDs, then a sequence of blocks.
 - **Window** — a byte range of one file inside a DAG, requested from a trustless
   gateway with IPIP-402 `entity-bytes` (§8.2).
-- **Root of trust** — for this namespace, the hash function. Nothing else in it
-  is trusted, and everything that is not hash-checked is named as such.
+- **Root of trust** — the mechanism that authenticates a result: a content
+  hash, an IPNS signature or the name system that supplied a pointer (§9).
 
 ---
 
 ## 3. Namespace membership
 
-Four URL schemes belong to this namespace: **`ipfs`, `ipns`, `ipld` and
-`pubsub`**. They share one root of trust and are therefore one namespace, not
-four (`../../src/router.js`, `SCHEME_TABLE`).
+The router groups **`ipfs`, `ipns`, `ipld` and `pubsub`** under the IPFS
+namespace (`../../src/router.js`, `SCHEME_TABLE`). Their verification rules
+differ: CID checks apply to content, IPNS adds signed mutable records, and
+pubsub topics are not content addresses (§4).
 
 An implementation **MUST** apply the spine's two routing laws here without
 exception:
@@ -157,7 +141,7 @@ Four further membership rules:
 
 - The **gateway path forms** `/ipfs/<cid>[/path]` and `/ipns/<key>[/path]`,
   typed without a scheme, are IPFS identifiers and are rewritten to `ipfs://`
-  and `ipns://` respectively. Nothing else scheme-less is.
+  and `ipns://` respectively. Bare CIDs are also recognized, as described below.
 - A Handshake name enters this namespace **only** by carrying a pointer record
   (§6). It is never *guessed* into it.
 - **A bare CID typed on its own is in this namespace.** A single label that is
@@ -183,12 +167,8 @@ names.
 
 - An implementation **MUST** validate the host against the CID shape it accepts
   before any retrieval is attempted, and **MUST** refuse a host that is not one.
-  In the reference implementation the shape is a regular expression, `CID_RE`
-  in `../../src/pointers.js`. It is **one definition, shared**: a per-module
-  copy of an address shape drifts — an upper bound goes missing, a multibase
-  prefix stops being required — and the modules then disagree about what an
-  address is. Two private copies remain in the browser tree and are the subject
-  of IP-2.
+  The shared `CID_RE` is in `../../src/pointers.js`. IP-2 tracks two private
+  copies that remain in the browser.
 - A host that is not a CID **MUST NOT** be interpreted as a domain name and
   resolved through DNS or DNSLink. `ipfs://` names content, never a host.
 - The path is opaque to resolution: it selects a node inside the DAG and is
@@ -215,21 +195,9 @@ Four host forms are accepted (`IPNS_RE`, `../../src/pointers.js`):
 - Resolving the key to a CID is an **IPNS record lookup**. It is a signature
   check over a record with a sequence number and a validity period — a different
   kind of proof from a hash, and one that can be *stale* rather than wrong.
-- **The reference implementation does not perform that lookup itself.** It is
-  delegated to the local IPFS node, which resolves the name over the DHT (and,
-  on one of the two daemons, over pubsub — §4.4). This is stated as a limit, not
-  claimed as a feature: we neither implement the IPNS record specification nor
-  independently verify its signature, sequence number or validity window.
-  See `../../DEVIATIONS.md` IP-3.
-- An implementation **MUST NOT** describe an `ipns://` answer as immutable, and
-  **MUST NOT** cache it as though it were a CID.
-- Two of those four host forms carry uppercase characters, and a URL parser
-  that canonicalises hosts lowercases them. An address that has an equivalent
-  case-insensitive spelling **SHOULD** be re-spelled into it before it is
-  written into a URL host — a CID into its base32 CIDv1 form (§3), an IPNS key
-  into its base32 or base36 `libp2p-key` CIDv1 form. The reference
-  implementation does this for a pasted CID and carries an IPNS key as it was
-  given; see IP-5.
+- **The reference implementation delegates the lookup to the local IPFS node.**
+The node checks signatures, sequence numbers and validity windows. This package
+does not independently repeat those checks or expose their results (IP-3).
 
 ### 4.3 `ipld://<cid>[/<path>]`
 
@@ -255,19 +223,16 @@ publishing peer's signature over it, at the libp2p layer.
   shares its trust model. It is specified here so that it is not mistaken for
   the other three.
 
-A scheme table that records what each scheme verifies **MUST** answer for the
-scheme and not for the namespace: `pubsub`'s entry reads *"libp2p publisher
-signature — a topic is not a content address"*, where its three neighbours read
-`CID`. A table filled in from the namespace would say `CID` for all four and
-would be telling a reader something untrue about the fourth.
+A scheme table **MUST** describe verification per scheme. The `pubsub`
+entry is "libp2p publisher signature — a topic is not a content address";
+the other three entries describe CID verification.
 
 ---
 
 ## 5. What a CID identifies
 
-A CID is **multibase(multicodec + multihash)** — a self-describing hash. What an
-implementation of *this* document needs from that is narrow and worth stating
-exactly, because it is the whole trust story:
+A CIDv1 string encodes a version, multicodec and multihash using a multibase.
+CIDv0 uses its legacy base58btc representation. The relevant properties are:
 
 1. **The bytes of a block are the block's identity.** A block whose bytes do not
    hash to its multihash is not that block. This is what "verified by hash"
@@ -281,18 +246,16 @@ exactly, because it is the whole trust story:
    **MUST** produce the same DAG the node it publishes through would produce, or
    the address it recorded names nothing.
 
-Point 3 is why `src/cid.js` exists. It computes a CID the way kubo 0.43 does
-with `--cid-version=1 --raw-leaves`: a fixed-size 256 KiB chunker, raw leaves,
-sha2-256, a balanced DAG at most 174 links wide, dag-pb internal nodes carrying
-a UnixFS `File` message, and a UnixFS `Directory` node for a folder with links
-sorted by name and each `Tsize` the cumulative size of the child's DAG. Those
-parameters are normative for interoperating with this implementation and are
-kubo's defaults, not ours.
+`src/cid.js` reproduces kubo 0.43 with
+`--cid-version=1 --raw-leaves`: 256 KiB fixed chunks, raw leaves, sha2-256,
+a balanced DAG with at most 174 links per node, dag-pb internal nodes carrying
+UnixFS `File` messages, and UnixFS `Directory` nodes with name-sorted links
+and cumulative child-DAG `Tsize` values. These parameters are normative for
+compatibility with this implementation.
 
-HAMT-sharded directories are **not** implemented: a folder whose basic directory
-node would exceed 256 KiB is refused with `NOT_SUPPORTED` rather than answered
-with a CID kubo would disagree with. Refusing is the correct behaviour for a
-function whose whole contract is agreement (IP-6).
+HAMT-sharded directories are not implemented. `directoryCid` returns
+`NOT_SUPPORTED` when a basic directory node would exceed 256 KiB, because
+its CID would differ from kubo's sharded result (IP-6).
 
 **Shape versus decode.** `CID_RE` tests the *shape* of a CID string; it does not
 decode one. It accepts a base58btc CIDv0 and a base32 CIDv1 and nothing else,
@@ -336,17 +299,13 @@ for every path.
 
 ### 6.3 DNSLink, the second pointer source
 
-DNSLink (`_dnslink.<name> TXT dnslink=/ipfs/<cid>` or `/ipns/<key>`, either with
-a trailing path) is the ecosystem's convention: kubo, Brave, IPFS Companion and
-the public gateways all read it, and for most published IPFS sites it is the
-*only* pointer record there is.
+DNSLink uses `_dnslink.<name> TXT dnslink=/ipfs/<cid>` or `/ipns/<key>`,
+optionally followed by a path.
 
-**It is read here, as a second pointer source of equal standing.** Both records
-are asked for on every resolution that reads pointers at all — the name's own
-`TXT` and `_dnslink.<name>` — on the authoritative-DNS route, where the DNSLink
-query follows the pointer query, and on the DoH route, where the two are asked
-in parallel. The full rules belong to Chapter 1 (`../handshake/SPEC.md` §6.5d–e
-and §10.1); what matters in this chapter is:
+Both the name's TXT records and `_dnslink.<name>` are read wherever this
+resolver reads content pointers. The authoritative route queries DNSLink after
+the name's TXT records; the DoH route queries both in parallel. Chapter 1
+(`../handshake/SPEC.md` §6.5d–e and §10.1) defines the full rules:
 
 - **The address space is the same.** A `dnslink=/ipfs/<cid>` value is parsed by
   the same `CID_RE` an `ipfs=` value is, and `dnslink=/ipns/<key>` by the same
@@ -441,8 +400,7 @@ them are ours.
 
 ### 7.3 Fetching, which is where this chapter stops
 
-For completeness, and to make the boundary unambiguous, this is what the
-reference implementation does after §7.2 — none of it is specified here:
+After §7.2, the browser performs these retrieval steps:
 
 - optionally warms the local node from the stated origin (§8), which
   is a **cache fill and never a decision**: whatever it does or fails to do, the
@@ -450,7 +408,7 @@ reference implementation does after §7.2 — none of it is specified here:
 - asks the node for `(cid, path)`, carrying the request's `Range` through, and
   returns what the node returns;
 - gives the fetch a first-byte deadline (45 s in the reference implementation)
-  and answers `504` honestly rather than hanging.
+  and returns `504` if it expires.
 
 An implementation **MUST NOT** let a warm failure change the answer, and
 **MUST NOT** let a warm success be reported as a stronger verification than an
@@ -460,28 +418,19 @@ ordinary fetch. Both would make a location hint into a trust input.
 
 ## 8. Experimental: the `car=` stated origin and origin warming
 
-**What "experimental" means here.** Everything in this section ships in the
-reference browser and is exercised by `tests/origin-warm.test.js`, and none of
-it is a proposed standard anywhere. The record name, its grammar, the decision
-that its value is a trustless-gateway URL, and every number in the windowing
-policy are a **local convention with no standing outside this implementation**,
-recorded in decision D-P2 of `STORAGE-PUBLISH-SHARE.md`. The behaviour may
-change. An implementation **MAY** ignore this section entirely and lose
-nothing but a cache fill: §7.3's rule is that a warm never changes an answer,
-so a client that does not implement `car=` resolves every name in this
-namespace to the same content address as one that does.
+This section describes a local convention implemented by the browser and
+tested in `tests/origin-warm.test.js`. Its record name, grammar and window
+sizes may change. Decision D-P2 in `STORAGE-PUBLISH-SHARE.md` records its
+origin. An implementation **MAY** ignore `car=`: §7.3 requires the same
+resolved content address whether warming runs, succeeds or fails.
 
-The two rules that are **not** experimental are the ones that make the section
-safe to ignore and safe to implement: a stated origin is untrusted by
-construction (§12.2), and a warm is a cache fill that cannot change what is
-served (§7.3).
+Two requirements remain applicable outside this experiment: the origin is
+untrusted (§12.2), and warming cannot change the content served (§7.3).
 
 ### 8.1 `car=<https url>` — the stated origin
 
-**The problem.** A CID says what the content is and nothing at all about where
-it is. A publisher who keeps their bytes with an ordinary storage provider has
-no way to say "the archive is here" without either running an IPFS node or
-handing a third party the list of everything anyone reads.
+`car=` lets a publisher announce an HTTPS location for the archive named by
+an IPFS pointer.
 
 **The record.** Beside `ipfs=<cid>`, a name **MAY** carry `car=<url>`: an HTTPS
 location from which an archive of *that* CID can be fetched.
@@ -510,22 +459,15 @@ location from which an archive of *that* CID can be fetched.
   implementation **SHOULD NOT** add entries, because each one names a company
   in a resolution path.
 
-**What it is worth: nothing, and that is the design.** The stated origin is a
-*routing hint*. It changes where an implementation looks first; it **MUST NOT**
-change the trust state, the lock, or what any interface claims. A hostile origin
-can serve junk, serve nothing, or serve an unrelated archive; in every case the
-CID check that follows means the wrong bytes are never rendered (§12.2).
+The stated origin is a retrieval hint. It **MUST NOT** change the trust
+state, lock or interface claims. An unrelated or malformed archive does not
+change the CID requested from the local node (§12.2).
 
-**What we are unsure of.** The record name, the
-bounding, and the decision that the URL is only ever a **trustless-gateway
-form** — `https://<host>[/<prefix>]/ipfs/<cid>`, so that a byte window and a
-path can be asked for (§8.2) — are all ours. The amended decision D-P2 in
-`STORAGE-PUBLISH-SHARE.md` says gateway-form only; the reference implementation
-*writes* only that form but *accepts* any HTTPS URL on read and has a
-whole-archive branch for one that is not a gateway (IP-9). We would rather adopt
-somebody else's convention for "here is a location for this CID" than defend
-ours — IPIP-402's trustless gateway gives us the *shape* of the URL but nothing
-says how a name announces one.
+The writer emits gateway-form URLs,
+`https://<host>[/<prefix>]/ipfs/<cid>`, as required by the amended D-P2
+decision. The reader accepts any HTTPS URL and has a whole-archive branch for
+non-gateway URLs. IP-9 records that unresolved mismatch. IPIP-402 defines the
+gateway request parameters but does not define this TXT announcement record.
 
 ### 8.2 Windowed retrieval
 
@@ -552,14 +494,13 @@ one. These numbers are engineering, not protocol; what is normative is:
 - Every block still arrives hash-checked, so a window is exactly as trustworthy
   as the whole archive: less content, identical guarantee.
 
-`src/origin-warm.js` is this, complete.
+`src/origin-warm.js` implements this policy.
 
 ---
 
 ## 9. Verified by hash, and trusted
 
-The claim this namespace lets an implementation make is narrow and strong.
-Stated exactly:
+The content-integrity claim is:
 
 > *The bytes rendered hash to the CID that was resolved.*
 
@@ -568,18 +509,18 @@ gateway, the publisher's own storage provider. It is why an implementation
 **MAY** treat a content pointer as closing the security question about
 *content*, and why a `car=` origin needs no trust at all.
 
-Everything else in this namespace is weaker, and an implementation **MUST NOT**
-present these as equivalent:
+The remaining steps have separate trust requirements. An implementation
+**MUST NOT** present them as equivalent:
 
 | Step | What it rests on |
 |---|---|
-| bytes ↔ CID | the hash. Unconditional. |
+| bytes ↔ CID | the hash check |
 | `ipfs=` on a name ↔ that name | the spine's chain proof, and the DNSSEC validation of the TXT record if the zone is signed |
 | `ipns://<key>` ↔ a CID | an **IPNS record**: a signature by the key, with a sequence number and a validity window — resolved and checked by the node, not by this stack (IP-3) |
 | a DNSLink ↔ a CID | ordinary DNS, with whatever DNSSEC the zone has. On a Handshake name that is the spine's chain proof plus the validation of the `_dnslink` RRset to the on-chain DS, and the proof of its absence where there is none (§6.3) — the same standing as an `ipfs=` record, because it is the same DNS answer |
 | an `ipld://` path traversal | the hash, at every link |
 | a `pubsub://` topic | **nothing.** A libp2p publisher signature at best; no content address exists |
-| a `car=` origin ↔ the archive | **nothing, deliberately.** A hint; the CID check is what protects the reader |
+| a `car=` origin ↔ the archive | no authentication. A hint; the CID check is what protects the reader |
 | the CAR header's `roots` list ↔ the archive's contents | **nothing.** The header is written by whoever wrote the archive; see §12.2 |
 
 ---
@@ -627,10 +568,8 @@ Every failure below is a refusal **inside this namespace**. None of them
 | `first-byte-timeout` | the blocks did not arrive | `504` after 45 s — a bounded, diagnosable answer instead of a hang |
 | warm states | `not-ours`, `no-node`, `present`, `warmed`, `windowed`, `too-large`, `failed`, `disabled` | **never** an error: a warm that could not happen is logged and the ordinary fetch proceeds |
 
-A note on the last row that is a security property rather than a nicety: the
-warm path is the only part of this namespace that talks to a named third party,
-and it is written so that it can fail in every one of those ways without
-changing what the reader is served.
+Warming may fail without changing the CID requested or the ordinary fetch
+that follows.
 
 ---
 
@@ -638,12 +577,8 @@ changing what the reader is served.
 
 ### 12.1 The address must be validated before anything is dialled
 
-A host that is not a CID is a string an attacker chose. Handing it to a
-retrieval layer means at best a wasted DHT walk and at worst a request to
-whatever the string turns out to name. Validate first, refuse loudly, and keep
-**one** copy of the shape: a private copy is how a bound goes missing and a
-guard that used to refuse two hundred characters of junk starts accepting it
-(IP-2).
+Validate an address before passing it to retrieval. A shared shape check
+prevents modules from accepting different address forms or bounds (IP-2).
 
 ### 12.2 A stated origin is an untrusted party, by construction
 
@@ -670,11 +605,8 @@ security. The header is written by the same party as the rest of the file.
 
 ### 12.3 Mutability is a security property, not a convenience
 
-An `ipns=` pointer, a DNSLink and a `pubsub://` topic all mean "whatever the key
-holder says today". An implementation that caches such an answer as though it
-were a CID, or renders it with the same words it uses for a CID, has quietly
-converted a signed-and-revocable statement into an immutable one. Say which was
-which.
+IPNS and DNSLink answers can change. Pubsub topics identify message streams.
+Caching or labelling any of these as an immutable CID misstates its semantics.
 
 ### 12.4 The retrieval layer is a privacy surface even when it is not a trust surface
 
@@ -683,28 +615,16 @@ address no HTTP proxy covers. That is why the reference implementation refuses
 an IPFS-served name outright while anonymisation is on rather than serving it
 over a path that would leak.
 
-**One part of this path is already private, and the refusal still stands. The
-reason is worth stating exactly.** The `car=` warm (§8) is an HTTPS fetch made
-through the fetch implementation the embedder injects, so it rides the proxied
-session like any other HTTPS request: that leg leaks nothing under anonymisation
-and needs no gate. What it does is **import blocks into the local node**, and a
-node holding blocks *announces* them — it publishes provider records for what it
-has, over the same libp2p connections no HTTP proxy covers. So a fetch that is
-private on the way in creates an advertisement on the way out, from the real
-address, naming exactly the content just read. Serving the page also means
-asking the node for the CID, which is a second reason. The gate therefore stays
-where it is — on the `ipfs=` branch, before the warm — and an implementation
-**MUST NOT** conclude from "the warm fetch is proxied" that the name can be
-served. Closing the gap means stopping the node from routing at all while
-anonymisation is on (`IP-D9`), not moving the gate.
+The `car=` HTTPS request uses the injected, proxied fetch, but its imported
+blocks enter the local node. That node can announce provider records and issue
+peer requests outside the HTTP proxy. The gate therefore remains on the
+`ipfs=` branch before warming. An implementation **MUST NOT** infer from a
+proxied warm request that the whole name can be served privately. IP-D9
+proposes disabling node routing before allowing that case.
 
-It is also why the local node is configured with
-**no delegated routers and no delegated publishers**: a delegated router would
-hand one company the list of every CID a person reads, and a delegated
-publisher the list of everything a person publishes. The `car=` warm is the
-deliberate exception and is scoped to make it a non-exception: the only server
-asked is one that already knows this name is being opened, because it is the one
-that serves it.
+The local node disables delegated routers and delegated publishers to avoid
+sending a single service the user's read and publish lists. The stated-origin
+fetch contacts the server named for that content.
 
 A privacy policy that has to reach more than one node **MUST** be written once.
 The reference implementation states it as a flat table of dotted keys and
@@ -717,25 +637,19 @@ delegated-publisher list. A test holds the two forms to the same leaves.
 
 ### 12.5 One namespace, two daemons
 
-The reference implementation runs **two** IPFS nodes: one for the `ipfs://`,
-`ipns://`, `ipld://` and `pubsub://` schemes, and a separate one for content
-behind a Handshake `ipfs=` pointer. They have separate blockstores, separate
-ports and separate lifecycles, and they share one privacy policy by derivation
-rather than by copy (§12.4). Nothing in this specification requires two, and a
-second node is a second place for a privacy setting to be missing: an
-implementation that runs more than one **MUST** be able to point at the single
-definition every one of them is built from.
+The browser runs two IPFS nodes: one for the four explicit schemes and one
+for Handshake `ipfs=` content. They have separate blockstores, ports and
+lifecycles, with privacy settings derived from one policy (§12.4). This
+specification does not require two nodes. An implementation running more than
+one **MUST** identify the shared policy definition used by all of them.
 
 ---
 
 ## Appendix A — what an implementation of this chapter owes a reader
 
-A one-paragraph summary, because it is the part that is easy to lose:
+Content integrity and pointer authenticity are separate checks.
 
-*A CID is a hash, so the content behind a resolved pointer cannot be tampered
-with — by us, by a gateway, by the publisher's storage provider, or by anyone on
-the path. What can be tampered with is **which** CID you were sent to, and that
-question belongs to the name system that carried the pointer. An IPNS name, a
-DNSLink and a pubsub topic are not hashes and do not carry that guarantee. A
-`car=` origin is a shortcut to the bytes and carries no guarantee at all, which
-is why it is safe to follow.*
+A CID allows retrieved blocks to be checked against the selected content
+address. The name system determines which CID is selected. IPNS and DNSLink
+add mutable mappings; pubsub topics have no content address. `car=` changes
+where retrieval starts, not which content is accepted.

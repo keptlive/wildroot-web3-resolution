@@ -1,14 +1,13 @@
 # Chapter 5 — ENS and `web3://`: references
 
-Every standard this chapter's implementation reads, with what it is used for
-and where. The rule is the spine's: **nothing is listed here that the code does
-not touch**, because a padded bibliography makes the real dependencies
-impossible to see. A row that says *not implemented* or *via the library* says
-so in the row — it is present because its absence, or its indirection, is a
-documented fact rather than an oversight.
+Specifications and implementation documents used by this chapter. Each row
+identifies the relevant behaviour and source. Delegated checks and
+unimplemented features are labelled explicitly.
 
-Rows that point at `../../src/` are dependencies this chapter **shares with the
-rest of the specification** and does not re-implement.
+`src/` and `tests/` paths are relative to this chapter; `../../src/` names
+shared modules. Browser paths refer to the Wildroot source tree.
+
+[Chapter specification](SPEC.md) · [Deviations and open questions](DEVIATIONS.md)
 
 ---
 
@@ -25,7 +24,7 @@ rest of the specification** and does not re-implement.
 | [ENSIP-7](https://docs.ens.domains/ensip/7) | Contenthash Field | EIP-1577 under the ENS numbering, and the codec assignments the decoder recognises: `ipfs-ns` 0xe3, `ipns-ns` 0xe5, `swarm-ns` 0xe4, `arweave-ns` 0xb29910. SPEC §5.5; `../../src/contenthash.js`. |
 | [ENSIP-21](https://docs.ens.domains/ensip/21) | Batch Gateway Offchain Lookup | The sentinel URL `x-batch-gateway:true`, the `query((address,string[],bytes)[])` selector `0xa780bab6`, and the `(bool[],bytes[])` return. Implemented locally, so `ccip-v3.ens.xyz` is never contacted. SPEC §6; `src/ccip-read.js` `batchLocally`. |
 | [EIP-181](https://eips.ethereum.org/EIPS/eip-181) | ENS support for reverse resolution of Ethereum addresses | **Not implemented** (EN-3). Listed because a reader expects it in an ENS chapter and its absence is deliberate: nothing on a browsing path has an address to reverse. |
-| [ENSIP-5](https://docs.ens.domains/ensip/5) | Text Records | **Not read** (EN-1, EN-7). The record profile a "name info" panel would use, and the reason this chapter's single call is a `contenthash` call and nothing else. |
+| [ENSIP-5](https://docs.ens.domains/ensip/5) | Seven text keys displayed on the no-website page, with escaping, a 512-character cap and HTTPS-only URL links. SPEC §5.6a; EN-1; `src/ens-protocol.js` (`textRecords`, `textRecordsHtml`). | **Not read** (EN-1, EN-7). The record profile a "name info" panel would use, and the reason this chapter's single call is a `contenthash` call and nothing else. |
 | [ENSIP-9](https://docs.ens.domains/ensip/9) | Multichain Address Resolution | **Not read** (EN-1, EN-7). A wallet's record profile, cited so that the boundary of "resolves a name to a website" is explicit. |
 | [ENS Universal Resolver](https://docs.ens.domains/resolution/universal) | ENS documentation — Universal Resolver | The contract this chapter calls, `0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe` on mainnet: a DAO-owned upgradable proxy, pinned deliberately rather than read from the bundled chain registry. SPEC §5.2; `src/ens-protocol.js` `UNIVERSAL_RESOLVER`. |
 
@@ -67,7 +66,9 @@ rest of the specification** and does not re-implement.
 | [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) / [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174) | Key words for use in RFCs to Indicate Requirement Levels | The requirement keywords used throughout this chapter. |
 | [multicodec](https://github.com/multiformats/multicodec) | Multiformats — multicodec table | The codec prefixes a contenthash value is read by, with unsigned-varint and CID. Shared with the rest of the specification. SPEC §5.5; `../../src/contenthash.js`. |
 
-## Not a standard, but load-bearing
+<a id="not-a-standard-but-required"></a>
+
+## Implementation dependencies
 
 | Identifier | Title | Used for |
 |---|---|---|

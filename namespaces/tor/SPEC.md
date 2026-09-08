@@ -2,24 +2,23 @@
 
 **Namespace:** `tor` · **Schemes:** `onion:` · **Addresses:** `<56-char v3>.onion`
 **Version:** 0.1 (draft for public comment)
-**Status:** Describes the behaviour of the reference implementation in
-`namespaces/tor/src/`, which ships in the Wildroot browser. Not endorsed by any
-standards body, and emphatically not by the Tor Project. Normative statements
-below describe what an implementation must do *to interoperate with this one*;
-where they are inherited from an existing standard, that standard is cited and
-its rule governs.
+**Status:** Describes the reference implementation in `namespaces/tor/src/`.
+Normative requirements define compatibility with this implementation. Cited
+standards govern requirements inherited from them. This is a project
+specification, without endorsement from a standards body or the Tor Project.
+
 **Licence:** CC-BY-4.0 (see `../../LICENSE-SPEC`). The reference implementation
 is licensed separately.
 
-This chapter is part of the integrated specification whose spine is
-[`../../SPEC.md`](../../SPEC.md), where namespace selection — which identifier
-belongs to which namespace, and the two routing laws that keep the boundary —
-is specified. This chapter adds the namespace whose whole character is that
-**its address is a public key and there is no name system underneath it at
-all**. Its deviations and open questions are in
-[`../../DEVIATIONS.md`](../../DEVIATIONS.md) under the `TO-` prefix, and the
-standards it reads are in `REFERENCES.md` beside this file; both are part of
-the specification, not appendices to it.
+This chapter follows the namespace-selection and trust rules in
+[`../../SPEC.md`](../../SPEC.md). It covers routing to onion services through
+a Tor client on the user's device.
+
+See [DEVIATIONS.md](DEVIATIONS.md) for `TO-` deviations and open questions,
+and [REFERENCES.md](REFERENCES.md) for sources.
+
+> **Review note:** [REVIEW.md](../../REVIEW.md) records contradictions and
+> technical claims awaiting a decision. This rewrite does not resolve them.
 
 ---
 
@@ -42,46 +41,28 @@ used as in RFC 2119 / RFC 8174.
 
 ## 1. What this specifies, and why it exists
 
-Every other chapter in this specification answers the question *"what does this
-name mean, and how sure are we?"* — a lookup, a proof, a record, a trust state.
-The Tor chapter answers a different question, because it does not have that
-one. **An onion address is not a name that resolves to a key. It is the key.**
+A v3 onion address encodes an Ed25519 public key, checksum and version byte
+(Tor rend-spec-v3 §6). Tor authenticates possession of the corresponding
+private key during the rendezvous protocol. The browser delegates that work
+to its Tor client.
 
-A v3 onion address is the base32 encoding of an Ed25519 public key, a checksum
-over it, and a version byte (Tor rend-spec-v3 §6). Reaching the service means
-Tor's rendezvous protocol proves possession of the corresponding private key
-inside the circuit; there is no directory to consult, no signature for a client
-to check afterwards, and no way for a wrong service to answer. The
-authentication is not *verified by the resolver* — it is **structural**, done by
-the transport, and it either happens or the connection does not.
+This chapter specifies address validation, routing, request handling and trust
+reporting. A central requirement is to keep onion addresses out of ordinary
+name resolution: a DNS query would disclose the requested service. Section 3.2
+and TO-2 describe the explicit-scheme exception in the current routing rules.
 
-So the whole security problem moves. There is nothing to get wrong about the
-*answer*. What can be got wrong is the **question**: a DNS lookup containing an
-onion address discloses, to a resolver and to everything on the path to it,
-which hidden service somebody tried to reach. **No lock state undoes that
-disclosure.** It is not a weaker answer; it is a fact about the user that has
-already left the machine.
-
-That is why this chapter is mostly a specification of things that MUST NOT
-happen, and why the classifier that decides which namespace a host belongs to
-is a security boundary here rather than a routing convenience.
-
-The second thing this specifies is a rule that is ours, not Tor's, and is the
-reason this chapter is a *design* document and not just a wiring note:
+The implementation also requires a device-local Tor client:
 
 > **An onion address is reached through a Tor client running on the user's own
 > device, or it is not reached at all.**
 
-No hosted relay, no operator-run SOCKS endpoint, no `.onion`-to-web gateway,
-however convenient. Every one of those substitutes "trust us" for the property
-the user came for, and every one of them learns which hidden service was asked
-for. A browser that offers the second thing while saying the first is lying, and
-this is one of the places we would rather be less capable than dishonest.
+Hosted SOCKS endpoints and onion-to-web gateways are outside this policy
+because their operators would learn the requested service.
 
 ### 1.1 Scope
 
 **In scope: turning a `.onion` address into a request that leaves the machine
-only inside a device-local Tor circuit, or into an honest refusal.** Precisely:
+only inside a device-local Tor circuit, or into an local refusal.** Precisely:
 
 - **classification** — which inputs belong to this namespace, and the rule that
   nothing in it may ever be handed to a name resolver (§3);
@@ -97,7 +78,7 @@ only inside a device-local Tor circuit, or into an honest refusal.** Precisely:
 - **the trust state** an interface is given, and the claims it must not make
   (§8).
 
-**Out of scope, explicitly:**
+**Out of scope:**
 
 | Out of scope | Why it is a different document |
 |---|---|
@@ -107,8 +88,7 @@ only inside a device-local Tor circuit, or into an honest refusal.** Precisely:
 | **Publishing an onion service** | The read path only. This implementation is a client and its `torrc` contains no `HiddenService` line. |
 | **What the page does once it loads** — rendering, storage, permissions | Except for §8, which specifies the trust state, and §9.4, which is about the origin the content is given. |
 
-A consequence worth stating plainly: an implementation of this chapter is a
-**gate and a router**, not a resolver. There is nothing to resolve.
+This chapter specifies the browser gate and transport routing; Tor performs onion-service resolution.
 
 ---
 
@@ -121,8 +101,7 @@ Terms are used as in [`../../SPEC.md`](../../SPEC.md), plus:
 - **Onion service key** — the Ed25519 public key that *is* the address, modulo
   the encoding of §4.
 - **v3** — the current onion service protocol. **v2** (16-character addresses,
-  1024-bit RSA) was deprecated in 2020 and removed from Tor in 2021. It is dead;
-  an implementation MUST NOT treat a v2 address as valid.
+  1024-bit RSA) was deprecated in 2020 and removed from Tor in 2021. An implementation MUST NOT treat a v2 address as valid.
 - **Circuit** — a Tor path. Here it always means one built by a Tor client
   process on the user's own device.
 - **The gate** — the policy decision, taken before any network activity, of
@@ -131,21 +110,19 @@ Terms are used as in [`../../SPEC.md`](../../SPEC.md), plus:
   Tor SOCKS endpoint (or, when that cannot be had, the blackhole of §7.6). It is
   the gate's only input. It is **not a control of its own**: it is driven by
   **Settings › Content delivery › Mode** — `Private` turns it on, `Fast` turns
-  it off — one switch with two handles, the settings page and the Privacy menu,
+  it off — one control exposed in two places, the settings page and the Privacy menu,
   both ending in `DeliveryMode.set()` (`../../src/delivery-mode.js`,
   `../../SPEC.md` §4.2). The name leads with what a user gets ("hide my IP")
   rather than with the technology.
 - **BLOCKED** — the controller's third state (`MODES.BLOCKED`): protection was
   asked for and Tor cannot be had, so every session is pointed at a loopback
-  port nothing listens on (§7.6). Nothing loads; nothing leaks.
+  port nothing listens on (§7.6). Session loads fail at that proxy.
 - **The blackhole** — that port: `BLACKHOLE_RULES`, `socks5://127.0.0.1:9`.
 - **Structural authentication** — authentication a client obtains by
   construction rather than by checking something. §4 and §9.1 turn on this
   distinction.
 
-Note what is *absent* from this vocabulary and present in every other chapter:
-there is no record, no zone, no signature, no proof, no anchor, and no NODATA.
-Nothing is looked up.
+The browser does not validate DNS records or perform Tor rendezvous verification itself.
 
 ---
 
@@ -163,12 +140,8 @@ application half of that as its first rule, and strengthens it.
 > **R2.** R1 applies to a **malformed** onion address exactly as it applies to a
 > valid one. Validity MUST NOT be a condition of the routing decision.
 
-R2 is the rule that is easy to get wrong and expensive to get wrong. If an
-implementation classifies only *well-formed* onion addresses into this namespace
-and lets the rest fall through to its default resolver, then a typo, a truncated
-paste, a v2 address, or a deliberately malformed link is sent to DNS — and a
-typo'd onion address in a query log identifies the intended service just as well
-as a correct one. The intent is the disclosure, not the accuracy.
+A validity-gated classifier could send mistyped, truncated or obsolete onion
+addresses to DNS. Those queries still disclose the user's intended service.
 
 Accordingly the classifier matches `.onion` **first and unconditionally**,
 before the ENS suffix check, before the reserved-name list, before the
@@ -189,15 +162,14 @@ if (isOnionHost(host)) return NAMESPACES.TOR
 `onion` is also a row in the one reserved-name list
 (`../../src/reserved-names.cjs:31`, RFC 6761/6762/7686/8375), which the
 classifier consults immediately **after** the `.onion` test
-(`../../src/router.js:322`). Both orderings are load-bearing: the reserved-name
+(`../../src/router.js:322`). Both placements matter: the reserved-name
 row would otherwise send an onion host to the web namespace as though it were
 `nas.local`, and its absence would make `.onion` a Handshake name for any code
 path that reaches the list without the suffix test.
 
 ### 3.1 Four entry points, one rule
 
-A host reaches the network through more than one door, and R1 has to hold at all
-of them. In this implementation there are four, and a miss at any one is a leak:
+The implementation applies the rule at four entry points:
 
 | Entry point | Mechanism | Result for `<addr>.onion` |
 |---|---|---|
@@ -208,12 +180,9 @@ of them. In this implementation there are four, and a miss at any one is a leak:
 
 `tests/onion-leak-guard.test.js` drives one address through all four.
 
-An implementation **MUST** enumerate its own entry points and cover every one.
-The subresource case is the one that is most often missed and is the worst to
-miss: a main-frame rewrite is visible to the user, whereas a tracking pixel
-pointed at an onion host leaks silently on every page view. In this
-implementation the network-layer guard runs before the ad blocker for the same
-reason — a filter list must never be able to downgrade a security decision
+An implementation **MUST** enumerate and cover every network entry point.
+Subresource requests need a separate guard because they can disclose an onion
+address without a visible navigation. This guard runs before the ad blocker
 (`src/subresource-guard.js:22-24`).
 
 ### 3.2 An explicit scheme still wins
@@ -225,12 +194,9 @@ circuit. An implementation MUST NOT re-sniff an explicit scheme out of the host
 — sniffing is how `https://` silently becomes something else, and that is a
 worse property than a failed page.
 
-The consequence is honest but worth stating: **R1 does not protect a user who
-explicitly asks for an onion address over another scheme.** In this
-implementation the subresource guard closes that hole for subresources (it acts
-on the host regardless of scheme) but not for a top-level `https://<addr>.onion/`
-the user typed themselves. See [`../../DEVIATIONS.md`](../../DEVIATIONS.md)
-TO-2.
+**The current R1 implementation does not protect an explicitly typed
+non-onion scheme on an onion host.** The subresource guard checks the host
+regardless of scheme, but the documented top-level exception remains. See TO-2.
 
 ---
 
@@ -290,10 +256,8 @@ consumes it: an address whose version byte or checksum does not match is refused
 (`src/onion-protocol.js:119-124`). Nothing was sent, the refusal carries
 `X-Resolution-Namespace: tor`, and no other namespace is tried.
 
-This is a **usability** property, not a security one — §9.2 explains why — and
-an implementation of this chapter **SHOULD** do the same, because the checksum
-exists precisely to catch the corrupted-address case locally instead of spending
-a circuit discovering it.
+An implementation **SHOULD** validate the address locally to report mistakes
+without waiting for Tor to reject them (§9.2).
 
 The check runs **before the gate** (§6.3), so a malformed address is answered
 the same way whether IP Protection is on or off. Both answers are generated
@@ -324,9 +288,7 @@ scheme. It returns three fields:
   the query alone becomes the path — which is what `http://<host>?q=1` means in
   any case.
 
-The **fragment is dropped** before the request is built. This is correct and
-worth doing deliberately: a fragment is the client's business and an onion
-service has no reason to receive one. The URL parser drops it for free.
+The **fragment is dropped** when constructing the request; it is client-side URL state.
 
 A string the parser refuses falls back to a hand split that returns the same
 three fields, so a malformed address fails closed inside the handler rather than
@@ -371,23 +333,18 @@ export function decideOnionRoute ({ ipProtectionOn } = {}) {
 > unless the connection it would ride is a device-local Tor circuit. If it is
 > not, the implementation MUST answer without touching the network.
 
-The gate's single input is whether the session proxy is currently the
-device-local Tor SOCKS endpoint (§7). It is a **mode** check, not a
-**readiness** check, and that distinction is load-bearing — see §7.2.
+The gate reads the protection mode, not circuit readiness (§7.2). The mode
+controls whether the session is routed through the local SOCKS endpoint or
+the BLOCKED proxy (§7.6).
 
-When the gate refuses, the handler returns a `200` interstitial page explaining
-that the protected path is off, that choosing **Private** under Settings ›
-Content delivery › Mode (or its Privacy-menu handle, §2) turns it on — and, in
-the same breath, that reaching `.onion` here hides the user's IP but is not full
-anonymity, because this browser does not resist fingerprinting the way Tor
-Browser does. **No request is made.** The host is escaped before being echoed
-into the page.
+When the gate refuses, the handler returns a local `200` interstitial. It
+points to Settings › Content delivery › Mode › Private and states that this
+path hides the IP address without providing Tor Browser's fingerprinting
+defences. No request is made. The echoed host is HTML-escaped.
 
-Answering `200` with a page rather than an error is deliberate: it is a
-navigable document a user can read and act on. It also means `did-fail-load`
-never fires for it, which is why the "reload when the circuit comes up" rule in
-§7.3 keys on the **scheme** rather than on the load status. See
-[`../../DEVIATIONS.md`](../../DEVIATIONS.md) TO-1.
+The `200` status makes the interstitial a normal navigable document. It does
+not trigger `did-fail-load`, so the Tor-ready reload rule checks the `onion://`
+scheme as well as load errors (§7.4, TO-1).
 
 ### 6.4 Step 3 — the proxied request
 
@@ -438,15 +395,17 @@ fetched and returns exactly one of four kinds:
 > service MUST be reached by a navigation the browser performs; a target
 > outside Tor MUST NOT be fetched at all.
 
-Refusing the third case *silently* would be worse than following it, which is
-why the answer is a page rather than an error: the user should learn that the
-service they asked for sent them somewhere else, and should be the one who
-decides to go.
+The off-Tor page lets the user inspect the destination before choosing to navigate.
 
 A followed hop after a `301`, `302` or `303` is re-issued as a `GET` with no
 body (RFC 9110 §15.4.4); a `307` or `308` keeps the method and body (§15.4.8,
 §15.4.9). The hop is the same service on the same port by construction, so
 nothing crosses an origin.
+
+The helper converts accepted onion redirect targets to `http://`, including
+`https://` locations. It does not preserve an HTTPS upgrade. The same-service
+comparison uses hostname and parsed port, without comparing schemes.
+[REVIEW.md](../../REVIEW.md) records this transport-policy decision.
 
 A `3xx` **without** a `Location` is not a redirect and is passed through as an
 ordinary response. This is the common case rather than an exotic one, because
@@ -471,11 +430,8 @@ Response headers are copied through a fixed allow-list
   `x-content-type-options`, `x-frame-options`, `referrer-policy`,
   `permissions-policy`.
 
-> **R9.** A handler that stands between an onion service and the page MUST pass
-> the service's own security headers through. They are not a convenience the
-> page wants; they are an instruction the service is giving, and dropping them
-> leaves an onion page less defended inside this browser than in one that does
-> nothing clever.
+> **R9.** A handler between an onion service and the page MUST pass the
+> service's security headers through, preserving its content restrictions.
 
 Two exclusions are deliberate. `Strict-Transport-Security` is **not** passed
 through: there is no TLS inside the tunnel, so it is meaningless here and
@@ -496,25 +452,21 @@ this namespace and no other.
 > **R10.** A failure in this namespace MUST be answered *as* a failure in this
 > namespace. There is no fallback, to DNS or to anything else.
 
-A thrown request yields a `502` carrying the underlying error and the honest
-note that the circuit may still be building and the first connection can take up
-to a minute. A missing `fetchImpl` yields a `500` saying the Tor-routed path is
-not wired in this build. Nothing is retried anywhere else.
+A request exception returns `502` with the underlying error and a note that
+Tor may still be bootstrapping. A missing `fetchImpl` returns `500` stating
+that the Tor route is not wired into the build. Neither triggers fallback.
 
 ### 6.8 What is *not* in the algorithm
 
-Stated because their absence is the design: no name lookup of any kind; no
-cache, positive or negative — there is no record to cache and nothing to expire;
-no certificate validation, chain building, or pin — the connection inside the
-tunnel is plain HTTP; no retry across a transport; no second opinion.
+The browser handler has no DNS lookup, resolution cache, certificate or DANE
+validation, transport fallback, or independent verification of the Tor circuit.
+The initial request inside Tor uses HTTP.
 
 ---
 
 ## 7. The circuit: device-local, or nothing
 
-Resolution depends on exactly two things about the Tor client: **whether there
-is a SOCKS endpoint to route to**, and **whether that endpoint is on this
-machine**. This section specifies those and stops.
+The handler needs the Tor client’s availability state and device-local SOCKS endpoint.
 
 ### 7.1 Where the circuit comes from
 
@@ -551,12 +503,9 @@ bootstrapping, and the gate opens at the same moment.
 
 > **R11.** The gate MUST be satisfied by the *mode*, not by circuit *readiness*.
 
-This looks backwards and is the leak-safe order. With the proxy already set, a
-request issued during the bootstrap **waits for the circuit**. If the gate
-instead waited for readiness, then either the request is refused (and the user
-learns to retry, which is a usability tax on the one path where impatience is
-dangerous) or — much worse — some other code path takes the request while the
-session is still direct, and the `.onion` host goes to a system resolver.
+Applying the proxy before admitting requests keeps requests on the Tor route
+during bootstrap. They can wait or fail at that endpoint instead of entering a
+direct connection path.
 
 The bootstrap percentage is relayed to the interface purely as display. It never
 changes routing (`tests/tor-policy.test.js`).
@@ -587,18 +536,13 @@ Private by routing off — this controller's `setMode('off')`, gate first —
 `tests/delivery-mode.test.js`: *"entering Private flips the mode BEFORE the
 anonymizer routes; leaving it routes off BEFORE the mode flips"*).
 
-The asymmetry is the point, and it is the whole reason to state it as a rule: a
-window of a single microtask on the way out is enough to hand a `.onion` host to
-a system resolver, and it is invisible when it happens.
+The ordering prevents an asynchronous transition from leaving the gate open on a direct session.
 
 ### 7.4 When the circuit arrives, and when it fails
 
-When the circuit comes up, tabs that were stuck must load themselves — a user
-should never have to know to press reload. The rule
-(`src/tor-reload.js:31-35`) is deliberately conservative: reload a tab whose
-last main-frame load **errored**, and reload any tab on the `onion://`
-**scheme**; leave everything else alone. Scheme rather than load status, because
-the interstitial is a successful `200` (§6.3).
+When Tor becomes ready, `src/tor-reload.js:31-35` reloads tabs whose last
+main-frame load failed and tabs on the `onion://` scheme. The scheme check
+includes the successful `200` interstitial (§6.3). Other tabs are unchanged.
 
 If the bootstrap never completes, the controller does not go direct. With
 `failClosed` it enters BLOCKED (§7.6) and says so — *"Private mode could not
@@ -662,25 +606,16 @@ implementation **MUST NOT** invert either half — resolving locally to send an
 address is a leak, and sending a name that was already resolved discloses it for
 nothing.
 
-**And TO-3 applies to these dials too.** They send no SOCKS credential either,
-so a Handshake nameserver lookup, the site connection that follows it, a
-WebSocket to a Handshake origin, a Gemini capsule and a relay query share
-circuits with each other and with everything in the session. The
-per-origin credential of [`../../DEVIATIONS.md`](../../DEVIATIONS.md) TO-D1
-would, unlike the session proxy, be trivial to supply here — these callers
-construct their own dialer — which makes them the cheapest place to *measure*
-whether Tor isolates on it before the harder question of the session proxy is
-answered.
+The direct dialers also send no SOCKS credentials, so they share the stream
+isolation limitation in TO-3. TO-D1 proposes measuring per-origin isolation
+with credentials in these dialers before changing the session proxy.
 
-This is what makes onion resolution possible at all: the onion handler does not
-build a tunnel, it rides the one the session already has. The cost of that
-simplicity is in [`../../DEVIATIONS.md`](../../DEVIATIONS.md) TO-6.
+The onion handler uses the session proxy; it does not create a separate tunnel. TO-6 covers the whole-session scope of that choice.
 
 ### 7.6 Fail closed: the BLOCKED state
 
-The controller has three states, `MODES`: `off`, `tor` and `blocked`. The third
-exists for one promise — Private mode's *"if a private lookup fails, the page
-fails rather than falling back"* — applied to the proxy itself.
+The controller exposes `off`, `tor` and `blocked`. BLOCKED prevents direct
+fallback when Private mode requires Tor but no usable client is available.
 
 > **R15.** When protection is in force and a device-local Tor cannot be had, an
 > implementation MUST NOT route the session directly. It MUST route it somewhere
@@ -711,7 +646,7 @@ go through `_cannotRoute()` and enter **BLOCKED**:
 (§7.3); a later `setMode('tor')` that succeeds routes to the real port and
 `torSocks()` reports it again. Without `failClosed` — the library default, kept
 for controller-only callers — the same two failures end `off`, direct, with the
-honest note of §7.4.
+explanatory note of §7.4.
 
 The blackhole is loopback by construction and **MUST** stay so: a routable
 address there would turn a refusal into a connection to somebody.
@@ -721,11 +656,9 @@ a failed bootstrap -> BLOCKED, not direct"*, *"failClosed: OFF still goes
 direct, and a routed TOR still reports its SOCKS URL"*, and *"the blackhole is a
 loopback port, never a routable address"*.
 
-What BLOCKED costs is what the mode's disclosure and the note say: nothing
-loads. What it does **not** do is change a verdict — there is no page to have
-one — or the gate's logic: the gate is a mode check and not a readiness check
-(§7.2), so it says *route*, the request dies at the blackhole, and the answer is
-the handler's failure page of §6.7, which echoes the proxy error (TO-7).
+BLOCKED prevents loads. The mode-based onion gate still returns `route`
+(§7.2), and the session request fails at the blackhole. The handler returns
+the 502 page of §6.7; TO-7 tracks its generic proxy-error wording.
 
 ---
 
@@ -744,16 +677,14 @@ Mapping onto the trust states of [`../../SPEC.md`](../../SPEC.md):
 > be decided by the scheme, and MUST NOT be influenced by anything the service
 > sends.
 
-The step an interface is given (`../../src/trust-path.js:397-406`) says, in the
-words the user is owed:
+The interface step (`../../src/trust-path.js`) is:
 
 > **Connection — unverified — Tor onion service (HTTP inside Tor).** Reached
 > only through the Tor client on this device — never a hosted relay. The onion
 > address authenticates the service at the Tor layer, but the page itself is
 > plain HTTP inside the tunnel, so its contents are not otherwise verified.
 
-Two things this is careful about, and an implementation should be equally
-careful:
+Two implementation details affect interpretation:
 
 - **`secure: true` is not a lock.** Registering the scheme as a secure context
   is what makes storage and WebCrypto work for real applications. It is a
@@ -764,8 +695,7 @@ careful:
   identical step list, including a malformed one that will never reach a
   service. Nothing in a header, a body or a certificate can change it.
 
-The honest summary a user is given elsewhere in the product is the same one:
-this hides your IP; it is not full anonymity.
+The product describes this as IP protection without full anonymity.
 
 ---
 
@@ -798,17 +728,11 @@ It may **not** conclude:
 
 ### 9.2 What the checksum check is, and what it is not
 
-Verifying the v3 checksum is a **syntax** check, not a security one, and saying
-so matters: a reader who believes it closes a hole will look for the wrong bug.
-**A wrong address cannot reach a wrong service** with or without it. Tor derives
-the directory lookup from the key bytes themselves, so a corrupted address names
-a service that does not exist, and the circuit fails.
+The v3 checksum detects address transcription errors. Tor handles service
+authentication; the browser's checksum check does not replace that protocol.
 
-What the check buys is precision and cost: a mistyped or truncated address fails
-**instantly and locally**, with a message that says what is wrong, instead of
-hanging while a circuit is built for an address that cannot resolve and then
-reporting a generic transport error. The checksum protects against
-*transcription error*, which is exactly what it was designed for.
+Local validation reports malformed addresses immediately, with a specific
+error, instead of waiting for a transport failure.
 
 R2 remains the boundary the check must not cross: the routing decision stays on
 the suffix test, because an invalid onion address discloses the user's intent to
@@ -816,7 +740,7 @@ a resolver exactly as well as a valid one.
 
 ### 9.3 What leaks, and when
 
-Stated positively, because "leak" is the whole subject of this namespace.
+The disclosure depends on the route and the entry point:
 
 **With IP Protection off** (Fast mode), an onion navigation makes **no network
 request at all**: no DNS, no TCP, no probe. The interstitial is generated locally. This is
@@ -838,7 +762,7 @@ and is the single most important behaviour in this chapter.
   existing sockets are closed, and the next load gets the interstitial (§7.3).
 - **A bootstrap that fails**: ends BLOCKED (§7.6) — nothing loads, and the note
   says why — never in a direct onion attempt (R13). Without `failClosed`, it
-  ends direct + off + honest.
+  ends with the gate closed, a direct session and a status note.
 - **An explicit non-onion scheme on an onion host** typed by the user: not
   protected for a top-level load (§3.2, TO-2).
 - **A redirect off Tor**: the destination is named to the user and is never
@@ -856,7 +780,7 @@ the user's machine, keyed to its own address, that survives across visits. That
 is the same bargain every origin gets and is stated here so it is not a
 surprise. Service workers are disabled.
 
-The redirect rules of §6.5 exist to keep that origin honest. Content served
+The redirect rules of §6.5 preserve the origin boundary. Content served
 under `onion://<host>` is content `<host>` itself served: a redirect to another
 onion service becomes a navigation, so the origin changes with the content, and
 a redirect off Tor is not fetched at all. Nothing another origin wrote is
@@ -864,9 +788,7 @@ handed to the page inside this one's storage.
 
 ### 9.5 The rule that carries the most weight
 
-Everything above rests on §3's R1/R2 holding at *every* entry point. This
-implementation has four (§3.1). The failure mode is silent — a request that
-should not have been made looks exactly like one that was allowed — so it cannot
-be found by using the browser. It can only be found by enumerating the doors and
-testing each one, which is what `tests/onion-leak-guard.test.js` exists to do,
-and what an implementer of this chapter is being asked to do for their own tree.
+Implementations must test R1/R2 at each network entry point (§3.1), including
+subresources and malformed input. `tests/onion-leak-guard.test.js` covers the
+shared routing and guard functions. TO-2 records the remaining explicit-scheme
+exception.

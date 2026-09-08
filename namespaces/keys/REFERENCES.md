@@ -1,23 +1,13 @@
 # Chapter 9 — Key-addressed namespaces (hyper, SSB, Gemini, BitTorrent): references
 
-Every standard, specification or protocol document this chapter's code actually
-reads, with what it is used for and where. Nothing is listed that the code does
-not touch: a padded bibliography is worse than none, because it makes the real
-dependencies impossible to see.
+Specifications and implementation documents used by this chapter. Each row
+identifies the relevant behaviour and source. Delegated checks and
+unimplemented features are labelled explicitly.
 
-A row that says **via the engine** means the rule is implemented by a
-third-party library this implementation depends on, not by code in this
-package. That distinction is kept deliberately — see `DEVIATIONS.md` **KY-7** —
-and it is the honest answer to "did you implement this?" for much of this
-chapter.
+`src/` and `tests/` paths are relative to this chapter; `../../src/` names
+shared modules. Browser paths refer to the Wildroot source tree.
 
-The spine's `REFERENCES.md` covers DNS, DNSSEC, DANE, DoH/ODoH, Handshake and
-the URL constraints; those rows are not repeated. RFC 3986 is restated because
-it is the shared grammar every identifier here is written in.
-
-Paths beginning `src/` are in this directory; `../../src/` is a shared module of
-this package; anything named *the Wildroot tree* is the browser this is
-extracted from.
+[Chapter specification](SPEC.md) · [Deviations and open questions](DEVIATIONS.md)
 
 ---
 
@@ -79,7 +69,9 @@ The BEPs are indexed at
 | [RFC 6125](https://www.rfc-editor.org/rfc/rfc6125) | Representation and Verification of Domain-Based Application Service Identity in PKIX | Cited for what is **not** done: no identity check of any kind is performed on a Gemini server certificate, name or otherwise (`rejectUnauthorized: false`, no store, no comparison). `DEVIATIONS.md` KY-1 |
 | [RFC 1928](https://www.rfc-editor.org/rfc/rfc1928) | SOCKS Protocol Version 5 | **§K.6.2** — how a Gemini request survives Private mode instead of being refused: the handler is a SOCKS5 client of the device-local Tor, offering only the "no authentication" method (§3) and sending the capsule's host as address type `0x03` `DOMAINNAME` (§4), so the name is resolved inside Tor and the operating system's resolver is never asked. `../../src/socks-dial.js` (`socksDialer`, shared with the Handshake resolver's authoritative hop, the WebSocket tunnel of Chapter 11 and the Nostr relays of Chapter 6), consumed in `src/gemini-protocol.js` where the socket is built. RFC 1929's username/password method is **not** used, so nothing isolates one capsule's circuit from another's (Chapter 8, TO-3). |
 
-## Not a standard, but load-bearing
+<a id="not-a-standard-but-required"></a>
+
+## Implementation dependencies
 
 | Identifier | Title | Used for |
 |---|---|---|

@@ -1,13 +1,13 @@
 # Chapter 3 — IPFS, IPNS and DNSLink: deviations and open questions
 
-Every place this chapter departs from a specification cited in
-`REFERENCES.md`, every place we are not confident we have made the right call,
-and every design item still open. **Section 2 is the one to read.** A deviation
-that is not written down is just a bug nobody has found yet.
+Known deviations, unresolved questions and proposed changes for IPFS identifiers, content pointers and the experimental `car=` origin hint.
 
-Paths beginning `src/` or `tests/` are in this chapter's directory; `../../src/`
-is a shared module of this package; anything named *the Wildroot tree* is the
-browser this is extracted from. Line numbers are as of extraction.
+Entries distinguish current behaviour from recommendations. Paths beginning
+`src/` or `tests/` are relative to this chapter; `../../src/` names shared
+modules. Browser paths refer to the Wildroot source tree. Historical line
+references may have moved since extraction.
+
+[Chapter specification](SPEC.md) · [References](REFERENCES.md)
 
 ---
 
@@ -29,11 +29,8 @@ table has a couple of dozen prefixes, and the
 [CID specification](https://github.com/multiformats/cid) makes a CIDv1 legal in
 any of them.
 
-**Why.** Those are the two forms anything in this ecosystem prints: `ipfs add`
-produces the second, everything before CIDv1 produced the first, and a shape
-test a hostile string cannot walk through is worth more here than generality.
-It is a *shape* test, deliberately — it does not decode, so it cannot be tricked
-into allocating on a malformed multihash.
+**Why.** The implementation uses a bounded shape check for the two supported
+CID encodings. It does not decode the multihash.
 
 **Consequence.** A CIDv1 written in base36 (`k…`), base16 (`f…`), base58btc
 (`z…`) or base64 is refused: as an `ipfs=` pointer, as an `ipfs://` host, as the
@@ -65,10 +62,8 @@ and it is the mechanism behind SPEC §12.1: one address shape, in one place.
 copies it was written against had (`[a-z0-9]{46,`), so these two, which are
 written differently and are currently equivalent, pass it.
 
-**Consequence.** Nothing today: the three agree. The cost is that they can stop
-agreeing silently, which is the failure mode this codebase has already had once,
-when a copy accepted two hundred characters of junk and gated a storage restore
-on it.
+**Consequence.** The copies currently agree, but a future change can leave
+modules accepting different forms or lengths.
 
 **Status.** `OPEN`. Have `src/hns/ipfs.js` and `src/pastebin-url.js` import
 `CID_RE`, then widen the guard from the one string the last drift happened to
@@ -98,10 +93,8 @@ whether the record was near expiry, or whether the answer came from a cache. A
 stale-but-validly-signed record is indistinguishable here from a fresh one.
 *"An IPNS name is a signed pointer"* is true and is the most that can be said.
 
-**Status.** `DELIBERATE`. Reimplementing a record validator beside a node that
-already has one adds a second place for it to be wrong, and the honest sentence
-costs nothing. The limit is stated where a reader meets it (SPEC §4.2 and §9)
-rather than glossed. What we owe and cannot yet give is §2.3.
+**Status.** `DELIBERATE`. The node owns record validation. The unresolved
+question is how much freshness and cache metadata it exposes (§2.3).
 
 ### IP-5. A URL host is canonicalised; two of our address forms are case-sensitive
 
@@ -148,15 +141,13 @@ node would exceed kubo's 256 KiB HAMT threshold, with `NOT_SUPPORTED`.
 **The standard says.** [UnixFS](https://github.com/ipfs/specs/blob/main/UNIXFS.md)
 defines `HAMTDirectory`, and kubo shards a directory past that threshold.
 
-**Why.** The entire contract of that function is *"the CID kubo would compute"*.
-Answering with a non-HAMT CID for a folder kubo would shard is not an
-approximation, it is a wrong address — and a wrong address is worse than no
-answer, because it is published.
+**Why.** `directoryCid` must agree with kubo. An unsharded result would name
+a different DAG from the published one.
 
 **Consequence.** A very large folder cannot have its CID computed locally before
 it is published.
 
-**Status.** `DELIBERATE`. Refusing beats disagreeing.
+**Status.** `DELIBERATE`. Unsupported directory layouts are refused.
 
 ### IP-7. The CAR header is decoded by a minimal reader
 
@@ -169,9 +160,8 @@ else including the indefinite-length forms dag-cbor forbids.
 **The standard says.** [DAG-CBOR](https://ipld.io/specs/codecs/dag-cbor/spec/)
 defines the encoding and requires canonical map ordering on encode.
 
-**Why.** Extraction. Adding a dependency to the package root is not this
-chapter's to do, and shipping a header parser that cannot be tested here is
-worse than shipping one that can.
+**Why.** The extracted package does not depend on `@ipld/dag-cbor`; the
+small header reader can be tested independently.
 
 **Consequence.** One file is not byte-identical to its Wildroot counterpart,
 which is the property this package holds every other source file to. The reader
@@ -205,8 +195,8 @@ the import is unpinned and bounded, and the page is then served by asking the
 node for the resolved CID (SPEC §12.2). The `importCar` docstring in the
 Wildroot tree overstates this check (IP-D5).
 
-**Status.** `DELIBERATE`, with the caveat that a check routinely mistaken for a
-proof has a cost of its own — §2.5.
+**Status.** `DELIBERATE`. Section 2.5 considers whether the diagnostic value
+justifies the risk of confusing the check with authentication.
 
 ### Experimental: `car=` and origin warming
 
@@ -295,11 +285,9 @@ honoured the range, and every block still arrives hash-checked.
 
 ### 2.1. Whether a stated origin is the right primitive at all (IP-9)
 
-`car=` solves a real problem: a publisher whose bytes sit with an ordinary
-storage provider has no way to say *"the archive is here"* without running a node
-or handing a third party their whole read list. We are confident about the
-*safety* of the answer — the origin is untrusted by construction, SPEC §12.2. We
-are not confident about the *shape*:
+`car=` announces an HTTPS location for a CID. Its retrieval and verification
+boundaries are defined in SPEC §12.2; the unresolved questions concern its
+record format:
 
 - Should the record be a full URL, or a provider identifier plus a well-known
   path?
@@ -311,9 +299,8 @@ are not confident about the *shape*:
   renewal, and nothing in the record says when it expires.
 - Is `car` the right tag, given the value is a gateway URL and not a `.car` file?
 
-We would rather adopt somebody else's convention than defend ours, and we could
-not find one: IPIP-402 and the trustless-gateway specification give the shape of
-the URL, and nothing we found says how a **name** announces one.
+IPIP-402 and the trustless-gateway specification define request URLs but do
+not define this name-to-location announcement.
 
 ### 2.2. Whether host canonicalisation actually breaks the case-sensitive forms (IP-5)
 
@@ -324,13 +311,9 @@ run, IP-5's consequence paragraph is a prediction.
 
 ### 2.3. What delegating IPNS to the node actually gives us (IP-3)
 
-We say *"an IPNS name is a signed pointer"* and mean it, but we have not
-established what the node's answer is worth in the cases that matter: how stale
-an answer may be, whether a resolution that finds nothing is distinguishable
-from one that finds an expired record, and what happens when the DHT is
-unreachable but a cached record exists. A specification that delegates a
-signature check should be able to say what the delegate promises. This one
-cannot yet.
+The node's stale-record, expired-record and offline-cache behaviour has not
+been established here. Those limits are needed to describe the freshness of a
+delegated IPNS result.
 
 ### 2.4. Whether `ipns://<domain>` (DNSLink through the node) works at all
 
@@ -353,19 +336,15 @@ is no point designing that before the measurement (IP-D8).
 
 ### 2.5. Whether the archive-root check should exist (IP-8)
 
-It catches a real class of operator error cheaply. It also reads exactly like a
-security check, and has been described as one in a code comment. A check that is
-worth having and is routinely misunderstood is not obviously worth having. The
-alternative — drop it and rely entirely on asking the node for the CID
-afterwards — is simpler to reason about and loses a useful diagnostic.
+The CAR-root check detects operator mistakes but does not authenticate the
+archive. Removing it would simplify the verification description while losing
+a diagnostic for an unrelated archive.
 
 ### 2.6. Whether a pointer's precedence should be fixed at all
 
-`ipfs` beats `ipns` beats the swarms beats Arweave, always, everywhere. That is
-right for cold-start latency and it is the spine's rule. But a name whose `ipfs=`
-is stale and whose `ipns=` is current resolves to the stale one, forever, with no
-way for the publisher to say "prefer the mutable pointer". We do not know whether
-that is a problem in practice or a misconfiguration nobody will make.
+Fixed precedence selects `ipfs=` even when an accompanying `ipns=` is newer.
+The publisher cannot express a preference for the mutable pointer. It remains
+unclear whether this occurs in practice.
 
 ---
 
@@ -487,7 +466,7 @@ name) from the imported blocks. Three things have to be settled before it
 ships, and none of them is the code: whether the setting can be changed without
 respawning the daemon (it is repo configuration, so probably not — which makes
 this the same restart-cost question the SPV node has), what a name **without** a
-stated origin does in that mode (refuse, as now, is the honest answer), and
+stated origin does in that mode (refuse, as now, is the answer), and
 whether a node that has been offline-routing must re-announce afterwards, which
 would leak on a delay instead of immediately. A gate removed on the strength of
 "the fetch is proxied" alone would be a regression, and the divergence inventory

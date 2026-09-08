@@ -1,28 +1,20 @@
 # Chapter 11 — Native applications on a Handshake name
 
-**Namespace:** `hns` (`hns://`) — the application layer above Chapter 1
+**Namespace:** `hns` (`hns://`), application integration above Chapter 1
 **Version:** 0.1 (draft for public comment)
-**Status:** Describes the behaviour of the reference implementation in `src/`
-beside this file and in the Wildroot browser tree, and is proven end to end by
-one deployed third-party application (`.pxls`). Not endorsed by any standards
-body. Normative statements describe what an implementation must do *to
-interoperate with this one*; where they are inherited from an existing
-standard, that standard is cited and its rule governs.
-**Licence:** CC-BY-4.0 (see `../../LICENSE-SPEC`). The reference
-implementation is licensed separately.
+**Status:** Implementation-specific draft; not endorsed by a standards body.
+**License:** [CC BY 4.0](../../LICENSE-SPEC); code is licensed separately.
 
-This chapter is part of the integrated specification whose spine is
-`../../SPEC.md`, and **namespace selection — which hosts reach this chapter at
-all — is specified there**, not here. Chapter 1 (`../handshake/SPEC.md`)
-specifies how a Handshake name resolves and how its DANE pin is checked; this
-chapter specifies what an *application* served at such a name may do, which is
-the part that decides whether Handshake hosts real software or only static
-pages.
+This chapter defines browser integration for applications served from
+Handshake names: origins, WebSockets, and name-based sign-in.
+[Chapter 1](../handshake/SPEC.md) defines resolution and DANE validation;
+the [shared specification](../../SPEC.md) defines namespace selection.
 
-Every deviation from a cited standard, and every question we are unsure of, is
-in `../../DEVIATIONS.md` under the prefix `AP-`. Every standard cited is listed
-with its purpose in `REFERENCES.md` beside this file. **Those two files are
-part of this specification, not appendices to it.**
+The reference modules are in this directory's `src/`; browser-only wiring is
+identified explicitly. The `.pxls` application is the integration example.
+[Deviations](DEVIATIONS.md) and [references](REFERENCES.md) accompany the
+requirements. Conflicts found in this chapter are listed in the
+[content review](../../REVIEW.md).
 
 **Paths.** Paths written `src/…` and `tests/…` are this chapter's, under
 `namespaces/apps/`. Paths written `../../src/…` are shared modules of the
@@ -53,38 +45,20 @@ used as in RFC 2119 / RFC 8174.
 
 ## 1. What this specifies, and why it exists
 
-A Handshake name that serves a static page is a document with a nice address.
-A Handshake name that serves an *application* — one that keeps state in the
-browser, holds a live socket to its own server, and knows who the user is — is
-a different claim entirely, and every part of it fails by default:
+An application served from a Handshake name needs browser storage, a
+connection to its server, and a way to authenticate users. This chapter
+specifies three mechanisms:
 
-- A browser that registers `hns://` as a non-standard scheme gives every page
-  at a Handshake name the **opaque origin**. `localStorage`, `sessionStorage`,
-  IndexedDB and `crypto.subtle` all throw, and any real web application dies
-  on its first line rather than on a feature it could degrade.
-- Making the scheme standard and secure fixes that and immediately forbids the
-  *other* half: a secure context may not open a plaintext `ws://`, and there is
-  no public certificate authority that will issue for a name ICANN does not
-  know, so `wss://` has nothing conventional to route to either.
-- An application that wants to know which name the user is has no mechanism at
-  all. Every capability a Handshake-app standard has defined mediates
-  *application → registry*; none mediates *application → the application's own
-  server*, which is the one every application with server-side state needs
-  first.
+- Register `hns://` with the origin and secure-context privileges the
+  application needs.
+- Route `wss://` connections through a local CONNECT proxy while Chromium
+  performs TLS and the WebSocket handshake with the application server.
+- Expose a scoped provider that signs authentication requests with a granted
+  name's control key.
 
-This chapter specifies all three: the origin, the socket, and the sign-in. It
-is written from an implementation in which a third-party application (`.pxls`,
-a shared pixel canvas) loads at `hns://pxls`, holds a DANE-pinned `wss://`
-socket to its own host, and signs a player in as a Handshake name its server
-independently verifies. Every rule below is one that had to hold for that to
-work.
-
-The design rule the whole chapter follows: **the browser routes, and never
-terminates.** The tunnel in §4 is a dumb TCP splice precisely so that it cannot
-weaken the TLS it carries, and the mediator in §5 signs only what an origin
-gate has already confined to the application's own server. A component that
-cannot read a secret cannot leak one, and a component that cannot substitute a
-certificate cannot break a DANE pin.
+The tunnel forwards encrypted traffic without terminating TLS. The provider
+keeps private keys in the browser's privileged process and checks the
+application's origin and grants before signing.
 
 ### 1.1 Scope
 
@@ -121,7 +95,7 @@ specifies only the decisions it must obtain, never a rendering.
 - **Entry origin** — an origin an application declares in its manifest as its
   own (`ui.entry`), and which the mediator has verified it owns (§5.2).
 - **Control key** — the key whose public half a name's `_hns` record anchors;
-  the thing a sign-in proves possession of (§5.3).
+  whose possession a sign-in proves (§5.3).
 
 Trust-state vocabulary (`verified` / `unverified` / `failed` / `none`) is the
 spine's, Part I §4.
@@ -131,8 +105,8 @@ spine's, Part I §4.
 ### 3.1 The scheme registration
 
 An implementation that intends to host applications at Handshake names **MUST**
-register `hns` as a **standard** (in WHATWG URL terms, a *special* scheme) and
-as a **secure** scheme, so that a page at `hns://<name>` has a tuple origin
+register `hns` as a **standard** custom scheme in Electron (or its equivalent
+in another engine) and as a **secure** scheme, so that a page at `hns://<name>` has a tuple origin
 (`hns`, `<name>`, null) in the sense of the HTML Standard and is a **secure
 context** in the sense of the W3C Secure Contexts specification.
 
@@ -158,22 +132,21 @@ With the registration above, and only with it:
 
 - **Storage.** `localStorage`, `sessionStorage`, IndexedDB and the Cache API
   are keyed by the tuple origin `hns://<name>`, per the HTML Standard's storage
-  model. Two Handshake names are two storage shelves; a name and its gateway
-  mirror are also two, and an application that runs at both **MUST NOT** assume
+  model. Different Handshake names have separate storage; a name and its gateway
+  mirror also have separate storage, and an application that runs at both **MUST NOT** assume
   state carries between them.
-- **Secure-context APIs.** `crypto.subtle`, and every API gated on
-  `isSecureContext`, are available.
+- **Secure-context APIs.** The registration satisfies the secure-context
+  requirement for APIs such as `crypto.subtle`. Individual APIs can have
+  additional permission and platform requirements.
 - **`wss://`.** A secure context may open a secure WebSocket; §4 specifies how
   it is routed.
 - **Relative and same-origin semantics.** Relative URLs resolve against the
   canonical form of the document URL, and a fetch from the page to its own name
   is same-origin.
 
-The single most important consequence is negative: **an application at a
-Handshake name does not have to be written for Handshake.** It is an ordinary
-web application whose origin happens to be chain-proven. `.pxls` is a FastAPI
-service with a plain browser client; nothing in its client code knows what
-Handshake is except the six lines that ask for a name (§5).
+These privileges let a native page use ordinary web APIs. The `.pxls` example
+uses a FastAPI server and browser client, with name-based sign-in added through
+the provider in §5. The restrictions below still apply.
 
 ### 3.3 What the registration costs
 
@@ -181,9 +154,10 @@ Handshake is except the six lines that ask for a name (§5).
 host parser, which runs the *ends in a number* checker and parses such a host
 as IPv4. A Handshake top-level name may legitimately be all digits, so
 `hns://14898/` canonicalises to `hns://0.0.58.50/` and `hns://hello.14898/` is
-not a valid URL at all. This is not an implementation quirk — it is the URL
-Standard applying to the scheme, and `new URL('http://hello.14898')` throws in
-every conforming browser for the same reason. The convention that carries such
+not a valid URL at all. This behavior depends on the browser's custom-scheme registration. The
+same host fails for the standard `http` scheme: `new URL('http://hello.14898')`
+throws. A generic parser that does not know the custom registration can treat
+`hns` differently. The convention that carries such
 a name in a URL (a single leading `_` on a final all-digit label:
 `hns://hello._14898/`) is specified in **Chapter 10 Part B**, and this chapter
 inherits it without restating it. An implementation of this chapter **MUST**
@@ -251,11 +225,10 @@ Therefore:
 - A native application **MUST** connect with `wss://<name>/<path>`, or with the
   protocol-relative form that a secure document upgrades to `wss`.
 - An implementation **MUST NOT** silently rewrite a page's `ws://` to `wss://`.
-  A silent upgrade is a lie about the security state in the one direction that
-  matters least, and it teaches an author that their insecure URL works.
+  The application must request the secure connection explicitly.
 
-Together with §4.7 this gives the property the whole design exists for: a
-WebSocket from a Handshake page is end-to-end TLS to the origin, pinned to the
+Together with the certificate check in §4.7, this requires that a
+WebSocket from a Handshake page be end-to-end TLS to the origin, pinned to the
 same on-chain key material as the document.
 
 ### 4.2 The tunnel
@@ -265,8 +238,7 @@ an address that no name resolver it consults can produce. The mechanism is a
 **local HTTP `CONNECT` proxy** (RFC 9110 §9.3.6, framed per RFC 9112) bound to
 loopback (`src/ws-proxy.js`).
 
-The property that makes it work is a fact about proxies, not about Handshake:
-**a client never resolves the destination of an HTTP proxy itself.** When the
+For a CONNECT request, the client sends the destination hostname to the proxy. When the
 session's PAC points `wss://pxls/ws` at the tunnel, the engine sends
 `CONNECT pxls:443` carrying the **literal name**. The tunnel then resolves that
 name with the implementation's own Chapter 1 resolver — the same chain-proof
@@ -295,17 +267,13 @@ An implementation of this chapter:
   bytes that do arrive belong to the tunnel.
 - **MUST NOT** parse, rewrite or terminate anything after the `200`. The
   WebSocket handshake of RFC 6455 and the TLS handshake are performed by the
-  user agent, end to end, through the splice. **A tunnel that cannot see
-  plaintext cannot weaken it**, and this is the reason the design is a pipe and
-  not a bridge: terminating TLS in the browser process would substitute the
-  implementation's certificate for the origin's and destroy the DANE binding
-  (§4.7), which is the entire trust story.
+  user agent, end to end, through the splice. Terminating TLS in the proxy would substitute its certificate for the
+  origin's and change the DANE binding (§4.7).
 
 ### 4.3 The proxy-authentication problem
 
-The obvious fence on a local proxy — require a per-session credential — cannot
-be built for this traffic, and the reasons are worth recording because they
-constrain any implementation, not just this one.
+The reference browser cannot supply proxy credentials for this traffic.
+The documented constraints are specific to its Chromium integration:
 
 - **SOCKS5 (RFC 1928) cannot carry it.** Chromium's SOCKS5 client offers only
   the "no authentication" method and does not implement RFC 1929
@@ -336,9 +304,8 @@ its protections. See AP-2.
 
 ### 4.4 The fences
 
-A local listening proxy that resolves names and dials for its caller is a
-capability, and the whole of its security boundary is these five rules. Each is
-normative, each has a reason, and each is pinned by a test in
+The proxy accepts requests from local processes. These five required checks
+limit where it can connect. Coverage is in
 `tests/ws-proxy.test.js` or `tests/native-origin.test.js`.
 
 **(0) Loopback only.** The listener **MUST** bind `127.0.0.1` and **MUST NOT**
@@ -399,7 +366,7 @@ the route of the socket is the only thing that changes. The tunnel still
 resolves the name itself, so the chain proof, the trust steps of §6 and the SSRF
 fence are exactly what they are on the direct route, and the certificate the
 origin presents is still pinned end to end (§4.7) because the tunnel is still a
-pipe. Two sub-rules are what make that true rather than hoped for:
+pipe. Two additional requirements apply:
 
 - The dial through Tor **MUST** be by **address** — the resolved address is sent
   to the SOCKS server as an address, `ATYP` IPv4 or IPv6 (RFC 1928 §4), never as
@@ -430,8 +397,7 @@ had — no client bundled or running, or one that could not reach the network.
 In it every session's proxy is `BLACKHOLE_RULES`, a loopback port nothing
 listens on, so the page that opened the socket is itself loading nothing
 through the session; the tunnel, which the session proxy does not cover,
-refuses on its own because `torSocks()` is `null`. Neither Private state ever
-produces a direct dial, which is the whole of the rule.
+refuses on its own because `torSocks()` is `null`. Neither Private state permits a direct dial.
 
 *Pinned by:* "with IP Protection on, the dial goes THROUGH the Tor SOCKS port
 when there is one, and is refused when there is not", which asserts that the
@@ -517,8 +483,7 @@ Normative rules for an implementation:
   takes a decorator (`proxyConfigFor`, browser `src/index.js:1129-1145`; applied
   at browser `src/hns/anonymize.js:243-253`), and the controller is re-applied
   once at startup so the PAC is live from launch rather than from the first
-  privacy toggle (`reapply()`, `:264-266`). Two writers is a clobber, and the
-  loser is silent.
+  privacy toggle (`reapply()`, `:264-266`). Separate writers could overwrite each other's proxy configuration.
 - The script **MUST** be delivered as a URL, not as text, where the engine's
   API demands one. The reference implementation inlines it as
   `data:application/x-ns-proxy-autoconfig;base64,<base64 of the script>` (RFC
@@ -528,8 +493,7 @@ Normative rules for an implementation:
   name — a failure that looks like a resolver bug and is not one.
 - The feature **MUST** be inert when disabled: no listener, no PAC diversion, no
   certificate gate (browser `src/protocols/index.js:255`, `src/index.js:1133`,
-  `:1322`). A capability that is off must have no surface at all, not a disabled
-  one.
+  `:1322`). Disabling the feature must remove its entry points.
 
 Two consequences an implementer should expect. The PAC decides on the
 **target** host, not on the initiating origin, so an ordinary `https://` page
@@ -545,9 +509,7 @@ the resolver is the PAC's job; declining the connection is the tunnel's.
 
 ### 4.7 The certificate gate
 
-Routing a `wss://` to a Handshake host would be worthless if the certificate
-were checked against the WebPKI, because no public CA issues for a Handshake
-name. The connection is instead pinned with **DANE-EE (`3 1 1`)**, exactly as a
+A Handshake WebSocket uses **DANE-EE (`3 1 1`)**, exactly as a
 document load is (Chapter 1 §8), by a session-wide certificate verification
 procedure (browser `src/index.js:1330-1351`):
 
@@ -563,14 +525,11 @@ procedure (browser `src/index.js:1330-1351`):
 
 An implementation **MUST** fail closed at steps 3 and 4, and **MUST** record the
 outcome of the whole decision — resolution included — as one measurement, so
-that a pin check which fails *slowly* is visible. A DANE check that only times
-successes hides the interesting case.
+that a pin check which fails *slowly* is visible. Record failed checks as well as successful ones.
 
 The consequence for publishers is stated as a requirement in §4.8: **a realtime
 application on Handshake must publish a TLSA pin**, or its socket fails closed
-however well everything else works. This is not a hypothetical: the reference
-application's first deployment had no `_443._tcp` TLSA in the served zone, so
-even a perfect tunnel would have been refused at this gate.
+however well everything else works. The tunnel alone does not supply the missing pin.
 
 ### 4.8 What an application publisher must do
 
@@ -591,7 +550,7 @@ Normative for the *application*, not the browser:
 3. Never use `ws://` from a page served over `hns://`. It is blocked in the
    renderer and no browser-side component can route it.
 4. Terminate the WebSocket at the application's own TLS endpoint, and see §7
-   for the two server-side traps that silently break the upgrade.
+   for server configuration requirements.
 
 ## 5. Signing in with a Handshake name from a native application
 
@@ -636,9 +595,8 @@ host's scope without exception handling.
 
 ### 5.2 The manifest and origin ownership
 
-An application is *installed* only after a manifest fetched from its own
-discovery URL is validated. One rule in that validation carries the security of
-the whole mechanism:
+An application is installed only after its discovery manifest is validated.
+Validation must enforce origin ownership:
 
 > **Origin ownership.** Every origin an application declares in `ui.entry`
 > **MUST** have a host that is exactly the application's own id — the native
@@ -697,7 +655,7 @@ privileged process:
 1. **Transport** — the caller is the application's own installed page (§5.1).
 2. **Manifest** — the application declared the capability; absence grants
    nothing (`manifestGrantsAuth`).
-3. **Origin** — *the one that matters.* The `url` to be signed **MUST** be under
+3. **Origin** — The `url` to be signed **MUST** be under
    one of the application's own entry origins (`originAllowedForAuth`, browser
    `src/protocols/app-manifest.js:115-119`). Without this rule the operation is
    a **signing oracle** over the user's control key: an application could ask
@@ -730,12 +688,12 @@ no mention of the one thing that would fix it.
 
 ### 5.4 What the application's server verifies
 
-This is the half a browser cannot enforce and a specification must state
-plainly.
+The application server performs the following checks independently of the
+browser.
 
 > **A provider's answer is a user-interface convenience, never an
 > authentication result.** A server **MUST NOT** trust a name because the page
-> reported it: the report arrives over the wire from the party it flatters.
+> reported it: the client controls that report.
 
 The reference application's server (`.pxls`) does exactly what this requires,
 and its shape is the recommended one:
@@ -785,7 +743,7 @@ application's own entry origins (§5.2), and only because of that.
 An implementation **MUST NOT** achieve this by rewriting bytes on the wire, and
 **MUST NOT** relax the origin gate to a suffix or a "related origins" test. The
 consequence — a token whose `u` tag is not the URL the request was sent to — is
-recorded as AP-5, with the honest note that what holds the property together is
+recorded as AP-5, because the deployment relies on
 the server's fixed public base plus its replay ledger, not the URL binding.
 
 ### 5.6 What the provider is not
@@ -835,7 +793,7 @@ one either. What the anonymized route does change is disclosed elsewhere: every
 such socket shares the session's single Tor circuit, because no SOCKS credential
 is sent (Chapter 8, TO-3).
 
-There is no **OPEN** state for this path, and that is the point: a `failed`
+This path has no **OPEN** state: a `failed`
 certificate step, an absent pin, a non-public address, a port that is not 443,
 or a Private-mode session whose Tor is blocked all end with no socket rather
 than with a degraded one. An implementation **MUST NOT** offer the user a way to
@@ -848,9 +806,9 @@ indicator.
 
 ## 7. Operational guidance for the server side (NON-NORMATIVE)
 
-Everything in this section is about the machine serving the application. None
-of it is required for conformance; all of it is required for the thing to work,
-and each item cost a full diagnosis at least once.
+These deployment notes describe the reference application. They are
+non-normative and must be checked against the server and browser versions in
+use. The review log identifies claims here that need narrower wording.
 
 **HTTP/2 silently breaks the upgrade.** The `Upgrade` header is not legal in
 HTTP/2, so a WebSocket handshake that arrives over an h2 connection reaches the
@@ -914,8 +872,7 @@ on the other side is hostile.
 
 **A capability that is off must be inert.** Both features here are
 configuration-gated, and when off there is no listener, no PAC diversion, no
-certificate procedure, no preload and no IPC channel. A disabled-but-present
-surface is an attack surface with no owner.
+certificate procedure, no preload and no IPC channel. The disabled configuration must remove the associated entry points.
 
 **Ports.** The tunnel dials one port and only one (§4.4 fence 1), so it cannot
 be used to attempt a connection to an arbitrary port of a public host, and a
@@ -952,8 +909,7 @@ origin before a key is touched.
 
 **Keys never cross.** No operation returns key material. The control key is
 read inside a privileged function, used to sign one event, and goes out of
-scope; only the header string crosses back. An implementation that returns a
-signature *and* a key has built a different, worse system.
+scope; only the header string crosses back. Private key material must remain in the privileged process.
 
 **The user-visible failure of a refused socket is indistinguishable from a
 network error.** That is a property of the WebSocket API, and it means an

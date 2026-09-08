@@ -1,33 +1,23 @@
 # Chapter 10 — Experimental: HIP-5 `_op` on-chain resolution, and numeric Handshake TLDs
 
-**Experimental means this.** Both parts of this chapter ship in the Wildroot
-browser and are exercised by its tests, and neither is a proposed standard.
-Part A is reached only when the Handshake chain itself points at it — a
-top-level name whose chain resource carries an `NS` record of the form
-`<registry>._op.` — so no name that does not opt in is affected by it; its
-mechanism is a permanent-Draft HIP, its behaviour may change, and it should not
-be treated as a stable interoperation target. Part B is weaker still:
-**whether numeric Handshake top-level names are supported at all is undecided.**
-The `_` marker described there is a convention invented here, with no standing
-anywhere else; it may be replaced by a different convention, or numeric
-top-level names may not be supported. Anyone writing links against either part
-should expect to rewrite them.
+This chapter describes two experimental Handshake conventions:
 
-This chapter is part of the integrated specification whose spine is
-`../../SPEC.md`, and namespace selection is specified there. Both parts sit
-underneath **Chapter 1 (Handshake)**: an `_op` delegation is entered from
-Chapter 1 §6.3, and a numeric top-level name is a Handshake name that Chapter 1
-§3 routes here for its written form.
+- **Part A:** use a `<registry>._op.` NS record to direct a sub-name lookup
+  to an Optimism registry contract.
+- **Part B:** encode numeric Handshake TLDs in `hns://` URLs with an underscore
+  marker.
 
-The code for both parts stays where it is and is not duplicated under this
-directory: the `_op` route is `../../src/hip5-op.js` together with the `_op`
-step inside `../../src/resolver.js`; the numeric-TLD form is
-`../../src/hns-url.cjs`, and the classification rule that sends an all-numeric
-final label to Handshake is in `../../src/router.js`.
+Neither convention is a ratified standard. Numeric-name classification is off
+by default; the optional marker remains supported for explicit `hns://` URLs.
+The [content review](../../REVIEW.md) records unresolved behavior questions.
 
-Deviations and open questions are in `../../DEVIATIONS.md` under the prefixes
-`OP-` (Part A) and `NT-` (Part B). Standards cited are in `REFERENCES.md`
-beside this file.
+[Chapter 1](../handshake/SPEC.md) defines the Handshake chain path that enters
+these mechanisms. The implementation is in `../../src/hip5-op.js`,
+`../../src/resolver.js`, `../../src/hns-url.cjs`, and the shared host
+classifier. These modules are not duplicated in this directory.
+
+[Deviations](DEVIATIONS.md) use `OP-` for registry resolution and `NT-` for
+numeric names. [References](REFERENCES.md) lists the cited standards.
 
 Key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT** and **MAY** are
 used as in RFC 2119 / RFC 8174.
@@ -57,19 +47,17 @@ used as in RFC 2119 / RFC 8174.
 
 **Status: HIP-0005 is a permanent Draft and the HIP process is not active.**
 `_op` as specified here is an extension of that draft's mechanism, shipping on
-Handshake mainnet for the top-level name `persist`. It is prior art with a
-number, not a ratified standard.
+Handshake mainnet for the top-level name `persist`. It is not a ratified standard.
 
 ## A.1 The problem
 
-A Handshake top-level name's chain resource carries `NS` records, and those are
-hostnames — a delegation to a *machine*, run by whoever owns the top-level name.
-For a **registry** that sells names to other people, that is the whole weakness:
-the seller's nameserver can answer anything it likes for a name the seller no
-longer holds, and nothing in the chain proof contradicts it. The buyer's
-ownership is on a chain; their *resolution* is on the seller's server.
+A Handshake top-level name normally delegates sub-name resolution through
+`NS` records. For a registry that sells sub-names, this leaves the registry
+operator able to answer DNS queries for those names, even when ownership is
+recorded in a smart contract. A chain proof of the TLD delegation does not
+independently prove each sub-name owner's records.
 
-HIP-5's answer is that a label under a `_<chain>` pseudo-TLD is not a host at
+HIP-5 defines an alternative: a label under a `_<chain>` pseudo-TLD is not a host at
 all — it is a pointer into another naming system, and the resolver strips the
 suffix and reads that system directly. The draft's shipped example is `_eth`
 (ENS on Ethereum). `_op` is the same idea aimed at **Optimism mainnet, chainId
@@ -81,7 +69,8 @@ persist.   NS  ns2.hns.one.
 persist.   NS  0x233b4fbf4e8f0e60bff0a5f1a24ffa257987dbf2._op.
 ```
 
-`persist` publishes exactly that today; it is the only live deployment.
+This is the `persist` deployment example recorded by the project. This
+repository does not verify its current live configuration.
 
 ## A.2 The route
 
@@ -116,8 +105,7 @@ whole route**. An endpoint that can serve the `A` record but not the `TLSA` one
 would strip the pin and look exactly like a name that has none.
 
 Stored records MUST NOT be trusted to be free of compression pointers: a length
-octet ≥ 0xC0 ends the parse. Following a pointer in bytes that arrived from a
-public RPC endpoint is how a parser becomes a loop.
+octet ≥ 0xC0 ends the parse. Compression pointers are unsupported in these stored records.
 
 RPC endpoints are tried in order, each with its own deadline, so a dead
 endpoint costs one timeout and not a navigation.
@@ -135,9 +123,8 @@ The **apex** is untouched: its records are the chain resource, already proven.
   `contenthash` reverts; that means "no content", and the route continues.
 - Records are versioned by ownership epoch, so when a name changes hands
   everything the previous holder wrote stops being served — with no transaction
-  and with no version parameter in the read path. **This is the property that
-  makes the registry route safer than the seller's nameserver**, not merely
-  different.
+  and with no version parameter in the read path. This is a property of the registry contract, not a guarantee enforced by
+  the reader.
 
 ## A.4 Fallback
 
@@ -145,8 +132,7 @@ The **apex** is untouched: its records are the chain resource, already proven.
 2. The ordinary `NS` records when the route yields **nothing**: a zero resolver;
    `hasDNSRecords` false with no contenthash (a minted name whose holder has
    published nothing); records but no address and no usable pointer; or every
-   RPC endpoint failing. The reason SHOULD be logged once per name — a silent
-   fallback is how a dead endpoint survives a release unnoticed. **See `OP-1`:
+   RPC endpoint failing. The reason SHOULD be logged once per name so RPC failures remain visible. **See `OP-1`:
    two of these cases arguably should not fall back at all.**
 3. A **non-public address** from the registry is not a fallback case. The
    record was found and it says something we refuse to fetch; asking a second
@@ -173,18 +159,16 @@ Therefore an implementation:
   DANE pin. The aggregate verdict is therefore never better than `partial`
   (TRUSTED, the neutral closed lock), because one step is `unverified`.
 
-The reasoning for that last rule, and why it is not obviously right, is
-`../../DEVIATIONS.md` (Chapter 10, §OP-2.1): the honest comparison is with the DNS
+The open question about that lock rule is recorded in
+`../../DEVIATIONS.md` (Chapter 10, §OP-2.1): the existing rationale compares it with the DNS
 route,
 which also takes an unsigned answer on a nameserver's word and over plaintext
 where this hop is HTTPS, and not with `ens://`, which has no chain anchor at
 all. A reasonable implementer could hold that an RPC-trusted answer should
 never close a lock, full stop.
 
-One consequence worth stating in an interface: a name that publishes records
-**only** on chain is unreachable from any client that does not implement HIP-5
-— which is nearly all of them. That is an argument for a registry writing a DNS
-mirror too, not an argument against the route.
+Interoperability limitation: a name that publishes records
+**only** on chain is unreachable from any client that does not implement HIP-5. A registry can publish a DNS mirror for other clients.
 
 ## A.6 Privacy and egress
 
@@ -203,8 +187,8 @@ fetch, which is **not** proxied — an embedder that omits the injection gets a
 working route and an unproxied one, silently, which is why the browser pins the
 injection with a test rather than a code review.
 
-**The route therefore runs while the user is anonymized, and needs no gate of
-its own.** Its one egress is an HTTPS request, and an HTTPS request made through
+The route can run while anonymization is enabled when the injected fetch
+uses the configured proxy. Its one egress is an HTTPS request, and an HTTPS request made through
 the injected fetch is covered by whatever proxied session the embedder
 configured — which is what the injection is for. What decides whether the
 route is *reached* under anonymization belongs to Chapter 1: the `_op` step sits
@@ -218,9 +202,7 @@ An implementation therefore **MUST NOT** refuse the `_op` route merely because
 anonymization is on: refusing a request that is already proxied buys no privacy
 and turns every name under an `_op` registry into a failure in the mode where a
 user most wants a name to resolve. It **MUST NOT** answer it through an
-unproxied default fetch either (`OP-D1`). The two rules are one rule — the
-egress is the embedder's to route, and the route's job is to make that possible
-rather than to make the decision.
+unproxied default fetch either (`OP-D1`). The embedder is responsible for supplying the correct transport.
 
 ## A.7 Draft normative text for a HIP
 
@@ -261,18 +243,18 @@ rather than to make the decision.
 
 # Part B — Numeric Handshake TLDs and the `_` URL marker
 
-**Status: provisional, and more than provisional — undecided.** The convention
-below is invented here and has no standing anywhere else. Whether numeric
-Handshake top-level names are supported at all is an open product question
-(`NT-1`). This part describes what the implementation does today so that a
-reader of a `hns://…_14898/` URL knows what it means, not because the form is
-settled.
+**Status:** Optional convention. Numeric-name classification is off by default
+and can be enabled with `setNumericNames()`. Explicit marked `hns://` URLs
+remain supported. NT-1 records this policy; interoperability of the marker
+and full browser-path coverage remain open.
 
 ## B.1 The numeric-TLD problem
 
-`hns:` is registered as a **standard** (special) URL scheme (Chapter 1 §5), so
-its host is parsed by the [WHATWG URL host
-parser](https://url.spec.whatwg.org/#host-parsing). That parser runs the
+`hns:` is registered as a **standard** custom scheme in the reference
+Electron browser (Chapter 1 §5). Its Chromium integration applies domain-host
+parsing to this scheme. This is an engine extension: `hns` is not one of the
+WHATWG URL Standard's [special schemes](https://url.spec.whatwg.org/#special-scheme),
+and a generic JavaScript `URL` parser need not treat it the same way. The registered Chromium domain-host parser runs the
 ["ends in a number" checker](https://url.spec.whatwg.org/#ends-in-a-number-checker),
 which returns true when the host's last label is non-empty and contains only
 ASCII digits, and then parses the host as an
@@ -286,13 +268,12 @@ hns://14898/          canonicalises to hns://0.0.58.50/
 hns://hello.14898/    is not a valid URL at all
 ```
 
-This is not an implementation quirk. `new URL('http://hello.14898')` throws in
-every conforming browser for the same reason. Every name under such a top-level
-name is unlinkable, untypeable and unnavigable as written.
+For comparison, `new URL('http://hello.14898')` fails under the WHATWG
+parser because `http` is a special scheme. Those unmarked forms cannot be navigated through that parser.
 
-The classifier nevertheless routes such a name to Handshake: ICANN has no
-all-numeric top-level domains, so an all-numeric final label is a Handshake
-name by the ordinary rule (`../../src/router.js`, Chapter 1 §3).
+With numeric names enabled, the classifier assigns an all-numeric final label
+to Handshake. With the default setting, it assigns that host to `web`; a bare
+number is a search. The switch is in `../../src/classify-host.cjs`.
 
 ## B.2 The convention
 
@@ -339,8 +320,8 @@ everyday proof.
 
 ## B.3 What the implementation does
 
-`../../src/hns-url.cjs` is the whole of it, and it is CommonJS because the
-omnibox must build the same URL the router does:
+`../../src/hns-url.cjs` exports the shared CommonJS helpers used by the
+router and address bar:
 
 | Function | What it does |
 |---|---|
@@ -359,9 +340,9 @@ navigation hook runs, so the `http→hns` rewrite of Chapter 1 §3 never sees it
 
 | Alternative | Why not |
 |---|---|
-| **Register `hns:` as a non-standard (opaque) scheme.** The URL Standard only runs the IPv4 parser for special/standard schemes, so the problem disappears. | It also disappears origins, `fetch`, service workers, secure-context features, and same-origin policy. The entire point of registering the scheme as standard is that a Handshake site is a real web origin. Not a trade we will make. |
-| **Percent-encode or otherwise escape the digits.** | The host component is not percent-decoded by the URL parser the way a path is; the escape survives into the canonical host and is worse to read than `_`. |
-| **Use a different marker character** (`-`, `.`, a Unicode digit). | `-` is a legal Handshake label character, so it would be ambiguous. A trailing dot is stripped. A non-ASCII digit is punycoded and then *is* a valid label but an unreadable one. `_` is the only character that is both illegal in a Handshake label, so unambiguous, and legal in a URL host, so parseable. |
-| **Suffix the name into a real domain** (`hello.14898.hns.one`). | That is what the outside world does, and it requires our infrastructure to exist. A browser that resolves from the chain should not need a gateway to name a site. |
-| **Get the URL Standard changed.** | The IPv4 rule exists for compatibility with a very long tail of the web. A per-scheme opt-out is a plausible ask but is not a thing we can ship against. |
-| **Refuse to support numeric TLDs.** | They are valid Handshake names that people have registered and paid for. This is nonetheless the open question of `NT-1`: it is a product decision, not a technical impossibility. |
+| **Register `hns:` as a non-standard (opaque) scheme.** An opaque-host parser avoids IPv4 interpretation; the engine's custom-scheme behavior would need separate review. | It changes the origin and API privileges required by the application model. The reference application model requires a usable web origin. |
+| **Percent-encode or otherwise escape the digits.** | Domain-host parsing percent-decodes the host before the numeric check, so encoding ASCII digits does not avoid that check. |
+| **Use a different marker character** (`-`, `.`, a Unicode digit). | `-` is a legal Handshake label character, so it would be ambiguous. A trailing dot is stripped. A non-ASCII digit is punycoded and then *is* a valid label but an unreadable one. `_` was selected because it cannot occur in a Handshake label and is accepted by the host parser. |
+| **Suffix the name into a real domain** (`hello.14898.hns.one`). | This uses a gateway domain and depends on its DNS and infrastructure. |
+| **Get the URL Standard changed.** | The IPv4 rule exists for compatibility with a very long tail of the web. A per-scheme opt-out is not available to this implementation. |
+| **Refuse to support numeric TLDs.** | They are valid Handshake names that people have registered and paid for. The selected policy in NT-1 disables automatic classification by default while retaining explicit URLs and an opt-in switch. |

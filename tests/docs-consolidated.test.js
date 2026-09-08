@@ -41,3 +41,16 @@ test('the chapter documents speak in the present tense about the current state o
     assert.ok(!existsSync(join(ROOT, 'namespaces', dir, 'IMPROVEMENTS.md')), `${dir}/IMPROVEMENTS.md must not exist`)
   }
 })
+
+test('consolidation keeps chapter-local links pointed at their source documents', () => {
+  const docs = [buildDeviations(), buildReferences()]
+  assert.ok(docs[0].includes('(namespaces/apps/SPEC.md)'), 'chapter-local SPEC link keeps its chapter destination')
+  for (const text of docs) {
+    assert.doesNotMatch(text, /\]\(\.\.\//, 'root document contains an unrebased parent link')
+    for (const [, target] of text.matchAll(/\]\(([^\s)]+)\)/g)) {
+      if (/^(?:[a-z][a-z0-9+.-]*:|#)/i.test(target)) continue
+      const file = target.split('#')[0]
+      assert.ok(existsSync(join(ROOT, file)), `missing link target: ${target}`)
+    }
+  }
+})
