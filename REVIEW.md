@@ -1,5 +1,8 @@
 # Content review and proposed improvements
 
+**Follow-up:** [Reassessed findings and WebSocket handoff](reviews/2026-09-08-reassessment.md) — includes new reproductions, narrowed conclusions, priorities, and a candidate HIP outline. Implementation work is deferred until after the Wildroot release.
+
+
 Reviewed on 2026-09-08 against repository commit
 `bd720c19019b08b6b68f856962deb0956e381961` (package 0.7.2). This review updates
 the documentation; it does not change resolver or browser behavior. Findings
