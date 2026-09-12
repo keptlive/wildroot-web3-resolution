@@ -12,27 +12,41 @@ down is just a bug nobody has found yet.**
 
 ## 1. Deviations
 
-### EN-1. Only `contenthash` is read; `addr`, `text` and the rest are not
+### EN-1. `contenthash` is what navigation reads; seven text records are shown only when there is no website
 
-**What.** One record, one call. No address record, no text records, no avatar,
-no multichain address records, no ENS metadata.
+**What.** Navigation reads one record: `contenthash`. Since 2026-09-06 a name
+with **no** website reads seven ENSIP-5 text keys as well — `url`,
+`description`, `avatar`, `email`, `com.twitter`, `com.github`, `org.telegram`
+(`src/ens-protocol.js` `TEXT_KEYS`) — one `text(node, key)` call each through
+the same Universal Resolver, and shows them on the no-website page: escaped,
+truncated to **512 characters**, nothing fetched, and only an `https:` `url`
+made into a link (`textRecords`, `textRecordsHtml`; SPEC §5.6a). No address
+record, no multichain address, no reverse name, no avatar image *loaded* — the
+`avatar` value is shown as the text it is.
 
 **The standard says.** ENS resolvers expose a profile of records — EIP-137
 `addr(bytes32)`, ENSIP-5 `text(bytes32,string)` and ENSIP-9 multichain
 addresses among them — and a general ENS client reads whichever it needs.
+ENSIP-5 names the global keys and the `com.*` / `org.*` service convention;
+it sets no length limit, so the 512-character cap is ours (a display bound, not
+a protocol one).
 
-**Why.** The scheme's job is to open a name as a **website**. Every other
-record belongs to a wallet or a profile viewer, and reading them would put a
-per-navigation cost on every ENS name for data nothing renders.
+**Why.** The scheme's job is to open a name as a **website**. A successful
+navigation therefore still costs exactly one record, and the extra calls happen
+only on the page that would otherwise be a dead end — where a name that
+publishes a profile and no site can at least say who it is.
 
-**Consequence.** A name that publishes only an address is reported as having no
-website — and the error page says so in those words, rather than implying the
-name does not exist. A user who wants the profile does not get one here.
+**Consequence.** A name that publishes only an address is still reported as
+having no website, in those words, rather than as not existing. The seven keys
+are a display, not a profile viewer: they are read through the same trusted RPC
+and Universal Resolver path as the content pointer (EN-2), rendered as text on
+the resolver's word, and a value longer than 512 characters is cut rather than
+scrolled. Anything outside the list is not read at all.
 
-**Status: DELIBERATE.** This chapter specifies browsing, not ENS. Reading a
-record nothing displays would add a lookup, a failure mode and a disclosure to
-the RPC endpoint for no user-visible result. A "name info" panel would be the
-place for the rest, and there is no such panel.
+**Status: IMPLEMENTED WITH LIMITED SCOPE.** This chapter specifies browsing,
+not ENS. Which keys belong on that page is a judgement we would take argument
+on; the cap and the escaping are not negotiable, because the values come from
+an untrusted resolver straight into a page.
 
 ---
 

@@ -119,7 +119,7 @@ a departure that no longer exists is not described.
   - IP-D8 Two measurements this chapter cannot make
   - IP-D9 Let a stated-origin name load while anonymised, by stopping the node routing
 - [Chapter 4 — Arweave](#chapter-4-arweave) — [chapter file](namespaces/arweave/DEVIATIONS.md)
-  - AR-1 The BYTES are verified against the transaction for a top-level transaction under 8 MiB (resolved 2026-09-06, with a stated limit)
+  - AR-1 What a gateway's answer is now checked against, and what is still taken on its word
   - AR-2 ar:// is a de-facto scheme with no registration
   - AR-3 An arweave resolution is cached for a flat 60 seconds
   - AR-U1 Is delegating manifest resolution to the gateway defensible at all?
@@ -127,10 +127,10 @@ a departure that no longer exists is not described.
   - AR-U3 What should an ar://-adjacent ArNS implementation look like?
   - AR-U4 Is one hardcoded gateway list the right shape?
   - AR-U5 Should an ar= pointer close the padlock at all?
-  - AR-D1 The data_root half of the cheap check
+  - AR-D1 Chunk proofs, for everything the in-memory check cannot hold
   - AR-D2 Config.arOptions has no schema, default or validation
 - [Chapter 5 — ENS and `web3://`](#chapter-5-ens-and-web3) — [chapter file](namespaces/ens/DEVIATIONS.md)
-  - EN-1 Only contenthash is read; addr, text and the rest are not
+  - EN-1 contenthash is what navigation reads; seven text records are shown only when there is no website
   - EN-2 A CCIP resolver's rigour is deliberately not graded
   - EN-3 Reverse resolution (EIP-181) is not implemented
   - EN-4 Two normalisations for one hash function
@@ -2798,64 +2798,87 @@ the Wildroot tree, and against `../../src/pointers.js` and
 
 ### 1. Deviations
 
-#### AR-1. The BYTES are verified against the transaction for a top-level transaction under 8 MiB (resolved 2026-09-06, with a stated limit)
+#### AR-1. What a gateway's answer is now checked against, and what is still taken on its word
 
-*SPEC §9.2 · `src/ar.js` (whole module)*
+*SPEC §9.1.1, §9.2 · `src/ar.js`, `src/ar-tx.js`, `src/ar-merkle.js`*
 
-**What.** No chunk proof is checked and `data_root` is never compared with
-anything. The transaction *header* is checked — fetched from a second gateway
-and required to hash to the identifier (SPEC §9.1.1), which is where the
-`data_root` arrives, authenticated — and then the bytes that were served are
-not measured against it. For the content itself the answering gateway is
-trusted like any HTTPS host.
+**What is checked (2026-09-12).** Two things, in order, and each one's value
+depends on the one before it.
+
+1. **The header is the identifier's transaction.** The header is fetched from a
+   gateway *other* than the one that served the bytes, and `src/ar-tx.js`
+   requires both halves of the protocol's own definition: `SHA-256(signature)`
+   is the identifier, **and** the signature verifies over the transaction's
+   fields — RSA-PSS/SHA-256 under the key `{ n: owner, e: 65537 }`, over the
+   deep hash of `["2", owner, target, quantity, reward, last_tx, tags,
+   data_size, data_root]` for format 2, and over the legacy concatenation
+   (which includes the data itself) for format 1. `owner`, `data_root`,
+   `data_size`, `tags`, `target`, `quantity`, `reward` and `last_tx` are
+   therefore all bound to the identifier.
+2. **The bytes are the transaction's.** The whole body of a plain fetch (no
+   manifest path, no `Range`) whose `data_size` is at most `MAX_VERIFY_BYTES`
+   (8 MiB) and whose length is exactly that is hashed against the now-proven
+   `data_root` with `src/ar-merkle.js` (256 KiB chunks, the last two
+   rebalanced; leaf `H(H(H(chunk))‖H(note))`, branch `H(H(l)‖H(r)‖H(note))`).
+   A body of the declared length that does not hash to the root is a 502; the
+   response says `X-Arweave-Verified: bytes` when it does.
+
+**What this fixed.** Until 2026-09-12 step 1 hashed the signature and stopped
+there, which is a check on the *signature* and not on the header: a gateway
+could keep a real signature and serve any `data_root`, `data_size`, `tags` or
+`owner` beside it and pass. Step 2 then hashed the bytes against that root and
+reported `bytes` — a verified-looking answer aimed at a root the gateway chose.
+The signature is what binds the fields, so it is verified now rather than
+hashed, and the earlier claim in this file (that step 1 authenticated the
+header) was ahead of the code.
 
 **The standard says.** An Arweave transaction id is the SHA-256 digest of the
-transaction's signature, and a format-2 transaction's data is committed by the
-`data_root` Merkle root inside that signed header (the Arweave reference
-implementation's documentation; ANS-104 states the same derivation verbatim for
-a bundled data item: *"The id of the DataItem, is the SHA256 digest of this
-signature."*). The identifier is therefore checkable, and a client that does
-not check it is trusting whoever answered.
+transaction's signature, and the signature is over the transaction's fields
+(the Arweave reference implementation; arweave-js `Transaction.getSignatureData()`
+and `NodeCryptoDriver.verify()`, which this reimplements without a dependency).
+ANS-104 states the same id derivation verbatim for a bundled data item: *"The
+id of the DataItem, is the SHA256 digest of this signature."*
 
-**Why.** Full chunk verification is a real amount of work — the chunk endpoint,
-the Merkle proof format, and a bounded buffer to hash against — where the header
-check was one hash and one request. The cheap half was therefore done first
-(AR-D1), and the expensive half is what is left. The scheme's namespace-table
-row still records `status: 'partial'` rather than `live` for exactly this
-reason, which is the model this file wants: the deviation lives in the code's
-own metadata, not only in prose.
+**What is still taken on the gateway's word.**
 
-**Consequence.** SPEC §11.7: a successful `ar://` fetch establishes that a
-TLS-authenticated host from a list we shipped returned these bytes for this
-identifier, and — with the header check — that a second, independent host agrees
-the identifier names a real transaction. Neither is a statement about the bytes.
-A hostile or compromised gateway still serves arbitrary content for the right
-transaction and nothing notices. Contrast `ipfs://`, where the local node checks
-every block hash, and `bittorrent://`, where the infohash does it — Arweave is
-the one content scheme in this browser whose bytes are not checked. What limits
-the damage is that the claim is not overstated anywhere: the trust panel calls
-the content step `unverified`, the aggregate verdict is `partial`, the scheme
-table says `partial`, and the response header says `header`, never `bytes`
-(SPEC §9.2, §9.1.1).
+- **Which transaction.** The header proves what a transaction says about
+  itself; nothing here proves that *this* owner's transaction is the one the
+  network accepted at that identifier, because that lives in the block index
+  and this implementation reads no chain. (The identifier is a hash of a
+  signature, so a second transaction with the same id would be a SHA-256
+  collision — but an identifier that was never mined, or was mined under a
+  different wallet than the header claims, is not distinguishable from here.)
+- **A header this implementation cannot check** — a format it constructs no
+  payload for, an `owner` that is not an RSA-4096 modulus, a format-1 header
+  served without the data it signed — is reported as `unsupported`: nothing is
+  claimed, `data_root` is not used, the response says `none`. A gateway can
+  therefore always *downgrade* itself to the standing it had before any of this
+  existed; what it cannot do is be believed while lying.
+- **The bytes of anything the byte check cannot hold**: a transaction over
+  8 MiB, a `Range` request, a manifest path (SPEC §7 hands the path→id mapping
+  to the gateway entirely — AR-U1), and a bundled data item, which has no
+  top-level header at all (`/tx/<id>` is 404 on every gateway for one). A
+  gateway also RENDERS some transactions rather than serving them (arweave.net,
+  2026-09-06: a 10,386-byte bundle came back as a 2,285-byte page); that page
+  is the gateway's, so a body whose length is not `data_size` is reported
+  `header`, never refused and never called `bytes`.
+- **Availability.** A gateway that answers nothing, or serves a valid header
+  and then withholds the data, is indistinguishable from an outage.
 
-**Status: RESOLVED for the common case, with the limit stated.** Since
-2026-09-06 `../../src/ar-merkle.js` computes the chunk Merkle root (256 KiB
-chunks, the last two rebalanced; leaf `H(H(H(chunk))‖H(note))`, branch
-`H(H(l)‖H(r)‖H(note))`; validated live against top-level transactions) and
-`../../src/ar.js` holds a whole body of a proven header's transaction up to
-`MAX_VERIFY_BYTES` (8 MiB), refuses one that does not hash to `data_root`,
-and answers `X-Arweave-Verified: bytes`. The body is checked only when its length is
-the header's `data_size`: a gateway RENDERS a bundle or a path manifest as an
-index page (arweave.net: a 10,386-byte bundle answered with a 2,285-byte page),
-and that page is the gateway's, not the data the root commits to — reported
-`header`, never refused; a body of the right length that does not hash is the
-one case refused. Above the limit, on a Range request, and for a bundled data
-item (no top-level header: `/tx/<id>` is 404 on every gateway), the header
-check stands alone and the header says `header` or
-`none` — the label never claims what was not checked. The trust panel's
-content step remains `unverified` because it is written at resolution time,
-before the fetch; the response header is the per-fetch truth. What remains:
-chunk proofs for bodies above the limit, and bundled items via their bundle.
+**Consequence.** A successful `ar://` fetch of a plain transaction under the
+limit now establishes that these bytes are the bytes the transaction at this
+identifier committed to, with both gateways treated as couriers. Everything
+above keeps the resolution-time verdict at `partial`: the trust panel's content
+step is written before the fetch and cannot know which outcome a body will get,
+so it stays `unverified` and the per-fetch truth lives in `X-Arweave-Verified`
+(SPEC §9.2, AR-U5).
+
+**Status: PARTIALLY IMPLEMENTED.** The header is authenticated and the common
+body is verified. What remains: chunk proofs for bodies above the limit and for
+`Range` requests, verification of a bundled item through its bundle, a bound on
+what is buffered before a length is compared (8 MiB is a *declared*-size
+threshold, not a limit on a hostile response), a client-side manifest reader
+(AR-U1), and the chain read that would anchor `owner` to a mined transaction.
 
 ---
 
@@ -3005,32 +3028,29 @@ us.
 
 ### 3. Open design items
 
-#### AR-D1. The `data_root` half of the cheap check
+#### AR-D1. Chunk proofs, for everything the in-memory check cannot hold
 
-This item had two steps and the first is built. The header is fetched from a
-gateway other than the one that served the bytes and required to hash to the
-identifier (SPEC §9.1.1, `headerMatchesId`, `tests/arweave-header.test.js`); a
-mismatch is a 502 in the Arweave namespace, and `X-Arweave-Verified` reports
-which of `header` and `none` happened.
+This item had three steps and two are built: the header is authenticated
+against the identifier (SPEC §9.1.1, `src/ar-tx.js`, `tests/ar-tx.test.js`) and
+a whole body under `MAX_VERIFY_BYTES` is hashed against its `data_root`
+(`src/ar-merkle.js`, `tests/ar-bytes.test.js`). A mismatch in either is a 502 in
+the Arweave namespace, never a fall-through, and `X-Arweave-Verified` reports
+which of `bytes`, `header` and `none` happened.
 
-**What is left.** The header carries a `data_root`, authenticated, and nothing
-compares the bytes with it. Recommendation, in order: buffer the body when it is
-small enough (a threshold — 4 MB covers a manifest and most pages) and hash it
-against `data_root` for a single-chunk transaction; above the threshold, or for a
-multi-chunk transaction, compare the body with the same path fetched from the
-second gateway; then, and only if it is worth it, the chunk endpoint and the
-Merkle proof format for the general case. Prove it with a mock gateway returning
-tampered bytes for a valid header, which must fail closed as an Arweave-namespace
-failure and never as a fall-through — the mirror of the case
-`tests/arweave-header.test.js` already pins. The response header gains a `bytes`
-value at that point and not before, and only then may the trust step change
-(AR-1, AR-U5).
+**What is left.** Everything the in-memory check cannot hold: a transaction over
+the limit, a `Range` request, and a bundled data item. Recommendation, in order:
+the `/chunk` endpoint and the `data_path` Merkle proof format, which verify a
+transaction a chunk at a time and would lift the size limit and serve a `Range`
+honestly; then a bundled item verified through its bundle's own header (ANS-104
+gives the item id the same signature derivation, so the machinery is the one
+already here). A streaming check would also remove the buffer-before-compare
+noted in AR-1.
 
-**One thing to preserve.** The header request must keep coming from a gateway
-other than the one that served the bytes, for the same reason it does now: a
-lying gateway would supply a matching `data_root` too. When the body comparison
-is added, the *bytes* must come from the two hosts in the other order, or one
-operator answers for both halves of its own proof.
+**Two things to preserve.** The header request must keep coming from a gateway
+other than the one that served the bytes: a lying gateway would supply a
+matching `data_root` too. And a check that cannot be made must keep saying so —
+`none`, and no use of an unproven `data_root` — rather than reporting the
+weaker check under the stronger name.
 
 #### AR-D2. `Config.arOptions` has no schema, default or validation
 
@@ -3054,9 +3074,11 @@ knob real.
 ### 4. What this chapter leaves out
 
 1. **Any Electron dependency.** `src/ar.js` is extracted byte-identical — it
-   imports only `isCanonicalTxid` from the shared pointer module, uses
-   `Response`, `Headers`, `Request`, `Buffer` and an injected fetch, and runs
-   unmodified under `node --test`. Nothing had to be factored or stubbed.
+   imports `isCanonicalTxid` from the shared pointer module and its two
+   siblings `src/ar-merkle.js` and `src/ar-tx.js` (both also byte-identical
+   copies), uses `Response`, `Headers`, `Request`, `Buffer`, `node:crypto` and
+   an injected fetch, and runs unmodified under `node --test`. Nothing had to
+   be factored or stubbed, and no dependency was added for the cryptography.
 
 2. **The composition layer**, which is Electron-bound and stays in the browser
    tree: the module that injects the proxied `net.fetch` and registers the
@@ -3102,27 +3124,41 @@ down is just a bug nobody has found yet.**
 
 ### 1. Deviations
 
-#### EN-1. Only `contenthash` is read; `addr`, `text` and the rest are not
+#### EN-1. `contenthash` is what navigation reads; seven text records are shown only when there is no website
 
-**What.** One record, one call. No address record, no text records, no avatar,
-no multichain address records, no ENS metadata.
+**What.** Navigation reads one record: `contenthash`. Since 2026-09-06 a name
+with **no** website reads seven ENSIP-5 text keys as well — `url`,
+`description`, `avatar`, `email`, `com.twitter`, `com.github`, `org.telegram`
+(`src/ens-protocol.js` `TEXT_KEYS`) — one `text(node, key)` call each through
+the same Universal Resolver, and shows them on the no-website page: escaped,
+truncated to **512 characters**, nothing fetched, and only an `https:` `url`
+made into a link (`textRecords`, `textRecordsHtml`; SPEC §5.6a). No address
+record, no multichain address, no reverse name, no avatar image *loaded* — the
+`avatar` value is shown as the text it is.
 
 **The standard says.** ENS resolvers expose a profile of records — EIP-137
 `addr(bytes32)`, ENSIP-5 `text(bytes32,string)` and ENSIP-9 multichain
 addresses among them — and a general ENS client reads whichever it needs.
+ENSIP-5 names the global keys and the `com.*` / `org.*` service convention;
+it sets no length limit, so the 512-character cap is ours (a display bound, not
+a protocol one).
 
-**Why.** The scheme's job is to open a name as a **website**. Every other
-record belongs to a wallet or a profile viewer, and reading them would put a
-per-navigation cost on every ENS name for data nothing renders.
+**Why.** The scheme's job is to open a name as a **website**. A successful
+navigation therefore still costs exactly one record, and the extra calls happen
+only on the page that would otherwise be a dead end — where a name that
+publishes a profile and no site can at least say who it is.
 
-**Consequence.** A name that publishes only an address is reported as having no
-website — and the error page says so in those words, rather than implying the
-name does not exist. A user who wants the profile does not get one here.
+**Consequence.** A name that publishes only an address is still reported as
+having no website, in those words, rather than as not existing. The seven keys
+are a display, not a profile viewer: they are read through the same trusted RPC
+and Universal Resolver path as the content pointer (EN-2), rendered as text on
+the resolver's word, and a value longer than 512 characters is cut rather than
+scrolled. Anything outside the list is not read at all.
 
-**Status: DELIBERATE.** This chapter specifies browsing, not ENS. Reading a
-record nothing displays would add a lookup, a failure mode and a disclosure to
-the RPC endpoint for no user-visible result. A "name info" panel would be the
-place for the rest, and there is no such panel.
+**Status: IMPLEMENTED WITH LIMITED SCOPE.** This chapter specifies browsing,
+not ENS. Which keys belong on that page is a judgement we would take argument
+on; the cap and the escaping are not negotiable, because the values come from
+an untrusted resolver straight into a page.
 
 ---
 

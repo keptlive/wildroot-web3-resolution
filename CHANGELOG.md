@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.8.0
+
+- **The Arweave transaction header is authenticated, not just hashed**
+  (`namespaces/arweave/src/ar-tx.js`, new) — a transaction id is
+  `SHA-256(signature)`, and that hash alone left `owner`, `data_root`,
+  `data_size`, `tags`, `target`, `quantity`, `reward` and `last_tx` free for a
+  gateway to swap while keeping the signature: the byte check of 0.7.0 would
+  then hash the body against a data root the gateway chose and report
+  `X-Arweave-Verified: bytes`. The signature is now verified over the
+  transaction's own fields — RSA-PSS/SHA-256 under the key `{ n: owner,
+  e: 65537 }`, over Arweave's deep hash (SHA-384) of `["2", owner, target,
+  quantity, reward, last_tx, tags, data_size, data_root]` for format 2, and
+  over the legacy concatenation for format 1 — so the root the bytes are
+  measured against is the one the identifier commits to. No dependency: the
+  algorithm is arweave-js's, re-implemented on `node:crypto`.
+  - A header that is not the identifier's transaction is a **502**, as before,
+    now including a signature that does not sign the fields served with it.
+  - A header this implementation cannot check — an unknown format, an `owner`
+    that is not an RSA-4096 modulus, a format-1 header served without the data
+    it signed — is `unsupported`: `X-Arweave-Verified: none`, `data_root`
+    unused, nothing claimed. It is never reported as `header`.
+  - `tests/ar-tx.test.js`: real format-2 and format-1 transactions fetched
+    from arweave.net (`EDGVy6AA…`, `9TbUmxOr…`, stored as fixtures), each
+    signed field swapped in turn, and the deep hash pinned against
+    arweave-js's own output.
+- **ENS EN-1 corrected** (`namespaces/ens/DEVIATIONS.md`) — the entry still
+  said only `contenthash` is read; the no-website page has read seven ENSIP-5
+  text keys, capped at 512 characters, since 0.7.0.
+- 1005 tests in 11 suites, 73 modules byte-identical with the browser tree.
+
 ## 0.7.2
 
 Sync with browser 2.78.28 (`93cdc62`). No behaviour change in resolution:
@@ -127,6 +157,6 @@ the browser resolves, with the reference implementation behind each.
   as the Fast / Private switch.
 - **`src/`, `namespaces/*/src/`** — the resolution modules, byte-identical to
   the Wildroot browser tree modulo import paths (`scripts/parity.mjs` proves
-  it; 69 copied modules, 8 declared factored).
-- **`tests/`, `namespaces/*/tests/`** — 931 deterministic tests in 11 suites,
+  it; 73 copied modules, 8 declared factored).
+- **`tests/`, `namespaces/*/tests/`** — 1005 deterministic tests in 11 suites,
   no network; `npm test` runs them all.

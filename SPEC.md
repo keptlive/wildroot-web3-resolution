@@ -289,7 +289,7 @@ wire a handler for a scheme absent from it. The reference table is
 |---|---|---|
 | `hns` | `hns` | SPV chain proof + DANE `3 1 1`, or a content pointer's own hash (Chapter 1) |
 | `ipfs` | `ipfs`, `ipns`, `ipld`, `pubsub` | CID; an IPNS record + CID; a pubsub topic is **not** a content address — a message carries only its publisher's libp2p signature (Chapter 3) |
-| `arweave` | `ar` | the transaction id's shape and canonical spelling only; bytes are gateway-trusted (Chapter 4) |
+| `arweave` | `ar` | the transaction id's shape and canonical spelling; then, per fetch, the transaction header's signature verified against the id and the bytes hashed to its `data_root` where the whole transaction fits in memory — a larger transaction, a range, a manifest path and a bundled item stay gateway-trusted (Chapter 4) |
 | `ens` | `ens` | an EIP-1577 contenthash read over a public Ethereum RPC — RPC-trusted, not chain-proven; the content it names is CID-verified (Chapter 5) |
 | `web3` | `web3` | an ERC-4804 EVM read over a public RPC (Chapter 5); there is deliberately **no** `w3://` — `.w3` is a Handshake TLD |
 | `nostr` | `nostr` | BIP-340 signature and event id recomputed locally, answer bound to the query; relay completeness not proven (Chapter 6) |
@@ -417,7 +417,7 @@ chapter's prefix.
 | [1 — Handshake](namespaces/handshake/SPEC.md) (`HS`) | `hns` | a chain proof from a local SPV node; DNSSEC anchored to the on-chain DS; DANE `3 1 1`; content pointers read from `ipfs=`/`ar=` records AND from DNSLink — the migration path from every other IPFS client | TRUSTLESS for a content pointer or a pinned, validated address; TRUSTED over the DoH fallback; OPEN for a proven-unpinned name over plain HTTP |
 | [2 — ICANN names](namespaces/icann/SPEC.md) (`IC`) | `icann` / `web` | WebPKI; the address from encrypted DNS (plain or oblivious) per a transport plan decided once and reported truthfully | TRUSTED |
 | [3 — IPFS, IPNS and DNSLink](namespaces/ipfs/SPEC.md) (`IP`) | `ipfs` | the CID: every block hash-checked by the local node; an IPNS record's signature | TRUSTLESS |
-| [4 — Arweave](namespaces/arweave/SPEC.md) (`AR`) | `arweave` | the transaction id names immutable bytes, but the bytes are fetched from an ar.io gateway and **not** checked against it | TRUSTED |
+| [4 — Arweave](namespaces/arweave/SPEC.md) (`AR`) | `arweave` | the transaction id names immutable bytes: the header a second gateway serves is verified against the id (signature over the fields, not merely hashed) and the bytes are hashed to its `data_root` — but only where the whole transaction is in hand and under 8 MiB, and **not** for a bigger one, a range, a manifest path or a bundled item | TRUSTED |
 | [5 — ENS and `web3://`](namespaces/ens/SPEC.md) (`EN`) | `ens`, `web3` | an EIP-1577 contenthash read over a public Ethereum RPC (with ERC-3668 CCIP-Read and a local ENSIP-21 batch); the content it names is CID-verified | TRUSTED |
 | [6 — Nostr](namespaces/nostr/SPEC.md) (`NO`) | `nostr` | every event's id recomputed and BIP-340 signature checked here, and bound to the question asked; relays are a transport | TRUSTED (authorship proven, completeness not) |
 | [7 — DID, AT Protocol and ActivityPub](namespaces/did/SPEC.md) (`DI`) | `did`, `atproto`, `activitypub` | a DID document fetched from `plc.directory` or the `did:web` host and checked to be about the DID asked for; `at://` and `activitypub:` recognised and refused | TRUSTED for `did:`; a refusal for the other two |

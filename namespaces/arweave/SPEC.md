@@ -632,32 +632,63 @@ This is the section to read.
 | Only a fixed header safelist crosses in either direction (§6.4) | nothing caller-chosen beyond a known set reaches the gateway |
 | A gateway may redirect only within itself (its host or a sandbox subdomain of it) and within the same transaction (§6.3) | 502 with no `Location`; the fetch cannot be bounced to an arbitrary host |
 | TLS to an `https:` gateway (§6.1) | the gateway is authenticated as a host, by a CA |
-| The transaction **header** hashes to the identifier, fetched from a gateway *other* than the one that served the bytes (§9.1.1) | 502 on a mismatch, and the response says which of the two happened |
+| The transaction **header** is the identifier's — its signature hashes to the id *and* verifies over the fields served with it — fetched from a gateway *other* than the one that served the bytes (§9.1.1) | 502 on a mismatch, and the response says which of the three happened |
+| The **bytes** hash to that proven header's `data_root` (§9.2) | 502 on a body of the declared length that does not hash to the root |
 
 ### 9.1.1 The header check
 
 An Arweave transaction id **is** `SHA-256` of the transaction's signature — that
 is the protocol's definition of the id, and ANS-104 states the same derivation
-verbatim for a bundled data item. So a transaction *header* can be proved to be
-the transaction an identifier names with one hash and no trust in anybody:
+verbatim for a bundled data item.
 
-```js
-export function headerMatchesId (header, txid) {
-  // base64url-decode the signature, SHA-256 it, base64url-encode the digest,
-  // and require it to equal the identifier.
-}
+That hash on its own, though, proves only that the gateway did not invent a
+signature. It says **nothing** about the fields served beside it: `owner`,
+`data_root`, `data_size`, `tags`, `target`, `quantity`, `reward`, `last_tx` are
+all outside it, so a gateway could keep the signature and swap the data root —
+and the byte check of §9.2 would then hash the bytes against a root of the
+gateway's choosing and call the result verified. What binds those fields to the
+identifier is the **signature itself**, so it is verified, not merely hashed:
+
+```
+id      = SHA-256(signature)
+verify  = RSA-PSS(SHA-256, salt length automatic) over the signature payload,
+          under the key { n: owner, e: 65537 }
+payload = format 2: deepHash([ "2", owner, target, quantity, reward, last_tx,
+                               [[name, value]…], data_size, data_root ])
+          format 1: owner ‖ target ‖ data ‖ quantity ‖ reward ‖ last_tx ‖
+                    (name ‖ value)…
 ```
 
-`src/ar.js` `headerMatchesId`. The check is performed **after** a successful
-fetch, and the rules around it are the whole of its value:
+where a number is its decimal string as bytes, every other field is its
+base64url decoding, an absent field is zero bytes, and `deepHash` is Arweave's
+tagged recursive SHA-384 (`H(H("blob"‖len)‖H(bytes))` for a leaf;
+`acc = H("list"‖count)` then `acc = H(acc‖deepHash(item))` for a list).
+`src/ar-tx.js` is the whole of it — no dependency, and the algorithm is
+arweave-js's (`lib/deepHash.ts`, `Transaction.getSignatureData()`,
+`NodeCryptoDriver.verify()`), re-implemented synchronously.
+
+A header therefore has **three** outcomes, and an implementation **MUST** keep
+them apart:
+
+| Verdict | Meaning | What the caller does |
+|---|---|---|
+| `verified` | the signature hashes to the id *and* signs these fields | the header may be used — including its `data_root` (§9.2) |
+| `mismatch` | no signature, a signature that is not the id's, or one that does not sign the fields served with it | **502.** A lie was caught |
+| `unsupported` | the id check passed and the signature could not be checked over the fields: a format with no payload construction here, an `owner` that is not an RSA-4096 modulus, a format-1 header served without the data it signed | nothing was proven, so **nothing is claimed** — `X-Arweave-Verified: none`, and `data_root` is not used |
+
+`src/ar-tx.js` `headerVerdict`; `src/ar.js` `headerMatchesId` is the boolean
+`=== 'verified'`. The check is performed **after** a successful fetch, and the
+rules around it are the whole of its value:
 
 1. **The header MUST come from a gateway other than the one that served the
    bytes.** `GET <other gateway>/tx/<txid>` (`src/ar.js`, the block after the
    failover loop). A gateway that is lying about the bytes would supply a
    matching header too, so a header from the same host proves nothing at all.
 2. **A mismatch is a refusal.** `502`, naming the gateway and saying that the
-   signature does not hash to the id. It is never a warning, never a retry, and
-   never a fall-through to the next gateway.
+   signature does not hash to the id, or does not sign the fields served with
+   it. It is never a warning, never a retry, and never a fall-through to the
+   next gateway. An **unsupported** header is not a refusal — nothing was
+   caught — but it is not a pass either: it is reported as nothing checked.
 3. **It applies to the transaction's own data.** With a manifest path there is
    no single transaction whose header could answer for the bytes (§7 hands path
    resolution to the gateway), so the check is skipped rather than faked.
@@ -668,9 +699,11 @@ fetch, and the rules around it are the whole of its value:
    response says.
 6. **The outcome is reported, machine-readably.** Every response carries
    `X-Arweave-Verified: header` when the header was proved to be this
-   identifier's, and `none` in every other case — skipped, unreachable, or the
-   check switched off. An implementation **MUST NOT** ever write `bytes` there:
-   it is a claim §9.2 does not support.
+   identifier's, `bytes` when the body was then hashed to its `data_root`
+   (§9.2), and `none` in every other case — skipped, unreachable, unsupported,
+   or the check switched off. An implementation **MUST NOT** write `bytes`
+   unless the body really was hashed against a root a **verified** header
+   carried, and **MUST NOT** write `header` for an unsupported one.
 
 The check is **on** in the reference browser and **off** by default in the
 library (`verifyHeader`, `browser src/protocols/index.js`). That asymmetry is
@@ -680,26 +713,50 @@ implementation **SHOULD** enable, because it is the whole cheap half of the
 verification (`../../DEVIATIONS.md` AR-D1).
 
 **What it proves, exactly.** That the transaction the identifier names exists,
-and that the header describing it — its `data_root`, its owner, its tags, its
-size — is authentic, because the signature it carries hashes to the id asked
-for. Two lies are removed by it: a gateway answering an identifier with a
-different transaction's metadata, and an identifier that names nothing at all
-being reported as content. What it does **not** prove is the bytes (§9.2), and
-an implementation **MUST NOT** let the header check be read as though it did.
+and that the header describing it — its `data_root`, its `data_size`, its
+owner, its tags, its target, its quantity, its reward, its `last_tx` — is the
+one whose signature is that identifier, because the signature verifies over
+exactly those fields. Three lies are removed by it: a gateway answering an
+identifier with a different transaction's metadata, a gateway keeping a real
+signature and editing the fields beside it (which would aim the byte check of
+§9.2 at a root of the gateway's choosing), and an identifier that names nothing
+at all being reported as content.
 
-*(`tests/arweave-header.test.js` — the derivation, the mismatch refusal, and the
-three cases where the check is honestly skipped.)*
+**What it still does not prove.** That this `owner` is the wallet the network
+accepted: a header is self-describing, and only the block index says which
+transaction was mined — anchoring that is a chain read this implementation does
+not do (§9.4, `../../DEVIATIONS.md` AR-1). Nor does it prove which transaction
+a *manifest path* resolves to (§7, AR-U1), nor that a gateway that will not
+answer is not simply withholding. And a gateway may always serve a header this
+implementation cannot check, which buys it nothing but the standing of a
+gateway that did not answer.
 
-### 9.2 What is NOT checked
+*(`tests/ar-tx.test.js` — real format-2 and format-1 transactions from
+arweave.net, each field swapped in turn, and arweave-js's own deep-hash
+vectors. `tests/arweave-header.test.js` — the refusal, the unsupported shrug,
+and the cases where the check is honestly skipped.)*
 
-**The bytes are never checked against the identifier.** No chunk proof is
-verified and `data_root` — which the header check delivers, authenticated —
-is never compared with anything. The transaction is proved to be the one the
-identifier names; the *content* is still whatever the answering gateway chose to
-send, trusted exactly the way a browser trusts any HTTPS host.
+### 9.2 The bytes, and what is still NOT checked
 
-The implementation says so in its own header, in its namespace table — which
-records the scheme as **`partial`**, not `live`:
+**The bytes are hashed against the proven header's `data_root`** — the chunk
+Merkle tree of `src/ar-merkle.js` — when the whole body is in hand: a plain
+transaction fetch (no manifest path, no `Range`), a `data_size` at most
+`MAX_VERIFY_BYTES` (8 MiB), and a body of exactly that length. A body of the
+declared length that does not hash to the root is a **502**; a body of another
+length is the gateway's own rendering of a bundle or manifest (§7) and is
+served as `header`, never as `bytes`.
+
+**Above that, the gateway is trusted for the content**: a transaction larger
+than the limit, a `Range` request, a manifest path and a bundled data item (no
+top-level header exists for it) are all served with the bytes unchecked, and
+the response header says `header` or `none` rather than claiming otherwise.
+Chunk proofs — which would lift the limit — are not implemented
+(`../../DEVIATIONS.md` AR-1, AR-D1).
+
+The implementation keeps saying so where a caller reads it: the scheme's
+namespace-table row still records **`partial`**, not `live`, because the
+resolution-time verdict is written before any fetch and cannot know which of
+the three outcomes a given body will get:
 
 ```js
 { scheme: 'ar', namespace: NAMESPACES.ARWEAVE, status: 'partial',
@@ -752,9 +809,10 @@ only in the response header.
 
 The gap itself — no byte verification — is `../../DEVIATIONS.md` AR-1.
 
-### 9.3 Why the shape check still buys something
+### 9.3 Why immutability still buys something where the checks stop
 
-An identifier names immutable content. So even without byte verification:
+An identifier names immutable content. So even where §9.2's byte check cannot
+run:
 
 - A gateway can serve wrong bytes, but it cannot serve bytes that *change* —
   there is no version, no mutable pointer, nothing to move. Compare `ipns=` or
@@ -762,24 +820,26 @@ An identifier names immutable content. So even without byte verification:
 - Two gateways can be compared, because both are answering for the same
   immutable id. This is the property that makes §6.1's failover safe at all, and
   it is the property the header check spends (§9.1.1): the second gateway is
-  asked for the one part of the transaction that is checkable with a hash.
+  asked for the transaction, and what it returns is checkable against the id
+  with no trust in it whatever.
 
-The second is partly automatic and the more valuable half of it is not. The
-header is compared across operators on every plain transaction fetch; the
-**bytes** are still never compared, against the second gateway or against the
-`data_root` the header authenticates. `../../DEVIATIONS.md` AR-D1 carries what
-remains: hash a single-chunk body against `data_root`, and for a multi-chunk
-transaction compare the body with the same path from the second gateway. A user
-still has no affordance to force either.
+What remains unchecked is the content of everything the byte check cannot hold:
+a transaction over the limit, a `Range`, a manifest path, a bundled data item.
+`../../DEVIATIONS.md` AR-D1 carries the rest — chunk proofs, so that a large
+transaction is verified a chunk at a time rather than not at all. A user still
+has no affordance to force it.
 
 ### 9.4 What the chain proof does establish
 
 When the identifier arrived from an `ar=` record on a Handshake name resolved
 through the SPV path, the **binding** — this name points at this identifier —
 is chain-proven and DNSSEC-validated to the on-chain DS (`../../SPEC.md` §6).
-That is a real and unusual guarantee, and it is orthogonal to §9.2: the
-implementation proves *which* immutable object a name names, and then does not
-check that the bytes it received are that object.
+That is a real and unusual guarantee, and it is what §9.1.1 and §9.2 build on:
+the chain proves *which* immutable object a name names, the header check proves
+the transaction that identifier is, and the byte check — where it can run —
+proves the bytes are that transaction's. The seam that no part of this closes
+is between the header's `owner` and the wallet the network accepted, which only
+a read of the chain's own index would settle.
 
 When the identifier arrived over DoH, or from `_op`, or from ENS, even the
 binding is taken on someone's word (`../../SPEC.md` §7, D-9, D-10). The trust

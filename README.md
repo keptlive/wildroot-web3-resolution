@@ -151,7 +151,8 @@ and the proof is kept.
 Things we would most like argued with are collected in `DEVIATIONS.md`: each
 chapter's *"Things we are not sure about"* and *"Open design items"*, the
 latter each with our recommendation. The largest are: verifying Arweave bytes
-against the transaction (the header is verified, the bytes are not); resolving
+that do not fit in memory (the header is authenticated and a transaction under
+8 MiB is hashed against it; chunk proofs are not implemented); resolving
 AT Protocol handles locally rather than through an AppView; auditing the
 `did:plc` operation log; a private IPFS path for named sites (the local node's
 DHT); whether numeric Handshake TLDs are supported at all; and whether `hns:`
