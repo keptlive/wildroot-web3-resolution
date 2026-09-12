@@ -58,6 +58,7 @@ export const MAP = {
   'src/route-path.js': 'src/hns/route-path.js',
   'namespaces/arweave/src/ar.js': 'src/hns/ar.js',
   'namespaces/arweave/src/ar-merkle.js': 'src/hns/ar-merkle.js',
+  'namespaces/arweave/src/ar-tx.js': 'src/hns/ar-tx.js',
   'namespaces/did/src/bsky.js': 'src/bsky/bsky.js',
   'namespaces/did/src/did-protocol.js': 'src/protocols/did-protocol.js',
   'namespaces/did/src/did-local.js': 'src/protocols/did-local.js',

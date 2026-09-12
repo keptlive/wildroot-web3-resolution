@@ -6,42 +6,46 @@
  *   ar://<txid>              the transaction's data
  *   ar://<txid>/path?query   path within a manifest, query carried through
  *
- * HONESTY NOTE: bytes come from an Arweave gateway and are NOT re-verified
- * against the transaction's data_root merkle tree, so the gateway is trusted
- * the same way a browser trusts any HTTPS host. The txid names immutable
- * content, which is what makes gateway failover safe, and the trust panel
- * (src/hns/trust-path.js) says the bytes are unverified rather than
- * borrowing the content-addressed sentence. Chunk verification is the known
- * follow-up. Contrast with ipfs://, where the local node verifies every block.
+ * HONESTY NOTE: what a gateway serves is checked in two steps and neither is
+ * taken on trust. The transaction HEADER is fetched from a second gateway and
+ * its signature verified over its own fields (ar-tx.js), which binds
+ * `data_root`, `data_size`, `tags` and the rest to the id; the BYTES are then
+ * hashed against that proven `data_root` (ar-merkle.js) when the whole body
+ * is in hand and under MAX_VERIFY_BYTES. Where either step cannot be made —
+ * one gateway, a manifest path, a Range, a body too big, a header this
+ * implementation cannot check — the response says so in `X-Arweave-Verified`
+ * and claims nothing. Contrast with ipfs://, where the local node verifies
+ * every block whatever its size.
  */
 
-import { createHash } from 'node:crypto'
 import { isCanonicalTxid } from '../../../src/pointers.js'
 import { bytesMatchRoot } from './ar-merkle.js'
+import { headerVerdict } from './ar-tx.js'
+
+export { headerVerdict }
 
 /** The largest body checked against its data root in memory (8 MiB). */
 export const MAX_VERIFY_BYTES = 8 * 1024 * 1024
 
 /**
  * THE HEADER CHECK. An Arweave transaction id IS the SHA-256 of the
- * transaction's signature (the protocol's definition of the id), so a
- * transaction header fetched from a SECOND gateway can be proven to be the
- * transaction the id names with one hash and no trust in either gateway. It
- * proves the BYTES too, for a top-level transaction under MAX_VERIFY_BYTES,
- * against `data_root` and the chunk Merkle
- * tree, which this browser does not compute — but it closes the cheapest
- * lie: a gateway answering a transaction id with a header for something else.
+ * transaction's signature (the protocol's definition of the id) — and that
+ * hash alone says nothing about the FIELDS served beside the signature, which
+ * a gateway could swap while keeping the signature. So the signature is
+ * verified over those fields as well (`headerVerdict`, ar-tx.js: RSA-PSS
+ * under the owner's key, over the deep hash of the transaction), which binds
+ * `owner`, `data_root`, `data_size`, `tags`, `target`, `quantity`, `reward`
+ * and `last_tx` to the id — and makes the data root the byte check hashes
+ * against the transaction's own, not the gateway's choice.
+ *
+ * True here means PROVEN: a header this implementation cannot check (see
+ * ar-tx.js) is false, and so is a caught lie — the caller distinguishes them
+ * with `headerVerdict`, refusing one and claiming nothing for the other.
  * Applied to the transaction's own data (no manifest path), and only when a
- * second gateway exists to ask; a header that does not match its id is a
- * refusal, never a shrug.
+ * second gateway exists to ask.
  */
 export function headerMatchesId (header, txid) {
-  const sig = header && typeof header.signature === 'string' ? header.signature : null
-  if (!sig) return false
-  let bytes
-  try { bytes = Buffer.from(sig, 'base64url') } catch { return false }
-  if (!bytes.length) return false
-  return createHash('sha256').update(bytes).digest().toString('base64url') === txid
+  return headerVerdict(header, txid) === 'verified'
 }
 
 /**
@@ -252,12 +256,16 @@ export default function createArHandler ({ gateway = null, gateways = null, fetc
       } catch {
         header = null // the second gateway is unreachable: nothing was checked, and the response says so
       }
-      if (header && !headerMatchesId(header, txid)) {
-        return new Response(`The transaction header ${other} serves for ${txid} is not the transaction that id names (its signature does not hash to the id). Refused.`, {
+      const verdict = header ? headerVerdict(header, txid) : null
+      if (verdict === 'mismatch') {
+        return new Response(`The transaction header ${other} serves for ${txid} is not the transaction that id names (its signature does not hash to the id, or does not sign the fields served with it). Refused.`, {
           status: 502, headers: { 'content-type': 'text/plain' }
         })
       }
-      if (header) headerVerified = true
+      // 'unsupported': the id check passed and the signature could not be
+      // checked over the fields (ar-tx.js). Nothing was proven, so nothing is
+      // claimed and the data root is not used — the standing of no header.
+      if (verdict === 'verified') headerVerified = true
     }
     // THE BYTES, against the header's data root (src/hns/ar-merkle.js). A
     // proven header names the Merkle root the transaction committed to; the

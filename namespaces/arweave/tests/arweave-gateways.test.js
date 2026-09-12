@@ -155,15 +155,14 @@ test('a path cannot escape the txid, whichever gateway answers', async () => {
 // subdomain of it), same txid (still the first path segment) — followed.
 
 test('a sandbox-subdomain redirect for the same transaction is followed; another host, txid or scheme is refused', async () => {
-  const { createHash } = await import('node:crypto')
-  const sig = Buffer.alloc(512, 3)
-  const id = createHash('sha256').update(sig).digest().toString('base64url')
+  const { signedTransaction } = await import('./signed-tx.js')
+  const { id, header } = signedTransaction()
   const label = sandboxLabel(id)
   assert.match(label, /^[a-z2-7]{52}$/, 'a 32-byte id sandboxes to 52 base32 characters')
   const seen = []
   const fetchImpl = async (url) => {
     seen.push(url)
-    if (/\/tx\//.test(url)) return new Response(JSON.stringify({ signature: sig.toString('base64url') }), { status: 200, headers: { 'content-type': 'application/json' } })
+    if (/\/tx\//.test(url)) return new Response(JSON.stringify(header), { status: 200, headers: { 'content-type': 'application/json' } })
     if (url === `https://g.example/${id}`) return new Response('', { status: 302, headers: { location: `https://${label}.g.example/${id}` } })
     return new Response('PNG', { status: 200, headers: { 'content-type': 'image/png' } })
   }

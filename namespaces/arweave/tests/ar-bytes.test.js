@@ -6,16 +6,19 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createHash, randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 
 import createArHandler, { MAX_VERIFY_BYTES } from '../src/ar.js'
 import { dataRootB64 } from '../src/ar-merkle.js'
+import { signedTransaction } from './signed-tx.js'
 
-/** A transaction whose header really is its id's, over `bytes`. */
+/**
+ * A transaction whose header really is its id's, over `bytes`: genuinely
+ * signed, because the header check verifies the signature over these very
+ * fields before the root is used (src/ar-tx.js, tests/ar-tx.test.js).
+ */
 function transaction (bytes, { root = null, size = null } = {}) {
-  const sig = randomBytes(512)
-  const id = createHash('sha256').update(sig).digest().toString('base64url')
-  return { id, header: { signature: sig.toString('base64url'), data_root: root || dataRootB64(bytes), data_size: String(size ?? bytes.length) } }
+  return signedTransaction({ data_root: root || dataRootB64(bytes), data_size: String(size ?? bytes.length) })
 }
 
 /** Two gateways: `a` serves bytes, `b` serves the header. */
