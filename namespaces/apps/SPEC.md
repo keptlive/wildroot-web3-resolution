@@ -851,7 +851,15 @@ The transport rules are normative:
   ones (`appOrigin`, browser `src/protocols/app-manifest.js:82-88`).
 - Operations **MUST** answer an envelope rather than throw across the process
   boundary, so that error **codes** are stable (`NotGranted`, `UserDeclined`,
-  `RateLimited`, `VaultLocked`, `Unavailable`, `OutOfScope`).
+  `RateLimited`, `VaultLocked`, `Unavailable`, `OutOfScope`). The shim that
+  turns that envelope back into a rejection **MUST** put the code on the
+  rejected `Error` as a `code` **property** and repeat it in the message as
+  `"<Code>: <prose>"` — a property alone does not reliably survive every
+  engine's page boundary, and a message alone cannot be branched on. The prose
+  is a sentence for a person; an application **MUST NOT** parse it, and
+  **MUST NOT** show it to a person verbatim as `"<Code>: <prose>"`. An
+  implementation **MUST NOT** emit a code it has not published; the full table,
+  including per-capability codes, is `plugin-standard/HANDSHAKE-APPS.md` §5.7.
 
 A capability the application did not declare in its manifest is refused
 (`NotGranted`), and a capability this host does not implement is refused
@@ -895,6 +903,28 @@ Three further install-time rules:
 - The manifest **MUST** be pinned by a hash of the fetched bytes, and refusals
   ("not now") **MUST NOT** be persisted — a refusal is not a permanent
   decision, while an install is.
+- An installed application's manifest **MUST** be re-read: on load at an
+  installed entry origin, rate-limited to once per origin per session, and on
+  an explicit user action that bypasses that budget. Fetching once at install
+  and never again freezes an application at the manifest the user first saw —
+  a new version that declares a capability is then never honoured, the
+  provider keeps reporting the old set, and the application hides the feature
+  it just shipped. Identical bytes are a no-op. A new manifest that asks for
+  MORE than was consented **MUST** re-consent the difference and **MUST NOT**
+  apply until it is accepted; one that asks for less, or that only changed
+  metadata, applies silently and is logged; one that fails validation or no
+  longer lists the origin it was served at **MUST** leave the installed
+  manifest in place. (Added 2026-09-13, after exactly this froze a live
+  application at a superseded manifest.)
+
+**The name picker.** `names.request` is mediator chrome and **MUST** offer every
+name in scope with no cap, answer with the **name** chosen rather than a
+positional index, re-check that answer against what was offered, mark which
+names the application already holds, be keyboard-operable, and be shown even
+when the implementation cannot parent it to a window. A host that cannot find a
+window **MUST NOT** answer `UserDeclined` on the user's behalf. A message box
+whose buttons are the first few names satisfies none of these and is
+non-conforming.
 
 ### 5.3 The token
 
@@ -937,7 +967,13 @@ privileged process:
 6. **Name** — the signing name **MUST** be one the user granted to this
    application. An explicit name outside the grants is refused; with no explicit
    name the sole grant is used, else the user's primary name if it is granted,
-   else the call is declined as ambiguous.
+   else **the name most recently granted to this application**. An
+   implementation **MUST NOT** refuse because it could not decide: ambiguity in
+   the host is not a refusal by the person, and an implementation that answers
+   one with "the user declined" is making a false statement about them. Only an
+   application with no grant at all is refused, and the code for that is
+   `NotGranted`. (Corrected 2026-09-13: the earlier rule declined an ambiguous
+   call, and a user who had granted two names was told they had refused.)
 
 **Consent is at install, not per call**, for this capability only: it
 authenticates to an origin the user is already on and writes nothing anywhere.
