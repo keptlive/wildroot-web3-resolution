@@ -17,6 +17,27 @@ whether to trust any of it.
 Nothing here is a claim about a deployed network or a released build. Findings
 describe this repository's source, and the fixture tests that pin it.
 
+The review's own documents are kept where they were written:
+[`reviews/2026-09-08-reassessment.md`](reviews/2026-09-08-reassessment.md) has
+the reproductions, the narrowed conclusions and the priorities that decided
+the order this work was done in, plus a focused WebSocket follow-up numbered
+`W1`–`W9`; and
+[`reviews/handshake-websocket-hip-outline.md`](reviews/handshake-websocket-hip-outline.md)
+is a candidate scope for a Handshake HIP on authenticated WebSocket
+connections — a proposal for discussion, with no HIP number assigned and
+nothing adopted. Both are dated records of 0.7.2 and are not the current
+state; this file is.
+
+The `W1`–`W9` items are answered in Chapter 11 with the rest of the WebSocket
+work: the mode-transition policy that aborts pending work and tears down
+established streams, the request-head bound that no longer counts coalesced
+tunnel payload against the header limit, and the narrowed claims about who
+authenticates the TLS, what a loopback bind and port 443 buy, what SOCKS
+hides, and why HTTP/2 is deployment guidance rather than a prohibition
+(RFC 8441). What the HIP outline asks for beyond that — an interoperable
+endpoint-authentication profile separated from this implementation's
+choices — is not something this repository can settle alone.
+
 ## Closed in the code
 
 | # | The finding | Where the answer is |

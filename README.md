@@ -89,6 +89,8 @@ DEVIATIONS.md               generated from the chapters: every deviation, uncert
 DIVERGENCE.md               the privacy-vs-speed inventory (a source file; also appended to DEVIATIONS.md)
 REVIEW.md                   the open review findings: what is not established, and what is owed
 REVIEW-DOCS-REWRITE-2026-09-12.md   why one proposed documentation rewrite was not merged, and the rule a future one is held to
+reviews/                    dated review records, kept as written: the 2026-09-08 reassessment and a candidate HIP outline
+CONTRIBUTING.md             how to send a correction, and how the generated documents, the tests and the parity check work
 scripts/build-docs.mjs      generates the two files above (npm run docs; npm run docs:check fails when stale)
 src/                        the Handshake chapter's modules and the modules every chapter shares
 tests/                      the Handshake suite (and the shared modules' tests)
@@ -200,3 +202,6 @@ byte-identical to the same files in the Wildroot tree.
 Corrections against the standards' text are the most welcome thing you can
 send. If you find a place where the code and a chapter disagree, the code is
 the bug report and the chapter is the claim — say which you think is wrong.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the working detail: which file to
+edit, how the generated documents are built, what the tests need, and what
+`npm run parity` and `npm run sync` actually do.
