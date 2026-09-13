@@ -218,9 +218,10 @@ warned about.
 **What.** The reference implementation renders the *name picker* as a
 main-process-owned window over one local page it loads from disk, with the
 application's renderer nowhere near it (browser `src/apps/name-picker-sheet.js`,
-`src/ui/name-picker.html`). The install consent and the **update** consent are
-still native `dialog.showMessageBox` calls (browser
-`src/apps/handshake-ops.js` `promptInstall`, `promptUpdate`).
+`src/ui/name-picker.html`). The install consent, the **update** consent and,
+since 2026-09-13, the **register a name** consent (§5.7) are still native
+`dialog.showMessageBox` calls (browser `src/apps/handshake-ops.js`
+`promptInstall`, `promptUpdate`, `confirmClaimDialog`).
 
 **The standard says.** HANDSHAKE-APPS §5.4 requires consent to be
 "main-process-owned chrome … never DOM inside or over the app's renderer". A
@@ -267,6 +268,40 @@ sheet, which is a visual inconsistency with the browser's other sheets.
 
 **Status: ACCEPTED.** Revisit if the overlay mechanism grows a second slot and a
 parentless mode.
+
+### AP-11. A claim voucher is a bearer secret the application page holds for minutes
+
+**What.** `names.claim` (§5.7) takes a voucher string the application's server
+obtained from the registry with the partner token, and the page carries it from
+one to the other. For the length of that carry it is a bearer capability: the
+registry will honor it, once, from any claimant whose browser presents it with
+a valid claim, for the one label and the one sponsor it names.
+
+**The standard says.** HANDSHAKE-APPS invariant 1 forbids a key or a signing
+oracle crossing into a page; §5.8 designs the voucher precisely so that neither
+does. Nothing in the standard forbids a page holding a short-lived, narrowly
+bound capability — a bearer session token (§5.4 step 5) is the same shape.
+
+**Why.** The alternative bindings both cost more than they buy. Binding the
+voucher to the browser's future key is impossible (the key does not exist until
+the mediator generates it after consent). Binding it to the sponsor's signature
+would require the page to obtain a second `auth.token` for a registry URL —
+exactly the signing-oracle shape §5.3 gate 3 exists to refuse. A random
+256-bit token, stored hashed, bounded to ≤ 600 s and single use, is the
+smallest thing that works.
+
+**Consequence.** A voucher exfiltrated from the page (a compromised
+application, a browser extension reading the page) lets its holder claim *that
+one label* under *that sponsor's* allowance within the minutes it lives, with a
+key the attacker generates. That is the same act the sponsor was about to do,
+spent from the sponsor's three; it yields no other name, no key of the
+sponsor's, and no write anywhere else. The page never stores, logs or URL-encodes
+it; the mediator never logs it; the registry stores only its hash.
+
+**Status: ACCEPTED.** Revisit if a TLD's allowance is ever large enough that
+spending it on somebody's behalf is a meaningful harm, in which case the voucher
+should additionally carry the sponsor's own signature obtained through a
+purpose-built, non-oracle verb.
 
 ### AP-7. A Handshake WebSocket is reachable on port 443 and nowhere else
 

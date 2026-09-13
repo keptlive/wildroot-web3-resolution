@@ -99,9 +99,10 @@ resulting connection in the terms of the spine's Part I §4.
 **Out of scope:** resolution itself (Chapter 1); the numeric-TLD URL convention
 (Chapter 10 Part B); the content of a Handshake-app manifest beyond the fields
 this chapter's gates read; the registry operations (`records.propose`,
-`names.claim`, `content.publish`) that the reference mediator answers
-`OutOfScope`; and the human-facing consent interface, of which this chapter
-specifies only the decisions it must obtain, never a rendering.
+`content.publish`) that the reference mediator answers `OutOfScope`; and the
+human-facing consent interface, of which this chapter specifies only the
+decisions it must obtain, never a rendering. `names.claim` — registering a
+new name through an application — IS in scope since 2026-09-13 (§5.7).
 
 ## 2. Terminology
 
@@ -1056,10 +1057,60 @@ the server's fixed public base plus its replay ledger, not the URL binding.
   never the user's portfolio.
 - It is **not** a general signer. The only bytes it will ever sign are
   `{url, method, body}` that the origin gate has already confined to the
-  application's own server.
+  application's own server — and, for §5.7, a claim body it built itself.
 - It is **not** a claim of trustworthiness. Manifests are unsigned in the
   reference implementation, `verified` is always false, and the consent copy
   says so (AP-6).
+
+### 5.7 Registering a new name from an application
+
+An application on a Handshake TLD it holds may want its user to hold a name
+under that TLD (`alpha.mypastebin`). Two authorities have to meet: the
+registry's permission to issue under the TLD — under a partner surface, a
+**partner token** that speaks for every name beneath it and **MUST NOT** enter
+a browser — and the new name's own control key, which the registry requires as
+the claim's signer and which **MUST NOT** leave the user's key store. A design
+that moves either to the other side (a token in the page; a key minted on the
+application's server and handed over as a file) is non-conforming, and the
+reference application shipped the second one until 2026-09-13.
+
+**The voucher.** The application's server obtains from the registry, with the
+partner token, a **voucher**: a one-shot permission for exactly one label under
+its TLD, bound to the sponsoring identity (the signed-in name, §5.3) and to the
+pointer records the new name should serve, living for minutes. The server hands
+the opaque string to its page; the page calls
+`names.claim({ tld, label, voucher })`; the mediator runs **its ordinary claim**
+— key generated in the key store, receipt signed in the privileged process,
+NIP-98 by the new key — with the voucher in the body in place of a token. The
+registry honors it for that label only, counts the allowance against the
+sponsor the partner named, writes the pointer in the same request, and consumes
+the voucher in the same transaction as the claim. The name is then a name like
+any other in the key store: one key per name, held only by the user,
+exportable, and granted to the application in the same act.
+
+The normative gates, in order, are HANDSHAKE-APPS §5.8 "host obligations":
+manifest (the capability **and** the `tld` in the manifest's `tlds`), argument
+shape, rate, key store (locked is `VaultLocked`, never a refusal), **consent in
+the mediator's words** naming the application and the exact name, the claim,
+the grant, one log line. The registry's obligations — voucher issuance gated as
+a partner claim is, `pubkey == signer` unchanged, exact-label binding, the
+sponsor taken from the voucher and never from the body, the cap under the row
+lock, single use in the claim's transaction, the pointer in the same request —
+are in the same section. The codes are `VoucherRejected`, `Cap`, `Taken`,
+`InvalidRequest` plus the standard six; the registry's own sentence for the cap
+and a taken name is what a person should read, and the mediator relays it.
+
+**What a voucher is not.** It is not a key and cannot claim anything alone:
+the registry still needs a claim signed by the key being claimed, after consent
+the mediator obtained. A stolen voucher lets its holder claim *that one label*
+under *that sponsor's* allowance for a few minutes with a key of their own —
+what the sponsor was about to do, and nothing else (AP-11).
+
+Reference: browser `src/apps/handshake-surface.js` (`namesClaim`),
+`src/identity/identity-account.js` (`claimIdentity` with `voucher`); registry
+`web/core/api_identity.py` (`partner_voucher`, the voucher path of `claim`),
+`web/domains/identity.py` (`issue_voucher`, `claim_with_voucher`); consumer
+`pastebin/server/registry.js`, `pastebin/names-ui.js`.
 
 ## 6. Trust states
 
@@ -1329,3 +1380,9 @@ An implementation conforms to this chapter when:
 15. The trust steps of §6 are exposed individually, no failure of them offers
     the user a way to proceed, and no step is scored differently because the
     socket was dialled through Tor (§6).
+16. A name registered through an application is claimed by the mediator with
+    a key generated in the user's key store, on a voucher the application's
+    server obtained; no partner token reaches a page and no control key is
+    minted outside the key store; the claim is honored only for a `tld` the
+    manifest declares, only after the mediator's own consent, and the name is
+    granted to the application in the same act (§5.7).
