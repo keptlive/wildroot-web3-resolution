@@ -44,8 +44,8 @@ test('the verification story names what is actually checked, and no more', () =>
   // to in namespace-trust.test.js, so an over-claim here becomes an over-claim
   // in the padlock. These are the rows where the honest answer is the
   // surprising one.
-  assert.match(schemeInfo('ar').verify, /shape only.*gateway-trusted/,
-    'ar: the bytes are never checked against the transaction')
+  assert.match(schemeInfo('ar').verify, /checked per fetch.*gateway-trusted/,
+    'ar: what a given fetch checks is a per-fetch fact; the row must keep saying what stays trusted')
   assert.equal(schemeInfo('ar').status, 'partial')
   assert.match(schemeInfo('ens').verify, /RPC-trusted, not chain-proven.*never green/,
     'ens: TRUSTED, and never the trustless lock')

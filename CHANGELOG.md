@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.9.0
+
+Sync with browser 2.78.39 (`cb633bb`): **one** Arweave transaction verifier.
+0.8.0 wrote a second implementation of a check the browser already had, and
+the two are now the same module — `namespaces/arweave/src/ar-tx.js`, extracted
+from the browser's `src/hns/ar.js` and byte-identical to `src/hns/ar-tx.js`.
+What the merged module keeps from each side:
+
+- **From the browser** — strict field reading (canonical base64url only, the
+  decimal grammar, the `data_size`/`data_root` pairing, the tag budget, the
+  32-byte target and 32/48-byte anchor), the optional `denomination` in the
+  format-2 payload (`ar_tx.erl`), an explicit `signature_type` refused rather
+  than ignored, and, in `ar.js`, the whole fetch contract this repository had
+  not caught up with: the representation decided from the *authenticated*
+  header before any data is read (`X-Arweave-Representation`: `raw`,
+  `gateway-rendered`, `manifest-path`, `gateway`), bounded reads that never
+  trust `Content-Length` or the signed size as an allocation limit, a streamed
+  size check above 8 MiB, a signed `Content-Type` for a verified raw body, and
+  `AbortSignal` all the way through.
+- **From this repository** — the legacy **format 1**, verified rather than
+  refused (its signature covers the data itself, so the served bytes are
+  compared with the signed bytes and reported `bytes`), and the third verdict:
+  a header the implementation *cannot* check (an unknown format, an
+  unrecognised account type, an owner that is not RSA-4096, a format-1 header
+  without its data) is `unsupported` — `X-Arweave-Verified: none`, the signed
+  root unused — instead of a refusal. Refusing there stops no attack, because
+  a header gateway reaches the same standing by not answering.
+- **Decided in the merge** — an owner **MUST** be RSA-4096, the only key size
+  an Arweave wallet has; 2048 was a test fixture's size, and a smaller
+  attacker-chosen modulus is the easier half of fitting a fixed signature to
+  chosen fields.
+
+`headerVerdict` is gone; `verifyTransactionHeader(header, txid)` returns
+`{ ok, verdict, dataSize, dataRoot, data, tags }` and `headerMatchesId` is its
+boolean. The chapter's tests are the browser's merged set
+(`tests/ar-tx.test.js` with the two real transactions, `arweave-header.test.js`,
+`ar-bytes.test.js`, `arweave-gateways.test.js`, `ar-transaction-fixture.js`).
+
+1023 tests in 11 suites, 73 modules byte-identical with the browser tree; the
+scheme table's `ar` row, Chapter 4 §9 and Chapter 10 §4.1 say what a fetch now
+checks and what stays gateway-trusted.
+
 ## 0.8.0
 
 - **The Arweave transaction header is authenticated, not just hashed**
@@ -158,5 +200,5 @@ the browser resolves, with the reference implementation behind each.
 - **`src/`, `namespaces/*/src/`** — the resolution modules, byte-identical to
   the Wildroot browser tree modulo import paths (`scripts/parity.mjs` proves
   it; 73 copied modules, 8 declared factored).
-- **`tests/`, `namespaces/*/tests/`** — 1005 deterministic tests in 11 suites,
+- **`tests/`, `namespaces/*/tests/`** — 1023 deterministic tests in 11 suites,
   no network; `npm test` runs them all.

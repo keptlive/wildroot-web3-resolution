@@ -1,94 +1,157 @@
-/*
- * The transaction header check, at the handler: the header is fetched from a
- * SECOND gateway, its signature must hash to the id AND verify over the
- * fields served with it (src/ar-tx.js, proven against real transactions in
- * tests/ar-tx.test.js), and only then does the id's `data_root` mean
- * anything. A header that is not this id's transaction is a refusal; a header
- * this implementation cannot check is a shrug that claims nothing.
- */
-
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { constants, createHash, generateKeyPairSync, randomBytes } from 'node:crypto'
+import createArHandler, { headerMatchesId, verifyTransactionHeader } from '../src/ar.js'
+import { dataRootB64 } from '../src/ar-merkle.js'
+import { tag, transaction, transactionV1 } from './ar-transaction-fixture.js'
 
-import createArHandler, { headerMatchesId, headerVerdict } from '../src/ar.js'
-import { signedTransaction } from './signed-tx.js'
-
-const { id: ID, header: HEADER } = signedTransaction()
-
-const answers = (header) => async (url) => {
-  if (/\/tx\//.test(url)) return new Response(JSON.stringify(header), { status: 200, headers: { 'content-type': 'application/json' } })
-  return new Response('bytes', { status: 200, headers: { 'content-type': 'text/plain' } })
-}
-
-const two = (header) => createArHandler({
-  gateways: ['https://a.example', 'https://b.example'], fetchImpl: answers(header), verifyHeader: true
+test('4096-bit Arweave RSA owners verify with both SDK salt settings', () => {
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 4096, publicExponent: 65537 })
+  for (const saltLength of [32, constants.RSA_PSS_SALTLEN_MAX_SIGN]) {
+    const { id, header } = transaction(Buffer.from('example'), { owner: publicKey.export({ format: 'jwk' }).n }, privateKey, saltLength)
+    assert.equal(headerMatchesId(header, id), true)
+  }
 })
 
-test('headerMatchesId is the protocol\'s definition of a transaction id AND the signature over the fields', () => {
-  assert.equal(headerMatchesId(HEADER, ID), true)
-  assert.equal(headerMatchesId({ ...HEADER, data_root: 'WCfBwUaeU65cNkG7aHfyqW48AuhhjgychOA9WIc43aU' }, ID), false,
-    'a swapped data root no longer passes on the strength of the signature\'s hash')
-  assert.equal(headerMatchesId({ signature: HEADER.signature }, ID), false, 'the hash alone proves nothing about the fields')
-  assert.equal(headerMatchesId({}, ID), false)
-  assert.equal(headerMatchesId(null, ID), false)
-})
-
-test('with the check on, the header comes from the OTHER gateway and must match; a mismatch is refused', async () => {
-  const ok = await two(HEADER).handler(new Request(`ar://${ID}/`))
-  assert.equal(ok.status, 200)
-  assert.equal(ok.headers.get('X-Arweave-Verified'), 'header')
-
-  const asked = []
-  const lying = createArHandler({
-    gateways: ['https://a.example', 'https://b.example'],
-    fetchImpl: async (url, init) => { asked.push(url); return answers(signedTransaction({ reward: '7' }).header)(url, init) },
-    verifyHeader: true
+test('a genuine owner signature authenticates every format-2 payload field', () => {
+  const { id, header } = transaction(Buffer.from('original page'), {
+    target: randomBytes(32).toString('base64url'),
+    last_tx: randomBytes(48).toString('base64url'),
+    quantity: '42',
+    tags: [tag('Content-Type', 'text/plain')]
   })
-  const bad = await lying.handler(new Request(`ar://${ID}/`))
-  assert.equal(bad.status, 502)
-  assert.match(await bad.text(), /does not hash to the id/)
-  assert.ok(asked.some((u) => u.startsWith('https://b.example/tx/')), 'the header was asked of the second gateway')
+  assert.equal(headerMatchesId(header, id), true)
+  assert.equal(verifyTransactionHeader(header, id).dataSize, 13n)
+  const changed = {
+    data_root: dataRootB64(Buffer.from('modified page')),
+    data_size: '14',
+    tags: [tag('Content-Type', 'text/html')],
+    owner: Buffer.alloc(256, 129).toString('base64url'),
+    target: randomBytes(32).toString('base64url'),
+    quantity: '43',
+    reward: '1001',
+    last_tx: randomBytes(48).toString('base64url'),
+    denomination: '1',
+    format: 1
+  }
+  for (const [field, value] of Object.entries(changed)) {
+    const tampered = { ...header, [field]: value }
+    assert.equal(createHash('sha256').update(Buffer.from(tampered.signature, 'base64url')).digest('base64url'), id, field + ': old signature-hash check still passes')
+    assert.equal(headerMatchesId(tampered, id), false, field + ': owner authentication must fail')
+  }
 })
 
-test('a header with the right signature but doctored fields is REFUSED, not served as checked', async () => {
-  // The attack the hash alone could not see: the signature is the id's, and
-  // the data root beside it is another transaction's.
-  const doctored = { ...HEADER, data_root: 'WCfBwUaeU65cNkG7aHfyqW48AuhhjgychOA9WIc43aU', data_size: '5725' }
-  assert.equal(headerVerdict(doctored, ID), 'mismatch')
-  const res = await two(doctored).handler(new Request(`ar://${ID}/`))
+test('denomination is included in the signature payload, not ignored metadata', () => {
+  const { id, header } = transaction(Buffer.from('example'), { denomination: '2' })
+  assert.equal(headerMatchesId(header, id), true)
+  assert.equal(headerMatchesId({ ...header, denomination: '3' }, id), false)
+  const absent = { ...header }
+  delete absent.denomination
+  assert.equal(headerMatchesId(absent, id), false)
+})
+
+test('strict fields, unsupported formats and account types fail honestly', () => {
+  const { id, header } = transaction(Buffer.from('example'))
+  // A `mismatch` is a finding — this document is not the transaction the id
+  // names. An `unsupported` is a limit of ours — nothing was proven, and
+  // nothing may be claimed. The handler refuses the first and shrugs at the
+  // second, so which verdict each case gets is part of the contract.
+  const cases = [
+    [{ format: 1 }, /format 1 header without the data it signed/, 'unsupported'],
+    [{ format: 3 }, /unsupported transaction format/, 'unsupported'],
+    [{ format: '2' }, /unsupported transaction format/, 'unsupported'],
+    [{ owner: '' }, /unsupported owner\/signature/, 'unsupported'],
+    [{ owner: randomBytes(32).toString('base64url') }, /unsupported owner\/signature/, 'unsupported'],
+    [{ owner: Buffer.alloc(256, 129).toString('base64url') }, /unsupported owner\/signature/, 'unsupported'],
+    [{ signature_type: 'secp256k1' }, /unsupported signature type/, 'unsupported'],
+    [{ signature: randomBytes(65).toString('base64url') }, /does not hash to the id/, 'mismatch'],
+    [{ signature: header.signature + '=' }, /base64url/, 'mismatch'],
+    [{ owner: header.owner + ' ' }, /base64url/, 'mismatch'],
+    [{ data_size: 7 }, /decimal/, 'mismatch'],
+    [{ data_size: '07' }, /decimal/, 'mismatch'],
+    [{ data_size: '-7' }, /decimal/, 'mismatch'],
+    [{ data_root: '' }, /size\/root/, 'mismatch'],
+    [{ tags: [tag('name', 'x'.repeat(2049))] }, /base64url/, 'mismatch'],
+    [{ denomination: '0' }, /denomination/, 'mismatch'],
+    [{ id: randomBytes(32).toString('base64url') }, /id mismatch/, 'mismatch']
+  ]
+  for (const [fields, reason, verdict] of cases) {
+    const result = verifyTransactionHeader({ ...header, ...fields }, id)
+    assert.equal(result.ok, false)
+    assert.match(result.reason, reason)
+    assert.equal(result.verdict, verdict, JSON.stringify(fields))
+  }
+})
+
+test('the legacy format is verified, not assumed: a format-1 transaction signs its data', () => {
+  const bytes = Buffer.from('a page from 2018')
+  const { id, header } = transactionV1(bytes, { tags: [tag('Content-Type', 'text/plain')] })
+  const result = verifyTransactionHeader(header, id)
+  assert.equal(result.verdict, 'verified')
+  assert.deepEqual(result.data, bytes)
+  assert.equal(result.dataRoot, null, 'format 1 commits to no Merkle root')
+  for (const fields of [
+    { data: Buffer.from('another page').toString('base64url') },
+    { tags: [tag('Content-Type', 'text/html')] },
+    { reward: '2000' },
+    { target: randomBytes(32).toString('base64url') }
+  ]) {
+    assert.equal(headerMatchesId({ ...header, ...fields }, id), false, JSON.stringify(Object.keys(fields)))
+  }
+})
+
+test('substituted matching root and body cannot obtain verified bytes for another signature', async () => {
+  const original = Buffer.from('original page')
+  const altered = Buffer.from('modified page')
+  const { id, header } = transaction(original)
+  const forged = { ...header, data_root: dataRootB64(altered), tags: [tag('Content-Type', 'text/html')] }
+  const { handler } = createArHandler({
+    gateways: ['https://data.example', 'https://header.example'],
+    verifyHeader: true,
+    fetchImpl: async (url) => url.includes('/tx/') ? Response.json(forged) : new Response(altered)
+  })
+  const res = await handler(new Request(`ar://${id}`))
   assert.equal(res.status, 502)
-  assert.match(await res.text(), /does not sign the fields served with it/)
-})
-
-test('a header that cannot be checked claims nothing: `none`, and the bytes are not measured against it', async () => {
-  // A real transaction of a format this implementation does not construct a
-  // payload for. Its signature really does hash to the id.
-  const future = { ...HEADER, format: 3 }
-  assert.equal(headerVerdict(future, ID), 'unsupported')
-  const res = await two(future).handler(new Request(`ar://${ID}/`))
-  assert.equal(res.status, 200, 'not a refusal: nothing was caught, only unproven')
   assert.equal(res.headers.get('X-Arweave-Verified'), 'none')
+  assert.match(await res.text(), /owner signature does not authenticate/)
 })
 
-test('the real thing, end to end: a fetched header proves the root the served bytes are then hashed against', async () => {
-  const header = JSON.parse(readFileSync(new URL('./fixtures/arweave/EDGVy6AAKFNKEA3LsjZJ5OXv82eRvJPsomCA4AWC7y8.tx.json', import.meta.url), 'utf8'))
-  const bytes = readFileSync(new URL('./fixtures/arweave/EDGVy6AAKFNKEA3LsjZJ5OXv82eRvJPsomCA4AWC7y8.bin', import.meta.url))
-  const fetchImpl = async (url) => (/\/tx\//.test(url)
-    ? new Response(JSON.stringify(header), { status: 200, headers: { 'content-type': 'application/json' } })
-    : new Response(bytes, { status: 200, headers: { 'content-type': 'application/octet-stream' } }))
-  const { handler } = createArHandler({ gateways: ['https://a.example', 'https://b.example'], fetchImpl, verifyHeader: true })
-  const res = await handler(new Request(`ar://${header.id}`))
-  assert.equal(res.status, 200)
+test('a header this implementation cannot check claims nothing, and is not refused', async () => {
+  // The standing of a header gateway that did not answer, which any header
+  // gateway can reach by not answering — so refusing here would stop no
+  // attack and would only make honest unverifiable content unopenable. What
+  // it must never do is report `header` or `bytes`.
+  const { id, header } = transaction(Buffer.from('example'))
+  for (const fields of [{ format: 3 }, { signature_type: 'secp256k1' }, { owner: Buffer.alloc(256, 129).toString('base64url') }]) {
+    const { handler } = createArHandler({
+      gateways: ['https://data.example', 'https://header.example'],
+      verifyHeader: true,
+      fetchImpl: async (url) => url.includes('/tx/') ? Response.json({ ...header, ...fields }) : new Response('example')
+    })
+    const res = await handler(new Request(`ar://${id}`))
+    assert.equal(res.status, 200, JSON.stringify(fields))
+    assert.equal(res.headers.get('X-Arweave-Verified'), 'none')
+    assert.equal(await res.text(), 'example')
+  }
+})
+
+test('a format-1 transaction gets verified bytes from the signature itself', async () => {
+  const bytes = Buffer.from('a page from 2018')
+  const { id, header } = transactionV1(bytes)
+  const gateways = (served) => async (url) => url.includes('/tx/') ? Response.json(header) : new Response(served)
+  const { handler } = createArHandler({
+    gateways: ['https://data.example', 'https://header.example'], verifyHeader: true, fetchImpl: gateways(bytes)
+  })
+  const res = await handler(new Request(`ar://${id}`))
   assert.equal(res.headers.get('X-Arweave-Verified'), 'bytes')
   assert.deepEqual(Buffer.from(await res.arrayBuffer()), bytes)
-})
 
-test('what is not checked is said: a manifest path, a single gateway, the check switched off', async () => {
-  const good = two(HEADER)
-  assert.equal((await good.handler(new Request(`ar://${ID}/index.html`))).headers.get('X-Arweave-Verified'), 'none')
-  const single = createArHandler({ gateway: 'https://a.example', fetchImpl: answers(HEADER), verifyHeader: true })
-  assert.equal((await single.handler(new Request(`ar://${ID}/`))).headers.get('X-Arweave-Verified'), 'none')
-  const off = createArHandler({ gateways: ['https://a.example', 'https://b.example'], fetchImpl: answers(HEADER) })
-  assert.equal((await off.handler(new Request(`ar://${ID}/`))).headers.get('X-Arweave-Verified'), 'none')
+  const liar = createArHandler({
+    gateways: ['https://data.example', 'https://header.example'],
+    verifyHeader: true,
+    fetchImpl: gateways(Buffer.from('a page from 2026'))
+  })
+  const refused = await liar.handler(new Request(`ar://${id}`))
+  assert.equal(refused.status, 502)
+  assert.match(await refused.text(), /not the data this transaction signed/)
 })

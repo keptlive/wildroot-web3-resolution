@@ -27,19 +27,32 @@ depends on the one before it.
    gateway *other* than the one that served the bytes, and `src/ar-tx.js`
    requires both halves of the protocol's own definition: `SHA-256(signature)`
    is the identifier, **and** the signature verifies over the transaction's
-   fields — RSA-PSS/SHA-256 under the key `{ n: owner, e: 65537 }`, over the
-   deep hash of `["2", owner, target, quantity, reward, last_tx, tags,
-   data_size, data_root]` for format 2, and over the legacy concatenation
-   (which includes the data itself) for format 1. `owner`, `data_root`,
-   `data_size`, `tags`, `target`, `quantity`, `reward` and `last_tx` are
-   therefore all bound to the identifier.
-2. **The bytes are the transaction's.** The whole body of a plain fetch (no
-   manifest path, no `Range`) whose `data_size` is at most `MAX_VERIFY_BYTES`
-   (8 MiB) and whose length is exactly that is hashed against the now-proven
-   `data_root` with `src/ar-merkle.js` (256 KiB chunks, the last two
-   rebalanced; leaf `H(H(H(chunk))‖H(note))`, branch `H(H(l)‖H(r)‖H(note))`).
-   A body of the declared length that does not hash to the root is a 502; the
-   response says `X-Arweave-Verified: bytes` when it does.
+   fields — RSA-PSS/SHA-256 under the key `{ n: owner, e: 65537 }` with the
+   owner an RSA-**4096** modulus (the only size an Arweave wallet has), over
+   the deep hash of `[denomination?, "2", owner, target, quantity, reward,
+   last_tx, tags, data_size, data_root]` for format 2, and over the legacy
+   concatenation (which includes the data itself) for format 1. `owner`,
+   `data_root`, `data_size`, `tags`, `target`, `quantity`, `reward` and
+   `last_tx` are therefore all bound to the identifier. Every field is read
+   strictly: a non-canonical base64url spelling, a decimal that is not one, a
+   `data_size`/`data_root` pairing that cannot exist, or tags over the
+   protocol's limits are refusals, not coercions.
+2. **The bytes are the transaction's.** Which contract a response gets is
+   decided from the *authenticated* header before any data is read
+   (`X-Arweave-Representation`: `raw`, `gateway-rendered`, `manifest-path`,
+   `gateway`), and a `raw` body of a `GET` without a `Range` is checked
+   against what the signature commits to: for format 2 the whole body, when
+   the signed `data_size` is at most `MAX_VERIFY_BYTES` (8 MiB), hashed
+   against the proven `data_root` with `src/ar-merkle.js` (256 KiB chunks, the
+   last two rebalanced; leaf `H(H(H(chunk))‖H(note))`, branch
+   `H(H(l)‖H(r)‖H(note))`); for format 1, whose signature covers the data
+   itself, the body compared with those signed bytes exactly. A body that does
+   not match, ends short, overruns the signed size or is interrupted is a 502;
+   the response says `X-Arweave-Verified: bytes` only when the check ran and
+   passed. Nothing the gateway says — `Content-Length`, `Content-Type`, the
+   declared size — is trusted as a bound or as a type: the read is bounded by
+   what arrives, and a verified `raw` response's MIME type comes from the
+   signed tags.
 
 **What this fixed.** Until 2026-09-12 step 1 hashed the signature and stopped
 there, which is a check on the *signature* and not on the header: a gateway
@@ -66,12 +79,16 @@ id of the DataItem, is the SHA256 digest of this signature."*
   signature, so a second transaction with the same id would be a SHA-256
   collision — but an identifier that was never mined, or was mined under a
   different wallet than the header claims, is not distinguishable from here.)
-- **A header this implementation cannot check** — a format it constructs no
-  payload for, an `owner` that is not an RSA-4096 modulus, a format-1 header
-  served without the data it signed — is reported as `unsupported`: nothing is
-  claimed, `data_root` is not used, the response says `none`. A gateway can
-  therefore always *downgrade* itself to the standing it had before any of this
-  existed; what it cannot do is be believed while lying.
+- **A header this implementation cannot check** — a format other than 1 or 2,
+  an unrecognised `signature_type`, an `owner` that is not an RSA-4096 modulus,
+  a format-1 header served without (or with more than 256 KiB of) the data it
+  signed — is reported as `unsupported`: nothing is claimed, `data_root` is not
+  used, the response says `none`. A gateway can therefore always *downgrade*
+  itself to the standing it had before any of this existed; what it cannot do
+  is be believed while lying. Refusing an unsupported header instead (which the
+  browser did until 2026-09-12) stops no attack — a header gateway reaches the
+  same standing by not answering — and made honest content unopenable, which is
+  why a format-1 transaction was refused outright before it was verified.
 - **The bytes of anything the byte check cannot hold**: a transaction over
   8 MiB, a `Range` request, a manifest path (SPEC §7 hands the path→id mapping
   to the gateway entirely — AR-U1), and a bundled data item, which has no
@@ -91,12 +108,13 @@ step is written before the fetch and cannot know which outcome a body will get,
 so it stays `unverified` and the per-fetch truth lives in `X-Arweave-Verified`
 (SPEC §9.2, AR-U5).
 
-**Status: PARTIALLY IMPLEMENTED.** The header is authenticated and the common
-body is verified. What remains: chunk proofs for bodies above the limit and for
-`Range` requests, verification of a bundled item through its bundle, a bound on
-what is buffered before a length is compared (8 MiB is a *declared*-size
-threshold, not a limit on a hostile response), a client-side manifest reader
-(AR-U1), and the chain read that would anchor `owner` to a mined transaction.
+**Status: PARTIALLY IMPLEMENTED.** The header is authenticated for both
+transaction formats and the common body is verified. What remains: chunk proofs
+for bodies above the limit and for `Range` requests, verification of a bundled
+item through its bundle, a format-1 transaction whose data is larger than the
+256 KiB header read (its data arrives *inside* the header, so the budget is the
+limit), a client-side manifest reader (AR-U1), and the chain read that would
+anchor `owner` to a mined transaction.
 
 ---
 
@@ -294,9 +312,11 @@ knob real.
 1. **Any Electron dependency.** `src/ar.js` is extracted byte-identical — it
    imports `isCanonicalTxid` from the shared pointer module and its two
    siblings `src/ar-merkle.js` and `src/ar-tx.js` (both also byte-identical
-   copies), uses `Response`, `Headers`, `Request`, `Buffer`, `node:crypto` and
-   an injected fetch, and runs unmodified under `node --test`. Nothing had to
-   be factored or stubbed, and no dependency was added for the cryptography.
+   copies; `ar-tx.js` is where the signature verification lives, in **one**
+   place for both trees), uses `Response`, `Headers`, `Request`,
+   `ReadableStream`, `Buffer`, `node:crypto` and an injected fetch, and runs
+   unmodified under `node --test`. Nothing had to be factored or stubbed, and
+   no dependency was added for the cryptography.
 
 2. **The composition layer**, which is Electron-bound and stays in the browser
    tree: the module that injects the proxied `net.fetch` and registers the

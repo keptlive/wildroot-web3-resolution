@@ -241,7 +241,8 @@ The verification story is not prose. It is the sentence the trust model (§10)
 is held to: a row that over-claims becomes a padlock that over-claims, and the
 two are checked against each other by test
 (`tests/namespace-trust.test.js`). Where the honest answer is unflattering the
-row says so — `ar` is "shape only", `ens` is "never green", `gemini` is "none",
+row says so — `ar` says which half of a fetch is checked and which is
+gateway-trusted, `ens` is "never green", `gemini` is "none",
 `did` is "not proven".
 
 `trust` states the same fact as a verdict rather than as a sentence, in the
@@ -287,7 +288,7 @@ not registered at all.
 | `ipns` | `ipfs` | live | trustless | IPNS record + CID | Provisional |
 | `ipld` | `ipfs` | live | trustless | CID | — |
 | `pubsub` | `ipfs` | live | trusted | **libp2p publisher signature** — a topic is not a content address | — |
-| `ar` | `arweave` | partial | trusted | immutable txid — **shape only**, bytes gateway-trusted | Provisional |
+| `ar` | `arweave` | partial | trusted | immutable txid; the signed header and a body under 8 MiB checked per fetch, **the rest gateway-trusted** | Provisional |
 | `ens` | `ens` | partial | trusted | contenthash via a public Ethereum RPC — RPC-trusted, not chain-proven; lock **TRUSTED, never green** | Provisional |
 | `web3` | `web3` | partial | trusted | ERC-4804 EVM read | Provisional |
 | `nostr` | `nostr` | partial | trusted | schnorr signature + event id recomputed locally; relay completeness **not** proven | Provisional |

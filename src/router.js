@@ -110,11 +110,15 @@ export const SCHEME_TABLE = Object.freeze([
   // A topic is a free-form string, not a content address: the only thing a
   // message carries is the publishing peer's libp2p signature.
   { scheme: 'pubsub', namespace: NAMESPACES.IPFS, status: 'live', trust: 'trusted', verify: 'libp2p publisher signature — a topic is not a content address' },
-  // Honest status: the handler validates the txid SHAPE and fetches from a
-  // gateway, but the returned bytes are never checked against the txid's
-  // data_root — the gateway is trusted. 'live' would claim verification the
-  // code does not do (see the header of src/hns/ar.js). BR-6 closes this.
-  { scheme: 'ar', namespace: NAMESPACES.ARWEAVE, status: 'partial', trust: 'trusted', verify: 'immutable txid (shape only — bytes gateway-trusted until BR-6)' },
+  // Honest status: with the header check on, the transaction header is
+  // authenticated against the id (its signature verified over the fields, not
+  // merely hashed — src/hns/ar-tx.js) and a whole raw body under 8 MiB is
+  // checked against the signed data root or, for format 1, the signed data
+  // itself. A larger transaction, a Range, a manifest path, a bundled item
+  // and a header we cannot check stay gateway-trusted, and this row is the
+  // resolution-time claim, written before any fetch — so 'partial', never
+  // 'live'. The per-fetch truth is X-Arweave-Verified. BR-6 closes the rest.
+  { scheme: 'ar', namespace: NAMESPACES.ARWEAVE, status: 'partial', trust: 'trusted', verify: 'immutable txid; signed header + bytes under 8 MiB checked per fetch, the rest gateway-trusted (BR-6)' },
   // Resolves the name's EIP-1577 contenthash over a PUBLIC Ethereum RPC and
   // hands the ipfs/ar pointer to those handlers. 'partial', not 'live': the
   // content is CID-verified but the name->content binding is RPC-trusted (not
