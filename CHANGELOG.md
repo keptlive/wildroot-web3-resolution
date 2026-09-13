@@ -1,5 +1,176 @@
 # Changelog
 
+## 0.10.0
+
+Sync with browser 2.78.40 (`39e5147`). **A setting is not an observation.** The
+content review this repository declined to merge on 2026-09-08
+(`REVIEW-DOCS-REWRITE-2026-09-12.md`) is answered where an answer belongs — in
+the code — and twenty-two modules changed with it. Ten of the review's fourteen
+findings are closed by behaviour; the rest are written down as what is still
+owed (`REVIEW.md`, new). Every chapter that owns one of those modules is
+rewritten to describe what it now does.
+
+- **The panel and the route view stop converting configuration into a claim
+  about a page** (spine `SPEC.md` §4, §4.1, §4.2; Chapter 2 §6.1–§6.4;
+  `src/trust-path.js`, `src/route-path.js`, `src/odoh-bridge.js`,
+  `namespaces/icann/src/dns-policy.js`). Chromium resolves an `http(s)` host
+  itself, from its own cache, out of this process's sight, so every ICANN name
+  step is now `unverified` and names the configuration as configuration — the
+  fail-closed plan included, which is a configured refusal of *new* lookups and
+  never an observed failure — and the route hop is a new value, `unknown`, in
+  every branch. One `unknown` hop decides the route summary. The oblivious
+  claim survives only as **evidence**: `recentEvidence()` records the exact
+  host answered, the relay and target that actually answered it, the query
+  type, a sequence number so a late older query cannot overwrite a newer
+  result, and only rcode 0 or 3; the subdomain match that let one
+  attacker-chosen name vouch for `example.com` and for `com` is gone, and the
+  wording says a lookup happened, not that this page used it. A content step
+  is `verified` only against a result bound to that exact request
+  (`ensContentStep()`), and `summarize()` drops a step only when it is marked
+  explicitly inapplicable — a missing protection still weakens the verdict.
+  New: `IC-17`, `IC-18`, `IC-19`, `IC-D5`, §2.11, `EN-8`.
+- **An ODoH reply is bound to its question before it is an answer** (Chapter 2
+  §5.3; `src/odoh-bridge.js` `dnsEnvelope()`). HPKE authenticates the transport
+  bytes, not their DNS meaning. The bridge now parses both packets: one
+  question, a frame with no trailing bytes, compression pointers that cannot
+  loop, the 255-octet name limit, QR set, no truncation or reserved flags, and
+  the reply's id, name (compared as case-folded label bytes, not decoded text),
+  type and class equal to the query's. Anything else is a SERVFAIL that also
+  masks the success before it. RFC 1035 §4.1.1/§4.1.2/§4.1.4, RFC 4343 and
+  RFC 9230 cited per rule; `tests/odoh-bridge.test.js` sweeps fifteen ways to
+  miss the binding and `namespaces/icann/tests/odoh-evidence.test.js` pins the
+  consequence for the panel.
+- **Every `TXT` answer on a signed zone is authenticated before it is read**
+  (Chapter 1 §6.5e; `src/resolver.js` `_validatedTxtAnswer()`). The old rule
+  validated the RRset only when it parsed as a content pointer and demanded an
+  authenticated denial only when nothing answered at all, so a non-pointer
+  TXT — an SPF record, a verification token — took neither check and an
+  unsigned one could suppress a signed `ipfs=` pointer and walk the browser
+  down to an address record. One rule now covers the name's TXT and its
+  `_dnslink` alike: NOERROR or NXDOMAIN only; TXT and CNAME may not coexist at
+  one owner (RFC 2181 §10.1); a present RRset validates to the on-chain DS or
+  fails closed; a CNAME is validated as type 5 over its RFC 4034 §6.2 wire
+  name and then followed, one alias per owner, eight owners deep, no loops,
+  with a cross-zone or delegated target refused rather than walked under this
+  zone's keys; and nothing at the owner is proven absent (RFC 4035 §5.4). New:
+  `HS-17`, `HS-18`, §2.8.
+- **A DNSLink path takes part in the comparison** (Chapter 1 §10.1;
+  `src/pointers.js` `mergePointers()`). `ipfs=<cid>` beside
+  `dnslink=/ipfs/<cid>/subdir` was judged the same pointer and the path was
+  dropped. Absent and `/` both name the root; every other path must match
+  exactly, and a difference is a reported conflict naming each pointer with its
+  path. Nothing is percent-decoded or normalised before the comparison,
+  deliberately, because the spelling selects the content (`HS-19`).
+- **One IPFS node, two schemes** (Chapter 3 §3, §4.2, §12.5; Part II §4.2,
+  §10.2; spine §2, §5; `src/router.js`, `src/trust-path.js`,
+  `src/route-path.js`). `ipld://` and `pubsub://` are retired with the second
+  daemon the browser dropped in 2.78.39: `ipfs://` and `ipns://` are served by
+  the one node Handshake names already use, and an `ipns://` name is resolved
+  **on the node** — never by trusting a gateway's answer — which is where IP-3's
+  rule now meets a reader. The scheme table is 30 rows over 18 namespaces; the
+  `libp2p/pubsub`, `ipns-pubsub-router` and `js-ipfs-fetch` reference rows go
+  with the schemes they described. Part II also separates the three stages an
+  address passes through, so L1 ("an explicit scheme is authoritative") is
+  scoped to classification and the browser's own HTTP(S) adaptation is named as
+  the earlier stage it is (`RT-14`).
+- **What the warmer remembers, and for how long** (Chapter 3 §8.3; new
+  `namespaces/ipfs/src/block-presence.js`, the 74th copied module). The node
+  garbage-collects unpinned blocks, so an imported archive or window is trusted
+  for five minutes and then re-confirmed with one offline block lookup of the
+  root; a missing root forgets the CID and every slice under it. Without it a
+  collected archive is answered "present" for the life of the process — and in
+  Private, where the node is offline and cannot re-fetch, the site simply stops
+  loading (`IP-12`). `fileCid()` also gained an `onBlock` sink and there is a
+  new `directoryNode()`; neither changes a CID.
+- **Consent covers both magnet forms** (Chapter 9 §K.7.4, §K.7.5;
+  `namespaces/keys/src/magnet-protocol.js`). A `xs=urn:btpk:` magnet reached
+  `bittorrent://<key>` without asking. Both forms now land on the confirmation
+  page, and the handler applies the same rewrite itself, so a redirect or a
+  subresource that arrives without the navigation rewrite cannot reach a
+  peer-backed URL either (`KY-5`, `KY-10` rewritten; `KY-12` new for a
+  malformed `xs` still refused by the wrong name).
+- **An onion redirect may not drop TLS** (Chapter 8 §5, §6.5;
+  `namespaces/tor/src/onion-protocol.js`). `onion://` carries HTTP inside Tor,
+  so a same-service redirect to `https:` is refused with a 501 rather than
+  re-encoded — which would lose the TLS and, after URL normalisation, an
+  explicit `:443`. An HTTPS-only onion service is therefore unreachable here,
+  recorded as the limitation it is (`TO-8`, `TO-D6`).
+- **A route that stops existing is revoked** (Chapter 8 §3.1, §7.3, §7.7;
+  `namespaces/tor/src/tor.js`, `anonymize.js`, `subresource-guard.js`). A dead,
+  exited or never-bootstrapped Tor emits `route-unavailable` once a route was
+  actually offered, and the controller re-enters its blackhole immediately;
+  handlers are bound to their own child so a superseded one cannot clear the
+  current route; every `await` in `setMode()` is followed by a sequence check;
+  and `torSocks()` returns null during the interval between "Tor was asked for"
+  and "the session proxy is installed", which `isSwitchingToTor()` names for
+  the raw-socket paths. The single `onBeforeRequest` listener now also
+  dispatches `ws:`/`wss:` to an injected policy, and a policy that throws fails
+  closed.
+- **Ordinary WebSockets follow the privacy route** (Chapter 11 §4.6;
+  `namespaces/apps/src/ws-proxy-pac.js`). The PAC returned `DIRECT` for every
+  non-Handshake `ws:`/`wss:` target even when its base directive was Tor. It
+  now falls through to the base route, and a rule or port it cannot represent
+  throws instead of degrading to a direct one.
+- **The tunnel's claims, narrowed** (Chapter 11 §4.2–§4.5, §7, §8;
+  `namespaces/apps/src/ws-proxy.js`, `src/socks-dial.js`). Loopback is a device
+  boundary that authenticates no requesting application; port 443 is this
+  profile's `_443._tcp` lookup and a destination restriction, not a TLS or pin
+  guarantee (the certificate check is the engine's, and the proxy is an opaque
+  pipe); dialling by address keeps the name out of the SOCKS request but not
+  out of the ClientHello, so the exit still sees it (`AP-8`, and the same
+  correction in Chapter 1 §8.1 and `DIVERGENCE.md` row 24); no stream isolation
+  is requested, so which circuit a dial gets is Tor's decision and is not
+  observed here; and the HTTP/2 advice is versioned, because RFC 8441 defines
+  extended CONNECT. `AP-D1`'s recommendation is corrected: Chromium documents
+  `<-loopback>` as *removing* the implicit bypass, and in the tested build it
+  had no effect under a PAC at all. The tunnel also gained bounded resources
+  and real statuses — `WS_LIMITS`, a per-connection abort, a generation counter
+  that tears down pending work and established streams on a mode switch, and
+  504 on a timeout / 503 when too many operations are pending / 502 otherwise.
+- **"No resolver" is not "not registered"** (Chapter 5 §5.6, §7;
+  `namespaces/ens/src/ens-protocol.js`). A revert answers about the resolver.
+  The page now says the name has no usable resolver and that this establishes
+  nothing about registration, instead of telling the holder of a registered
+  name that it does not exist.
+- **The local DID methods validate the key material** (Chapter 7 §5.1a, §5.1b;
+  `namespaces/did/src/did-local.js`). Canonical multicodec varints, a capped
+  identifier, RSA that re-exports to the same PKCS#1 DER, Ed25519 points that
+  are valid, non-small-order and torsion-free, an X25519 low-order probe,
+  compressed points OpenSSL accepts, and a `did:jwk` that must round-trip as
+  unpadded base64url and survive `createPublicKey`. None of it proves anyone
+  holds the private key or controls the account, and the step says so
+  (`DI-12`).
+- **Versioned atproto receipts** (Chapter 7 §9.3;
+  `namespaces/did/src/receipt.js`). A verifier takes the version from the
+  receipt and never retries another after a failed signature. Version 1 keeps
+  its lowercase preimage exactly, for the receipts already deployed; version 2
+  canonicalises per method — a `did:web` domain folds, its path segments do
+  not — and signing a `did:web` path binding at version 1 is refused outright
+  (`DI-13`, `DI-14`).
+- **`REVIEW.md`** (new) — the review's open findings, re-checked against this
+  code: what is closed and where, and what is still owed (the measurements no
+  fixture test can stand in for, the evidence channel this repository does not
+  specify, v1 receipts, the tunnel's remaining boundaries, ActivityPub, `w3://`
+  and the document-versioning question). **`REVIEW-DOCS-REWRITE-2026-09-12.md`**
+  (new) — why the 2026-09-08 documentation rewrite was not merged, and the rule
+  a future prose pass is held to: the entry schema, the normative citations,
+  the `§` and `src/file.js:123` pointers and the counts may not be removed.
+- Deviation ledger — **added**: `HS-17`, `HS-18`, `HS-19`, `IC-17`, `IC-18`,
+  `IC-19`, `IC-D5`, `IP-12`, `RT-14`, `EN-8`, `DI-12`, `DI-13`, `DI-14`,
+  `TO-8`, `TO-D6`, `KY-12`, `AP-8`, and the uncertainties Chapter 1 §2.8,
+  Chapter 2 §2.11, Chapter 8 §2.8, Chapter 9 §2.8. **Changed**: `HS-1`, `HS-3`,
+  `HS-9`, `HS-D1`, `IC-4`, `IC-6`, `IC-7`, `IC-15`, §2.4, §2.5, `IP-3`, `IP-5`,
+  `IP-6`, `IP-8`, `IP-9`, `IP-10`, `IP-D8`, `RT-3`, `RT-4`, `RT-5`, `RT-6`,
+  `RT-8`, `RT-10`, `RT-12`, `RT-D1`, `RT-D4`, `EN-7`, `DI-2`, `KY-5`, `KY-10`,
+  `AP-2` (DELIBERATE → OPEN), `AP-4`, `AP-7`, `AP-D1`, `AP-D8`, `AP-D9`.
+  **Deleted**: Chapter 3's open item on `js-ipfs-fetch`'s `ipld://` and
+  `pubsub://` semantics, with the schemes it described. Twenty-seven stale
+  `src/file.js:123` pointers corrected in Chapter 8 alone — among them the
+  `.onion`-first classifier, which is `src/classify-host.cjs:116-119`.
+- 1058 deterministic tests in 11 suites (90 files), no network; 74 modules
+  byte-identical with the browser tree and 8 declared factored; 268 numbered
+  entries in the consolidated `DEVIATIONS.md`.
+
 ## 0.9.0
 
 Sync with browser 2.78.39 (`cb633bb`): **one** Arweave transaction verifier.

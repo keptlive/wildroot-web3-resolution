@@ -10,10 +10,8 @@
 // applied through the AnonymizeController's decorator, so there is a single
 // proxy authority.
 //
-// The directive carries NO credential: Chromium ignores `user:pass@` in PAC
-// strings (and cannot authenticate to SOCKS5 at all). The proxy's per-session
-// credential is supplied by main through Electron's app 'login' event when
-// the proxy answers 407 — see src/index.js.
+// The directive carries no credential: this browser's WebSocket CONNECT path
+// cannot answer a proxy-auth challenge. The listener is loopback-only.
 //
 // The host rule MIRRORS classifyHost (src/protocols/router.js): a bare label
 // or non-ICANN / numeric TLD is Handshake; ICANN TLDs, IP literals, .eth and
@@ -24,22 +22,26 @@ import reserved from '../../../src/reserved-names.cjs'
 
 const { NEVER_HNS_TLDS } = reserved
 
-/** Turn the anonymizer's proxyRules ('socks5://host:port' or null) into a PAC
- *  directive for all non-ws traffic. */
+/** Turn the anonymizer's rules into the base route, including ordinary WS. */
 export function rulesToPacDirective (rules) {
   if (!rules) return 'DIRECT'
-  const m = /^socks5?:\/\/([^/]+)$/i.exec(String(rules))
-  return m ? `SOCKS5 ${m[1]}` : 'DIRECT'
+  const m = /^socks5?:\/\/(\[[0-9a-f:]+\]|[a-z0-9.-]+):(\d{1,5})\/?$/i.exec(String(rules))
+  if (!m || Number(m[2]) < 1 || Number(m[2]) > 65535) throw new Error('Unsupported WebSocket base proxy rule')
+  return `SOCKS5 ${m[1]}:${m[2]}`
 }
 
 /** Build the PAC script. `icannTlds` is the Set from ui/icann-tlds.cjs. */
 export function buildWsPac (icannTlds, { port, baseDirective = 'DIRECT', numericNames = false }) {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid WebSocket proxy port')
+  if (typeof baseDirective !== 'string' || !/^(?:DIRECT|SOCKS5 (?:\[[0-9a-f:]+\]|[a-z0-9.-]+):\d{1,5})$/i.test(baseDirective)) throw new Error('Unsupported WebSocket base proxy directive')
   const tlds = JSON.stringify(Object.fromEntries([...icannTlds].map((t) => [t, 1])))
   // Numeric Handshake names are a switch (src/hns/classify-host.cjs); the PAC
   // copy of the rule takes the same answer.
   const numeric = numericNames ? 'true' : 'false'
   // The reserved-name list (src/hns/reserved-names.cjs) is embedded the same
-  // way, so `nas.local` stays direct for the same reason `localhost` does.
+  // way, so `nas.local` is never sent to a Handshake resolver. In Private it
+  // follows the base proxy too. Chromium's implicit loopback bypass is gated
+  // separately by localWsPolicy, with a same-origin running Local App exception.
   const reserved = JSON.stringify(Object.fromEntries([...NEVER_HNS_TLDS].map((t) => [t, 1])))
   const socks = `PROXY 127.0.0.1:${port}`
   return `var ICANN = ${tlds};
@@ -60,7 +62,7 @@ function _isHns(h){
 }
 function FindProxyForURL(url, host){
   if(url.substring(0,4) === 'wss:' || url.substring(0,3) === 'ws:'){
-    return _isHns(host) ? '${socks}' : 'DIRECT';
+    if(_isHns(host)) return '${socks}';
   }
   return '${baseDirective}';
 }`

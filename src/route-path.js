@@ -25,11 +25,11 @@
  *   refused    not done in this mode, and nothing was sent instead
  */
 
-/** @typedef {{label: string, route: 'local'|'oblivious'|'tor'|'direct'|'refused', source: string, detail: string, alt: string}} Hop */
+/** @typedef {{label: string, route: 'local'|'oblivious'|'tor'|'direct'|'refused'|'unknown', source: string, detail: string, alt: string}} Hop */
 
 const hop = (label, route, source, detail, alt) => ({ label, route, source, detail, alt })
 
-const CONTENT_PEERS = new Set(['ipfs', 'ipns', 'ipld'])
+const CONTENT_PEERS = new Set(['ipfs', 'ipns'])
 const P2P = new Set(['bittorrent', 'hyper', 'ssb'])
 
 function hostOf (url) {
@@ -185,8 +185,6 @@ export function schemeRoute (url, dns = null, bridge = null, extra = {}) {
       return [icannNameHop(host, dns, bridge, priv), connection(protocol === 'http' ? 'Plain HTTP' : 'HTTPS')]
     case 'ipfs':
     case 'ipns':
-    case 'ipld':
-    case 'pubsub':
       return [priv || tor
         ? hop('Content', 'refused', 'Content-network peers not asked',
           'Asking peers would show them this computer\'s address and what it wants, so it was not done.',
@@ -235,28 +233,18 @@ export function schemeRoute (url, dns = null, bridge = null, extra = {}) {
 
 function icannNameHop (host, dns, bridge, priv) {
   if (bridge && bridge.live) {
-    return hop('Domain name', 'oblivious',
-      `Oblivious DoH — relay ${bridge.relay || '(configured relay)'} → target ${bridge.target || 'odoh.hns.one'}`,
-      `The relay saw this computer's address and only ciphertext; the target saw ${host} and only the relay.`,
-      priv ? 'Fast takes the same route when the bridge answers, and may fall back to an encrypted resolver.' : 'In Private this is the only route: nothing else is asked.')
+    return hop('Domain name', 'unknown',
+      'Recent ODoH activity — relay ' + (bridge.relay || '(not recorded)') + ' → target ' + (bridge.target || '(not recorded)'),
+      'The bridge answered this exact hostname recently. This records a lookup, not the DNS route or cache used by this page.',
+      'Private requires secure DNS. Browser network observations are needed to verify this navigation.')
   }
   const mode = (dns && dns.mode) || 'automatic'
-  if (dns && dns.oblivious && mode === 'secure') {
-    return hop('Domain name', 'oblivious', 'Oblivious bridge only — this answer may have come from the engine\'s cache',
-      `Only the oblivious bridge could have resolved ${host}; unencrypted DNS is refused.`,
-      'In Fast an encrypted resolver may answer instead, and sees the name with this computer\'s address.')
-  }
   const servers = (dns && dns.servers) || []
-  if (!servers.length || mode === 'off') {
-    return hop('Domain name', 'direct', 'System DNS, unencrypted',
-      `${host} went out in the clear: the router, the ISP and anyone on the path saw the name with this computer's address.`,
-      'In Private the name is looked up only through the oblivious bridge.')
-  }
-  let label = servers[0]
-  try { label = new URL(servers[0]).host } catch {}
-  return hop('Domain name', 'direct', `Encrypted DNS to ${label}`,
-    `Encrypted in transit, but ${label} saw this computer's address and ${host} together.`,
-    'In Private the name is looked up only through the oblivious bridge, which splits the two.')
+  return hop('Domain name', 'unknown',
+    mode === 'secure' ? 'Secure DNS configured — no matching lookup recorded' : mode === 'off' ? 'System DNS configured — lookup not recorded' : 'Automatic DNS configured — lookup not recorded',
+    'No request-specific DNS evidence is available for ' + host + '. ' +
+      (servers.length ? 'Configured endpoints: ' + servers.join(', ') + '.' : 'An empty endpoint list alone does not establish the route used.'),
+    priv ? 'Private requires secure DNS without plaintext fallback.' : 'Automatic mode can use fallback; configuration alone does not show which path answered.')
 }
 
 /**
@@ -271,7 +259,9 @@ export function summarizeRoute (mode, steps) {
   const direct = steps.filter((s) => s.route === 'direct')
   const refused = steps.filter((s) => s.route === 'refused')
   let summary
-  if (direct.length) {
+  if (steps.some(s => s.route === 'unknown')) {
+    summary = 'Some route details were not recorded; this view cannot establish every party that saw this page request.'
+  } else if (direct.length) {
     summary = direct.length === steps.length
       ? 'Every step showed someone this computer\'s address.'
       : `${direct.length} of ${steps.length} steps showed someone this computer's address: ${direct.map((s) => s.label.toLowerCase()).join(', ')}.`

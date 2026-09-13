@@ -1,13 +1,13 @@
 /*
- * "Not registered" versus "we could not ask" — SPEC §5.6.
+ * "The chain answered" versus "we could not ask" — SPEC §5.6.
  *
  * The rule that decides which *sentence* a failure produces is the most
- * consequential one in the namespace. A 404 reading "<name> is not registered"
- * is a claim about the chain's answer; showing it because our RPC list was
- * down is a false statement about a fact we never obtained. An error is an
- * ANSWER only when it carries revert data; everything else — no RPC reachable,
- * a CCIP gateway that does not answer, a result that will not decode — is
- * `unreachable`, served 502.
+ * consequential one in the namespace. A 404 is a claim about the chain's
+ * answer; showing one because our RPC list was down states a fact we never
+ * obtained. An error is an ANSWER only when it carries revert data, and what
+ * it answers is about the RESOLVER — never about registration or ownership.
+ * Everything else — no RPC reachable, a CCIP gateway that does not answer, a
+ * result that will not decode — is `unreachable`, served 502.
  *
  * Everything here runs offline against a stub RPC.
  */
@@ -70,7 +70,7 @@ test('every RPC failing is 502 "unknown, not absent" — never a 404 about the n
     'each endpoint gets its own attempt, or a list of two is worth one')
   const body = await res.text()
   assert.match(body, /unknown — not absent/)
-  assert.doesNotMatch(body, /not registered|has no website/)
+  assert.doesNotMatch(body, /not registered|usable resolver|has no website/)
   assert.equal(res.headers.get('X-Resolution-Namespace'), 'ens')
 })
 
@@ -104,25 +104,32 @@ test('a revert is an ANSWER: the first endpoint\'s revert ends the lookup', asyn
   assert.deepEqual(tried, ['http://rpc-a.test'], 'the second endpoint must not be asked')
 })
 
-test('WHICH revert decides the sentence: no resolver ≠ no contenthash', async () => {
-  const notFound = await handlerWith(reverting(RESOLVER_NOT_FOUND))(new Request('ens://nothing.eth/'))
-  assert.equal(notFound.status, 404)
-  assert.match(await notFound.text(), /is not registered/)
+test('WHICH revert decides the sentence: no usable resolver ≠ no contenthash', async () => {
+  const noResolver = await handlerWith(reverting(RESOLVER_NOT_FOUND))(new Request('ens://nothing.eth/'))
+  assert.equal(noResolver.status, 404)
+  const resolverBody = await noResolver.text()
+  assert.match(resolverBody, /has no usable resolver/)
+  // The revert answers a question about the RESOLVER. A registered name whose
+  // owner never set one reverts identically, so the page must not turn the
+  // answer into a claim about registration.
+  assert.match(resolverBody, /does not establish whether the name is registered/)
+  assert.doesNotMatch(resolverBody, /is not registered/)
 
-  // A resolver that does not implement contenthash: the name EXISTS and simply
-  // has no website. Saying "not registered" about it tells someone their own
-  // name does not exist.
+  // A resolver that does not implement contenthash: the resolver answered and
+  // simply has no website to offer.
   const noProfile = await handlerWith(reverting(UNSUPPORTED_PROFILE))(new Request('ens://wallet-only.eth/'))
   assert.equal(noProfile.status, 404)
   const body = await noProfile.text()
   assert.match(body, /has no website/)
-  assert.doesNotMatch(body, /is not registered/)
+  assert.doesNotMatch(body, /is not registered|usable resolver/)
 })
 
-test('an unknown revert selector is "no website", not "not registered"', async () => {
+test('an unknown revert selector is "no website", never a resolver or registration claim', async () => {
   const res = await handlerWith(reverting('0xdeadbeef' + '00'.repeat(32)))(new Request('ens://x.eth/'))
   assert.equal(res.status, 404)
-  assert.match(await res.text(), /has no website/)
+  const body = await res.text()
+  assert.match(body, /has no website/)
+  assert.doesNotMatch(body, /is not registered|usable resolver/)
 })
 
 test('a CCIP-Read lookup whose gateway never answers is 502, not "has no website"', async () => {
@@ -145,7 +152,7 @@ test('a CCIP-Read lookup whose gateway never answers is 502, not "has no website
     return ok({ jsonrpc: '2.0', id: 1, error: { code: 3, data: revert } })
   })(new Request('ens://offchain.eth/'))
   assert.equal(res.status, 502)
-  assert.doesNotMatch(await res.text(), /has no website|not registered/)
+  assert.doesNotMatch(await res.text(), /has no website|usable resolver|not registered/)
 })
 
 test('a well-formed answer that will not decode is 502, never a claim about the name', async () => {
@@ -154,7 +161,7 @@ test('a well-formed answer that will not decode is 502, never a claim about the 
   const res = await handlerWith(async () => ok({ jsonrpc: '2.0', id: 1, result: '0x1234' }))(
     new Request('ens://vitalik.eth/'))
   assert.equal(res.status, 502)
-  assert.doesNotMatch(await res.text(), /has no website|not registered/)
+  assert.doesNotMatch(await res.text(), /has no website|usable resolver|not registered/)
 })
 
 // ---------------------------------------------------------------------------

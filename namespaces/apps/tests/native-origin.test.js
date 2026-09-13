@@ -17,7 +17,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import net from 'node:net'
 
-import { WsProxy, parseConnectHead, parseAuthority, basicCredential } from '../src/ws-proxy.js'
+import { WsProxy, WS_LIMITS, parseConnectHead, parseAuthority, basicCredential } from '../src/ws-proxy.js'
 import { buildWsPac, rulesToPacDirective } from '../src/ws-proxy-pac.js'
 import { isHnsHost } from '../../../src/hns-host.js'
 import icannTlds from '../../../src/icann-tlds.cjs'
@@ -40,14 +40,33 @@ function pacRunner ({ baseDirective = 'DIRECT', tlds = icannTlds } = {}) {
 
 // ------------------------------------------------------------------ the PAC
 
-test('the PAC sends wss:// to a Handshake host through the tunnel, everything else DIRECT', () => {
+test('the PAC sends wss:// to a Handshake host through the tunnel, everything else to the base route', () => {
   const pac = pacRunner()
   for (const host of ['pxls', 'matt.w3', 'hnshosting', 'foo.bar.baz', 'PXLS', 'pxls.']) {
     assert.equal(pac.wss(host), PROXY, `${host} is a Handshake host`)
   }
   for (const host of ['example.com', 'sub.example.co.uk', 'vitalik.eth', 'expyuzz4wqqyqhjn.onion']) {
+    // With the base directive DIRECT (Fast mode), "not the tunnel" reads as
+    // DIRECT — it is the base route, which here happens to be direct.
     assert.equal(pac.wss(host), 'DIRECT', `${host} is not Handshake and must not reach the tunnel`)
   }
+})
+
+test('a non-Handshake WebSocket follows the base privacy route, never DIRECT', () => {
+  // SPEC §4.6: the ws/wss branch selects the tunnel for a Handshake host and
+  // otherwise falls THROUGH to the base directive. A PAC that answered DIRECT
+  // here would route wss://example.com/ out of the machine while
+  // https://example.com/ rode Tor — the mode the user selected, contradicted
+  // by one scheme.
+  const on = pacRunner({ baseDirective: TOR })
+  for (const host of ['example.com', 'sub.example.co.uk', 'vitalik.eth', 'expyuzz4wqqyqhjn.onion', 'localhost', 'nas.local', '127.0.0.1', '[::1]']) {
+    assert.equal(on.wss(host), TOR, `wss://${host} must take the base privacy route`)
+    assert.equal(on.ws(host), TOR, `ws://${host} must take the base privacy route`)
+    assert.equal(on.https(host), TOR, 'and it must be the same route the rest of the session uses')
+  }
+  // The Handshake WebSocket is the only exception, in either mode.
+  assert.equal(on.wss('pxls'), PROXY)
+  assert.equal(pacRunner({ baseDirective: 'DIRECT' }).wss('pxls'), PROXY)
 })
 
 test('the PAC treats a numeric TLD as Handshake in both its name and its URL form', () => {
@@ -106,7 +125,7 @@ test('every non-WebSocket URL gets the anonymizer’s own directive, unchanged',
   assert.equal(on.wss('pxls'), PROXY)
 })
 
-test('the PAC routes plaintext ws:// to the tunnel too (AP-1)', () => {
+test('the PAC routes plaintext ws:// to the tunnel too (SPEC §4.6)', () => {
   // Pinned as the CURRENT behaviour, not as a desired one: no secure hns://
   // page can produce a ws:// (the renderer blocks it), but a non-secure page
   // can, and this rule would splice it in the clear with no certificate gate.
@@ -123,11 +142,39 @@ test('the PAC never embeds a credential in a proxy directive', () => {
 })
 
 test('rulesToPacDirective maps the anonymizer’s rules to a directive', () => {
-  assert.equal(rulesToPacDirective(null), 'DIRECT')
+  assert.equal(rulesToPacDirective(null), 'DIRECT', 'no rules is the anonymizer being off, not a malformed rule')
   assert.equal(rulesToPacDirective(''), 'DIRECT')
   assert.equal(rulesToPacDirective('socks5://127.0.0.1:9150'), 'SOCKS5 127.0.0.1:9150')
   assert.equal(rulesToPacDirective('socks://127.0.0.1:9150'), 'SOCKS5 127.0.0.1:9150')
-  assert.equal(rulesToPacDirective('http://proxy.example:8080'), 'DIRECT', 'an unrecognised rule is never guessed at')
+  assert.equal(rulesToPacDirective('socks5://[::1]:9150/'), 'SOCKS5 [::1]:9150', 'an IPv6 literal keeps its brackets')
+})
+
+test('a rule the generator cannot represent THROWS; it never degrades to DIRECT', () => {
+  // SPEC §4.6: a malformed rule that became DIRECT would produce a PAC that is
+  // valid, installs cleanly, and routes a Private-mode session straight out of
+  // the machine. Nothing downstream can detect that; a throw fails closed at
+  // the caller composing the proxy configuration.
+  for (const rules of [
+    'http://proxy.example:8080', // not SOCKS at all
+    'socks5://127.0.0.1', // no port
+    'socks5://127.0.0.1:0', // port out of range
+    'socks5://127.0.0.1:70000',
+    'socks5://127.0.0.1:9150 direct://', // a rules LIST, not one proxy
+    'socks5://user:pass@127.0.0.1:9150', // a credential the engine would drop
+    'socks5://not a host:9150'
+  ]) {
+    assert.throws(() => rulesToPacDirective(rules), /Unsupported WebSocket base proxy rule/, rules)
+  }
+})
+
+test('buildWsPac refuses a port or a base directive it cannot represent', () => {
+  for (const port of [0, 70000, 1.5, '4444', null]) {
+    assert.throws(() => buildWsPac(icannTlds, { port }), /Invalid WebSocket proxy port/, String(port))
+  }
+  for (const baseDirective of ['PROXY evil.example:80 ; DIRECT', 'SOCKS5 127.0.0.1', 'SOCKS5 user:pass@127.0.0.1:9150', '', null]) {
+    assert.throws(() => buildWsPac(icannTlds, { port: PORT, baseDirective }), /Unsupported WebSocket base proxy directive/, String(baseDirective))
+  }
+  assert.match(buildWsPac(icannTlds, { port: PORT, baseDirective: TOR }), /return 'SOCKS5 127\.0\.0\.1:9050'/)
 })
 
 // ------------------------------------------------------------- head parsing
@@ -183,6 +230,7 @@ function connect (t, port, target) {
       const [line, ...hs] = buf.slice(0, at).split('\r\n')
       const m = /^HTTP\/1\.1 (\d{3}) (.*)$/.exec(line)
       resolve({
+        sock,
         status: Number(m && m[1]),
         reason: m && m[2],
         headers: Object.fromEntries(hs.map((h) => { const i = h.indexOf(':'); return [h.slice(0, i).toLowerCase(), h.slice(i + 1).trim()] })),
@@ -238,6 +286,82 @@ test('a resolver failure is 502, and nothing is dialed', async (t) => {
   const res = await connect(t, proxy.port, 'pxls:443')
   assert.equal(res.status, 502)
   assert.equal(dialed.length, 0)
+})
+
+test('a resolution that never answers is 504, and the next request is 503', async (t) => {
+  // SPEC §4.5.2: the three gateway statuses are three different facts about
+  // the tunnel and a reimplementation must not collapse them. A resolver that
+  // never settles gives both deterministically: the first request exceeds its
+  // deadline (504), and because a cancelled operation keeps its slot until the
+  // underlying work actually settles (§4.5.3), the next request meets the
+  // pending limit (503) rather than starting a second unbounded lookup.
+  const dialed = []
+  const proxy = await startProxy(t, {
+    resolver: { resolve: () => new Promise(() => {}) },
+    dial: async (...a) => { dialed.push(a); throw new Error('should not dial') },
+    limits: { resolveTimeout: 50, maxPending: 1 }
+  })
+
+  const first = await connect(t, proxy.port, 'pxls:443')
+  assert.equal(first.status, 504, 'a resolution past its deadline is a gateway timeout')
+  await first.closed
+
+  const second = await connect(t, proxy.port, 'pxls:443')
+  assert.equal(second.status, 503, 'at the pending limit the tunnel says so, rather than guessing 502')
+  assert.equal(dialed.length, 0, 'neither request reached a dial')
+})
+
+test('a limit above the built-in maximum is refused, and a second start is refused', async (t) => {
+  // The limits of WS_LIMITS are maxima, not defaults: a deployment may lower
+  // one, never raise it (SPEC §4.5.3).
+  const resolver = stubResolver({ kind: 'unregistered' })
+  assert.throws(() => new WsProxy({ resolver, limits: { maxConnections: WS_LIMITS.maxConnections + 1 } }), /invalid maxConnections limit/)
+  assert.throws(() => new WsProxy({ resolver, limits: { resolveTimeout: 0 } }), /invalid resolveTimeout limit/)
+  assert.throws(() => new WsProxy({ resolver, limits: { dialTimeout: 1.5 } }), /invalid dialTimeout limit/)
+  assert.throws(() => new WsProxy({ resolver, limits: { nonsense: 1 } }), /invalid nonsense limit/)
+  const lowered = new WsProxy({ resolver, limits: { maxConnections: 4 } })
+  assert.equal(lowered.limits.maxConnections, 4, 'lowering is allowed')
+  assert.equal(lowered.limits.maxPending, WS_LIMITS.maxPending, 'the rest keep the built-in value')
+
+  const proxy = await startProxy(t, { resolver })
+  await assert.rejects(() => proxy.start(), /already started/, 'one listener, or the port in the PAC stops being the port that is bound')
+})
+
+test('a change of privacy mode revokes the sockets made on the old route', async (t) => {
+  // SPEC §4.5.4: a spliced CONNECT is not in the engine's connection pool, so
+  // nothing else tears it down. A socket opened in Fast mode must not keep
+  // sending over its direct route once the user has switched to Private.
+  const echo = net.createServer((s) => s.pipe(s))
+  await new Promise((resolve) => echo.listen(0, '127.0.0.1', resolve))
+  t.after(() => echo.close())
+  const upstreams = []
+
+  let anonymized = false
+  const proxy = await startProxy(t, {
+    resolver: stubResolver({ kind: 'site', address: '93.184.216.34', tlsa: [] }),
+    isAnonymized: () => anonymized,
+    dial: async () => {
+      const s = net.connect(echo.address().port, '127.0.0.1')
+      // Watch for the close now: after the revocation it may already have
+      // happened, and a listener added then would wait for an event that is
+      // in the past.
+      upstreams.push({ socket: s, closed: new Promise((resolve) => s.once('close', resolve)) })
+      await new Promise((resolve, reject) => { s.once('connect', resolve); s.once('error', reject) })
+      return s
+    }
+  })
+
+  const res = await connect(t, proxy.port, 'pxls:443')
+  assert.equal(res.status, 200, 'established on the Fast route')
+  assert.equal(upstreams.length, 1)
+
+  anonymized = true // the user switches to Private
+  proxy.refreshPolicy()
+
+  await res.closed
+  assert.equal(res.sock.destroyed, true, 'the client end of the tunnel is gone')
+  await upstreams[0].closed
+  assert.equal(upstreams[0].socket.destroyed, true, 'and so is the established TCP stream it was spliced to')
 })
 
 test('the tunnel refuses to be constructed without a resolver', () => {

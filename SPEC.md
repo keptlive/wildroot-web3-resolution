@@ -110,8 +110,8 @@ answers "what does this address mean, and how sure are we?" and stops there.
 ## 2. Terminology
 
 - **Namespace** — a distinct address space with its own root of trust. Two
-  schemes may share one namespace (`ipfs://`, `ipns://`, `ipld://` and
-  `pubsub://` are all IPFS). Failures never cross a namespace boundary (§3).
+  schemes may share one namespace (`ipfs://` and `ipns://` are both IPFS).
+  Failures never cross a namespace boundary (§3).
 - **Scheme** — the token before the first `:` of an explicit URL. The registry
   (§5) maps every scheme this implementation dispatches to exactly one
   namespace.
@@ -192,6 +192,25 @@ rules are these.
   which relay set, which gateway), and an oblivious lookup MUST be
   distinguished from a plain one, so that the interface can say who saw the
   question.
+- **A setting is not an observation.** A step describes what happened to *this*
+  request. Where an implementation cannot see the event — an `http(s)` host
+  resolved by the engine's own resolver and its own cache, a content check that
+  happens after resolution — it **MUST** say which configuration was in force
+  and that the path was not observed, and **MUST NOT** convert that
+  configuration into a claim about the page. "Secure DNS is configured with no
+  resolver to point at" is a statement about the setting; "this name was
+  refused" is a statement about an event that was not witnessed, and a cached
+  answer may have served the page. Evidence recorded for one request never
+  carries to another: an implementation that grades a step from a handler's
+  result **MUST** bind that result to the exact request (`ensContentStep` in
+  `src/trust-path.js` is the reference: same URL, `ok`, a known protocol, and
+  a byte check that actually completed).
+- **Recent activity is not provenance.** A record that some component answered
+  a lookup for a name recently is evidence that a lookup happened, not that
+  this page used that answer, and it vouches for the **exact** name only —
+  never a parent and never a child (`recentEvidence()` in
+  `src/odoh-bridge.js`, read by `icannBridgeState()` in
+  `namespaces/icann/src/dns-policy.js`).
 
 ### 4.1 Aggregating to a lock
 
@@ -214,7 +233,12 @@ states, not two:
 
 The rule is the weakest link: a `failed` step MUST NOT aggregate to a closed
 lock; a single `unverified` step MUST NOT aggregate to trustless; a plaintext
-connection MUST NOT aggregate to the same verdict an encrypted one gets. The
+connection MUST NOT aggregate to the same verdict an encrypted one gets. A step
+may be excluded from the aggregate **only** when it is marked explicitly
+inapplicable (`applicable: false`); a protection that is simply missing carries
+the state `none` and still weakens the verdict, because "this does not apply
+here" and "this did not happen" are different claims and only the first is the
+implementation's to make. The
 reference implementation's aggregation is `summarize()` in
 `src/trust-path.js` — five states: `verified`, `partial`, `open`, `failed`,
 `unknown` — and every scheme row in the registry carries the verdict it can at
@@ -243,10 +267,13 @@ For those five an implementation **MAY** offer two modes, and if it does:
   oblivious bridge only, nothing plaintext (Chapter 2, `privateDns()`); dial
   a Handshake site, a relay and the WebSocket tunnel through Tor with their
   chain proof and pins unchanged (`src/dane-connect.js`,
-  `namespaces/nostr/src/tor-websocket.js`, Chapter 11 §4.4); refuse hyper,
-  SSB and BitTorrent discovery with the reason on the page (Chapter 9), and
-  serve a Handshake name that publishes a stated origin from that origin
-  (Chapter 3 §8).
+  `namespaces/nostr/src/tor-websocket.js`, Chapter 11 §4.4); and refuse hyper,
+  SSB and BitTorrent discovery with the reason on the page (Chapter 9). A
+  Handshake name that publishes a **stated origin** is served from that origin
+  in Private (Chapter 3 §8) — but that path is IPFS's alone, an HTTPS range
+  read of a CAR archive whose blocks verify against the CID asked for, and a
+  stated origin therefore does **not** re-enable a refused peer-to-peer
+  protocol. The refusal says so.
 - **Fast** is the configured behaviour of each chapter with the mode absent.
 - Every refusal or failure a mode causes **MUST** name the mode, say what was
   not done (nothing was sent; no unprotected lookup was made), not blame the
@@ -260,9 +287,14 @@ For those five an implementation **MAY** offer two modes, and if it does:
   (nothing left the computer), `oblivious` (a relay saw the address, a
   target saw the question, neither both), `tor` (the far end saw a Tor
   exit), `direct` (the far end saw this computer's address with the
-  question) or `refused` (not done in this mode, nothing sent instead) —
-  what the far end learned, and what the other mode does for that hop. The
-  reference is `src/route-path.js` (`hnsRoute`, `schemeRoute`,
+  question), `refused` (not done in this mode, nothing sent instead) or
+  `unknown` (the implementation did not see this hop and will not guess from
+  its settings — the state every ICANN name lookup is in, because the engine
+  resolves it, from its own cache, out of this process's sight) — what the far
+  end learned, and what the other mode does for that hop. One `unknown` hop
+  **MUST** decide the summary: a route view that cannot account for every hop
+  says so rather than describing the hops it does know as if they were the
+  whole page. The reference is `src/route-path.js` (`hnsRoute`, `schemeRoute`,
   `summarizeRoute`), the mirror of `src/trust-path.js`; the same page yields
   the same hops in both modes and only the route column differs.
 
@@ -288,7 +320,7 @@ wire a handler for a scheme absent from it. The reference table is
 | Namespace | Schemes | Verified by (the native layer) |
 |---|---|---|
 | `hns` | `hns` | SPV chain proof + DANE `3 1 1`, or a content pointer's own hash (Chapter 1) |
-| `ipfs` | `ipfs`, `ipns`, `ipld`, `pubsub` | CID; an IPNS record + CID; a pubsub topic is **not** a content address — a message carries only its publisher's libp2p signature (Chapter 3) |
+| `ipfs` | `ipfs`, `ipns` | CID; an IPNS record resolved on the node, then CID (Chapter 3) |
 | `arweave` | `ar` | the transaction id's shape and canonical spelling; then, per fetch, the transaction header's signature verified against the id and the bytes hashed to its `data_root` where the whole transaction fits in memory — a larger transaction, a range, a manifest path and a bundled item stay gateway-trusted (Chapter 4) |
 | `ens` | `ens` | an EIP-1577 contenthash read over a public Ethereum RPC — RPC-trusted, not chain-proven; the content it names is CID-verified (Chapter 5) |
 | `web3` | `web3` | an ERC-4804 EVM read over a public RPC (Chapter 5); there is deliberately **no** `w3://` — `.w3` is a Handshake TLD |

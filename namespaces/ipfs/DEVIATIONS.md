@@ -89,8 +89,8 @@ signed record with a value, a sequence number and a validity period, and how a
 resolver chooses between two records for the same key.
 
 **Why.** Doing it here means running a libp2p stack, a DHT client and a record
-store inside the resolver — which is the daemon this implementation already
-ships, twice over.
+store inside the resolver — which is precisely the node this implementation
+already ships and already asks.
 
 **Consequence.** Everything an implementation of this chapter can say about an
 `ipns://` answer is second-hand. It cannot report which sequence number it got,
@@ -105,12 +105,12 @@ rather than glossed. What we owe and cannot yet give is §2.3.
 
 ### IP-5. A URL host is canonicalised; two of our address forms are case-sensitive
 
-**What.** All four schemes are registered as **standard** schemes in the Wildroot
+**What.** Both schemes are registered as **standard** schemes in the Wildroot
 tree (`src/main.cjs`, `P2P_PRIVILEGES.standard = true`), and a standard scheme's
-host is lowercased by the URL parser. Meanwhile a CIDv0 (`Qm…`) is base58btc, a
-legacy IPNS key (`Qm…`) and a modern peer ID (`12D3Koo…`) likewise, and a
-`pubsub://` topic is arbitrary text. A CIDv1 in base32 and an IPNS key in
-base32 or base36 are already lowercase and are unaffected.
+host is lowercased by the URL parser. Meanwhile a CIDv0 (`Qm…`) is base58btc,
+and a legacy IPNS key (`Qm…`) and a modern peer ID (`12D3Koo…`) likewise. A
+CIDv1 in base32 and an IPNS key in base32 or base36 are already lowercase and
+are unaffected.
 
 **The standard says.** The [WHATWG URL Standard](https://url.spec.whatwg.org/#host-parsing)
 lowercases the host of a special (registered, standard) scheme.
@@ -122,28 +122,29 @@ secure-context features for these schemes. It is the same trade the spine
 records for `hns://` in its §5: a standard scheme cannot opt out of the URL
 Standard's host handling.
 
-**Consequence.** A *navigated* `ipfs://Qm…`, `ipns://Qm…`, `ipns://12D3Koo…` or
-`pubsub://MixedCase` is expected to arrive at the handler with its host
-lowercased and therefore broken. A CID is protected on the path that matters
-most — a pasted bare CIDv0 is re-spelled as its base32 CIDv1 form before it
-becomes a URL (SPEC §3) — and a CID reached through a Handshake `ipfs=` pointer
-never becomes a URL host at all. An `ipns=` pointer builds `ipns://<key>` inside
-the main process (the Wildroot tree's `src/hns/index.js:443`), where Node's
-parser applies and preserves case, so it is probably unaffected. `pubsub://` and
-a typed peer-ID IPNS key are the exposed cases, and neither is re-spelled.
+**Consequence.** A *navigated* `ipfs://Qm…`, `ipns://Qm…` or `ipns://12D3Koo…`
+is expected to arrive at the handler with its host lowercased and therefore
+broken. A CID is protected on the path that matters most — a pasted bare CIDv0
+is re-spelled as its base32 CIDv1 form before it becomes a URL (SPEC §3) — and a
+CID reached through a Handshake `ipfs=` pointer never becomes a URL host at all.
+An `ipns=` pointer builds `ipns://<key>` inside the main process (the Wildroot
+tree's `src/hns/index.js:443`), where Node's parser applies and preserves case,
+so it is probably unaffected. A **typed peer-ID IPNS key** is the exposed case,
+and it is not re-spelled.
 
 **Status.** `OPEN`, and **unmeasured** — the paragraph above is reasoning, not a
 measurement, and §2.2 says what would settle it. The fix is not obvious either:
 lowercasing is correct behaviour for a standard scheme, so the choices are to
 re-spell every address into a case-insensitive multibase before it goes in a
-host (which works for a CID and for an IPNS key, and not for a topic), to accept
-that a topic containing an uppercase letter is unaddressable, or to carry the
-address somewhere other than the host. Measure first (IP-D8).
+host — which works for a CID and for an IPNS key, at the cost of a decode on a
+path that is currently a shape test (IP-1) — or to carry the address somewhere
+other than the host. Measure first (IP-D8).
 
 ### IP-6. No HAMT-sharded directories
 
-**What.** `directoryCid` (`src/cid.js`) refuses a folder whose basic directory
-node would exceed kubo's 256 KiB HAMT threshold, with `NOT_SUPPORTED`.
+**What.** `directoryNode` (`src/cid.js:347`), which `directoryCid` is a thin
+wrapper over, refuses a folder whose basic directory node would exceed kubo's
+256 KiB HAMT threshold, with `NOT_SUPPORTED`.
 
 **The standard says.** [UnixFS](https://github.com/ipfs/specs/blob/main/UNIXFS.md)
 defines `HAMTDirectory`, and kubo shards a directory past that threshold.
@@ -186,7 +187,7 @@ header that exercises the two-byte length form — and pinned in
 
 ### IP-8. The archive-root check is a claim check
 
-**What.** After a warm fetch, `src/origin-warm.js:179` asserts that the CID being
+**What.** After a warm fetch, `src/origin-warm.js:184` asserts that the CID being
 warmed is among the roots the archive names. Those roots come from the archive's
 **own header** (the Wildroot tree's `src/hns/ipfs.js`, `importCar`), not from the
 node.
@@ -219,7 +220,7 @@ no standing outside it, and its behaviour may change.
 **What.** The writer only ever produces the gateway form `<site>/ipfs/<cid>`
 (the Wildroot tree's `src/publish.js:515,662`). The reader does not: `parseOrigin`
 (`../../src/pointers.js:133`) accepts any absolute `https:` URL under 480 bytes,
-and `src/origin-warm.js:203` has a branch for an origin that is not a gateway —
+and `src/origin-warm.js:208` has a branch for an origin that is not a gateway —
 fetch the whole archive or nothing.
 
 **The standard says.** No published standard says how a name announces a
@@ -247,7 +248,7 @@ not. See IP-D2.
 
 ### IP-10. A vendor gateway is named in a resolution path
 
-**What.** `src/origin-warm.js:42-44` maps `<label>.pinthis` to
+**What.** `src/origin-warm.js:43-45` maps `<label>.pinthis` to
 `https://pinthis.cloud` — a name-to-provider table in the code.
 
 **The standard says.** Nothing directly; SPEC §8.1 permits such a table and
@@ -261,7 +262,7 @@ no new party learns anything.
 **Consequence.** One company's gateway is named in a resolution path, for one
 TLD. The general mechanism has since made it unnecessary for any name published
 after `car=` existed, and a stated origin already wins over the table when both
-are present (`src/origin-warm.js:200`).
+are present (`src/origin-warm.js:205`).
 
 **Status.** `OPEN`, and transitional: it is deleted once the names that predate
 `car=` have been re-published with a stated origin, and not before — deleting it
@@ -291,6 +292,50 @@ engineering. The parts worth defending are normative and stated as such in SPEC
 §8.2: never pin a partial DAG, bound the response whether or not the gateway
 honoured the range, and every block still arrives hash-checked.
 
+### IP-12. "Present on the node" is believed for five minutes without asking
+
+**What.** What the warmer has imported — a whole archive, or a slice of a large
+one — is remembered so the next read is free, and that memory is trusted for
+`PRESENCE_TTL_MS` (five minutes, `src/block-presence.js:21`) before it is
+re-confirmed with **one** offline block lookup of the root CID
+(`src/block-presence.js:63-80`, called from `src/origin-warm.js:134-136` and
+`:239-243`). A root the node no longer has forgets that CID and every slice
+recorded under it. A node that cannot answer is not read as eviction: the
+memory is kept and the next read asks again.
+
+**The standard says.** Nothing normative — no published specification governs a
+client's cache of what a node holds. What governs the behaviour is
+[kubo](https://github.com/ipfs/kubo)'s garbage collector, which the browser
+starts with `--enable-gc` and which removes every block that is not pinned or
+otherwise referenced; its `Datastore.GCPeriod` (1 h) and
+`Datastore.StorageGCWatermark` (90 % of `StorageMax`) decide when it runs.
+SPEC §12.2 is why the warmed blocks are exposed to it: a stated-origin import
+is deliberately **not** pinned.
+
+**Why.** The alternative believed forever. After a collection the warmer went on
+answering *"present"* for an archive the node had dropped, so the one fetch that
+would have brought the bytes back was the one being skipped — and in Private
+mode, where the node is offline and cannot fetch them itself, the content stayed
+broken for the life of the process. Re-confirming on every read instead would
+put a node round-trip in front of every seek in a video, which is the case the
+windowing in SPEC §8.2 exists to make fast.
+
+**Consequence.** The bound is a heuristic and not a guarantee. A collection
+*inside* the window is not noticed until the window ends, so for up to five
+minutes a read can still be answered from a memory of blocks that are gone; the
+read then fails or stalls exactly as it would have without a warmer, and the
+next one re-warms. In the other direction the cost is one local lookup per CID
+per five minutes, which is not a network request and does not reach any third
+party.
+
+**Status.** `DELIBERATE`. The honest statement of what this buys is *"a
+collection is noticed within minutes"*, and that is what SPEC §8.3 says. Pinning
+the import would remove the problem and is refused for a better reason (SPEC
+§12.2, §8.2): a pinned partial DAG makes the node walk the network for the rest
+of it, and a pinned archive is never reclaimed. Being told by the node when it
+collects would remove the heuristic altogether; kubo has no such notification,
+so this is the available shape.
+
 ## 2. Things we are not sure about
 
 ### 2.1. Whether a stated origin is the right primitive at all (IP-9)
@@ -318,9 +363,9 @@ the URL, and nothing we found says how a **name** announces one.
 ### 2.2. Whether host canonicalisation actually breaks the case-sensitive forms (IP-5)
 
 The reasoning is in IP-5 and it is only reasoning. What would settle it is one
-navigation each to `ipfs://Qm…`, `ipns://12D3Koo…` and `pubsub://MixedTopic` in
-the shipping browser, and a look at the URL the handler receives. Until that is
-run, IP-5's consequence paragraph is a prediction.
+navigation each to `ipfs://Qm…` and `ipns://12D3Koo…` in the shipping browser,
+and a look at the URL the handler receives. Until that is run, IP-5's
+consequence paragraph is a prediction.
 
 ### 2.3. What delegating IPNS to the node actually gives us (IP-3)
 
@@ -338,7 +383,7 @@ This is the open remainder of the DNSLink story. The resolver reads DNSLink
 itself, on both routes, for a name resolved through this stack (SPEC §6.3).
 What is unknown is the *node-side* reader: kubo resolves a DNSLink when an IPNS path names a domain rather than a
 key, and `ipns://example.com` is a URL a user can type. The reference
-implementation sets `DNS.Resolvers: {}` on both daemons, deliberately, because
+implementation sets `DNS.Resolvers: {}` on the node, deliberately, because
 the "auto" value meant DoH queries to third parties. What that empty value
 leaves — the system resolver, or nothing — is untested, and there is no test for
 `ipns://example.com` in either tree.
@@ -440,7 +485,7 @@ anybody.
 
 ### IP-D7. Delete the hard-coded `.pinthis` gateway table
 
-`src/origin-warm.js:42-44` maps one TLD to one company's gateway (IP-10). `car=`
+`src/origin-warm.js:43-45` maps one TLD to one company's gateway (IP-10). `car=`
 generalises it, and the code already prefers a stated origin when both exist.
 
 **Recommendation.** Re-publish the names that predate `car=` so they state their
@@ -454,18 +499,18 @@ Both need a running browser or a running daemon, which this package deliberately
 does not have, so both belong in the Wildroot tree's live suite.
 
 1. **Host canonicalisation (IP-5, §2.2).** Navigate the shipping browser to
-   `ipfs://Qm…`, `ipns://12D3Koo…` and `pubsub://MixedTopic` and log the URL the
-   handler receives. If the host arrives lowercased, those address forms are
-   unreachable as URLs and IP-5 becomes a fact rather than a prediction.
-2. **`ipns://<domain>` (§2.4).** With `DNS.Resolvers: {}` set on both daemons,
-   does kubo still resolve a DNSLink, and if it does, through which resolver?
+   `ipfs://Qm…` and `ipns://12D3Koo…` and log the URL the handler receives. If
+   the host arrives lowercased, those address forms are unreachable as URLs and
+   IP-5 becomes a fact rather than a prediction.
+2. **`ipns://<domain>` (§2.4).** With `DNS.Resolvers: {}` set on the node, does
+   kubo still resolve a DNSLink, and if it does, through which resolver?
    There is no test for it in either tree. The question is not whether this
    stack can read a DNSLink — it reads one directly (SPEC §6.3) — but whether
    the `ipns://<domain>` URL form works and whether it makes a DNS query nobody
    declared.
 
 **Recommendation.** Write both, in that order. The first decides whether SPEC
-§4.2 and §4.4 state a hazard or a defect; the second decides whether
+§3 and §4.2 state a hazard or a defect; the second decides whether
 `ipns://<domain>` is a supported form, an undeclared plaintext lookup, or a URL
 that should be refused.
 
@@ -498,27 +543,23 @@ authorising that.
 
 ## 4. What this chapter leaves out
 
-1. **Retrieval, both daemons.** The `ipfs://` handler
-   (`src/protocols/ipfs-protocol.js`) is Electron-bound — it takes a `session`,
-   registers a protocol handler and manages an `ipfsd-ctl` daemon lifecycle. The
-   `hns://` node (`src/hns/ipfs.js`) spawns and adopts a kubo process, writes its
-   config, and streams ranged reads over its HTTP RPC. Neither is resolution.
-   Two pure functions are lifted out of the second — `parseByteRange`
-   (`src/byte-range.js`) and `carRoots` (`src/car-roots.js`) — because the
-   resolution half genuinely depends on them; nothing else is.
-2. **`js-ipfs-fetch`'s semantics for `ipld://` and `pubsub://`.** The re-encoding
-   an `Accept` header triggers, and the event-stream form of a pubsub
-   subscription, are that library's, cited in `REFERENCES.md` and not
-   respecified.
-3. **The kubo-identity tests.** Four tests in the Wildroot tree spawn the bundled
+1. **Retrieval, and the node.** `src/hns/ipfs.js` in the Wildroot tree spawns
+   and adopts a kubo process, writes its config, and streams ranged reads over
+   its HTTP RPC; `src/protocols/ipfs-protocol.js` is the Electron-bound adapter
+   that parses an `ipfs://`/`ipns://` URL, resolves an IPNS name on that node
+   and hands the rest to it. Neither is resolution. Three pure pieces are lifted
+   out — `parseByteRange` (`src/byte-range.js`), `carRoots`
+   (`src/car-roots.js`) and the presence bookkeeping (`src/block-presence.js`) —
+   because the resolution half genuinely depends on them; nothing else is.
+2. **The kubo-identity tests.** Four tests in the Wildroot tree spawn the bundled
    kubo binary and compare its `ipfs add` output to `src/cid.js` over fresh
    fixtures, including the 174-link boundary and a depth-3 tree. They need a
    60 MB binary this package does not depend on, so they stay there. What is here
    instead is the pinned vectors those tests produced, which prove agreement on
    the cases someone thought to freeze and not on every input.
-4. **Everything after the bytes arrive** — content-type sniffing, directory
+3. **Everything after the bytes arrive** — content-type sniffing, directory
    listing pages, media handling, the conversion pipeline. None of it is
    addressing.
-5. **The write path.** How an `ipfs=` record is published, an IPNS key created or
+4. **The write path.** How an `ipfs=` record is published, an IPNS key created or
    an archive uploaded is a different problem with a different threat model
    (SPEC §1.1).

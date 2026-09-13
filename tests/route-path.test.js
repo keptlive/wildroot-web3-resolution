@@ -72,16 +72,29 @@ test('peer-to-peer kinds are direct in Fast and refused in Private; a registry r
   assert.equal(refused.at(-1).route, 'refused')
 })
 
-test('an ordinary web page: the name lookup and the connection, with the DNS plan and the bridge decided per host', () => {
+test('an ordinary web page: the connection is known, the name lookup is not', () => {
+  // Chromium resolves an http(s) host itself, and this process sees neither
+  // the query nor a cache hit. The DNS setting says what was CONFIGURED; it
+  // cannot say which endpoint answered for this page. So the hop is `unknown`
+  // in every branch, and the row names the configuration as configuration.
   const plain = schemeRoute('https://example.com/', { mode: 'automatic', servers: [] }, null, { mode: 'fast' })
-  assert.deepEqual(plain.map((h) => [h.label, h.route]), [['Domain name', 'direct'], ['Connection', 'direct']])
-  assert.match(plain[0].source, /System DNS/)
+  assert.deepEqual(plain.map((h) => [h.label, h.route]), [['Domain name', 'unknown'], ['Connection', 'direct']])
+  assert.match(plain[0].source, /Automatic DNS configured — lookup not recorded/)
+  const off = schemeRoute('https://example.com/', { mode: 'off', servers: [] }, null, { mode: 'fast' })
+  assert.match(off[0].source, /System DNS configured/)
   const encrypted = schemeRoute('https://example.com/', { mode: 'secure', servers: ['https://dns.example/dns-query'] }, null, { mode: 'fast' })
-  assert.match(encrypted[0].source, /Encrypted DNS to dns\.example/)
-  assert.equal(encrypted[0].route, 'direct', 'encrypted is not oblivious: the resolver still saw the pair')
+  assert.equal(encrypted[0].route, 'unknown', 'a configured resolver is not an observed one')
+  assert.match(encrypted[0].source, /Secure DNS configured — no matching lookup recorded/)
+  assert.match(encrypted[0].detail, /dns\.example/, 'the configured endpoints are still named')
+  // With the bridge's own record for this exact host, the row names the relay
+  // and the target — and still says what that record is and is not.
   const priv = schemeRoute('https://example.com/', { mode: 'secure', servers: ['https://127.0.0.1:1/'], oblivious: true }, { live: true, relay: 'relay.example', target: 'odoh.hns.one' }, { mode: 'private', anonymized: true })
-  assert.deepEqual(priv.map((h) => h.route), ['oblivious', 'tor'])
-  assert.match(summarizeRoute('private', priv).summary, /No step showed anyone/)
+  assert.deepEqual(priv.map((h) => h.route), ['unknown', 'tor'])
+  assert.match(priv[0].source, /Recent ODoH activity — relay relay\.example → target odoh\.hns\.one/)
+  assert.match(priv[0].detail, /records a lookup, not the DNS route or cache used by this page/)
+  // One unrecorded hop decides the summary: it may not claim the page was
+  // routed the way the rest of the hops were.
+  assert.match(summarizeRoute('private', priv).summary, /Some route details were not recorded/)
 })
 
 test('other schemes: built-in pages are local, onion needs Tor, peers are refused in Private', () => {

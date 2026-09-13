@@ -282,6 +282,15 @@ test('classifyOnionRedirect sorts a Location into exactly one kind', () => {
   // A different port on the same host is a different service.
   assert.equal(classifyOnionRedirect(`http://${ONION}:9/a`, base).kind, 'other-onion')
   assert.equal(classifyOnionRedirect('https://example.com/', base).kind, 'off-tor')
+  // An HTTPS target on the onion service ITSELF is neither of those: the
+  // service is the same, but onion:// carries HTTP inside Tor, so following it
+  // would silently drop TLS.
+  assert.equal(classifyOnionRedirect(`https://${ONION}/secure`, base).kind, 'unsupported-transport')
+  assert.equal(classifyOnionRedirect(`https://${ONION}/secure`, base).url, `https://${ONION}/secure`)
+  // The same for another onion service, and for the explicit :443 that URL
+  // normalisation would drop on the way into an onion:// URL.
+  assert.equal(classifyOnionRedirect(`https://${OTHER}/x`, base).kind, 'unsupported-transport')
+  assert.equal(classifyOnionRedirect(`https://${ONION}:443/x`, base).kind, 'unsupported-transport')
   // A non-http(s) target is off Tor too — it is certainly not this service.
   assert.equal(classifyOnionRedirect('ftp://x/', base).kind, 'off-tor')
   assert.equal(classifyOnionRedirect('http://', base).kind, 'invalid')
@@ -339,6 +348,28 @@ test('a redirect off Tor is not followed: the page names the destination', async
   assert.match(body, /<a href="https:\/\/example\.com\/track">/, 'offered as a link the user can take')
   assert.deepEqual(seen, [`http://${ONION}/`], 'the clearnet URL was never fetched')
   assert.equal(res.headers.get('X-Resolution-Namespace'), 'tor')
+})
+
+test('a redirect to HTTPS on the same service is refused 501, not re-encoded as onion://', async () => {
+  // onion:// carries HTTP inside Tor. Rewriting an https: target as onion://
+  // would drop TLS — and the explicit :443 with it — while the address bar
+  // went on claiming the same origin. The onion address authenticates the
+  // service; HTTPS on that service is a different security context, so the
+  // transition is refused rather than performed.
+  const seen = []
+  const handler = routed(async (url) => {
+    seen.push(url)
+    return new Response('', { status: 301, headers: { location: `https://${ONION}/secure` } })
+  })
+  const res = await handler(new Request(`onion://${ONION}/`))
+  assert.equal(res.status, 501)
+  const body = await res.text()
+  assert.match(body, /HTTPS/)
+  assert.match(body, new RegExp(`https://${ONION}/secure`))
+  assert.equal(res.headers.get('X-Resolution-Namespace'), 'tor')
+  assert.deepEqual(seen, [`http://${ONION}/`], 'the HTTPS target was never fetched')
+  // No Location: this is a refusal, not a navigation the browser could follow.
+  assert.equal(res.headers.get('location'), null)
 })
 
 test('a 304 answer to a conditional request is passed through, not treated as a redirect', async () => {

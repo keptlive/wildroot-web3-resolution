@@ -449,33 +449,70 @@ of reading DNSLink is that the two publications are equally authoritative. The
 cost is stated plainly because it is paid by every name, including an ordinary
 address-record name with no pointer anywhere — one further query per zone on
 this route, and none on the DoH route, which asks the two together (`HS-D1`).
-A referral at the underscore label is not a DNSLink answer and yields no
-pointer.
+On an **unsigned** zone a referral at the underscore label is not a DNSLink
+answer and yields no pointer; on a **signed** zone a delegated
+`_dnslink.<host>` is refused rather than followed, because a parent's referral
+proves nothing about what a child zone holds (`HS-17`).
 
 Each source is held to the same rules:
 
-  - on a **signed** zone the RRset — the pointer TXT at the name, the DNSLink
-    TXT at `_dnslink.<host>`, whichever is present — MUST validate to the
-    anchor, including the wildcard proof of RFC 4035 §5.3.4 if it was
-    wildcard-expanded. A signed zone whose pointer does not validate is an
-    attack or a broken zone; fail closed.
+  - on a **signed** zone the answer MUST be authenticated by rule (e) below
+    *before* a byte of it is read as application syntax. A signed zone whose
+    pointer does not validate is an attack or a broken zone; fail closed.
   - the two are then merged by the rule of §10.1: either alone **is** the
-    pointer; agreement (same kind, same address) yields that pointer, recorded
-    as also published as DNSLink so an interface can say which record it came
-    from; **disagreement is `pointer-conflict`** (§6.9) — neither pointer is
-    followed and neither is preferred.
+    pointer; agreement (same kind, same address, same path) yields that
+    pointer, recorded as also published as DNSLink so an interface can say
+    which record it came from; **disagreement is `pointer-conflict`** (§6.9) —
+    neither pointer is followed and neither is preferred.
   - return the merged pointer.
 
-**e. Proven absence of a pointer.** If a `TXT` answer is **empty** and the zone
-is signed, the absence MUST be proven (NSEC/NSEC3 NODATA or NXDOMAIN, §6.7)
-*before* the algorithm moves on to the address — and that is required of **both**
-owner names: the name itself and `_dnslink.<host>`. Without it, an on-path party
-who merely withholds the `ipfs=` record, or withholds the `_dnslink` record of a
-site that publishes only that one, walks the browser from a content-addressed
-site down to an address. Reading a second pointer source without proving its
-absence would add a rung to the downgrade ladder of §11.3 instead of closing a
-hole. A `TXT` that exists and is not a pointer (SPF, a verification token) is an
-ordinary non-answer and needs no proof.
+**e. Every `TXT` answer on a signed zone is authenticated before it is read.**
+One rule governs both owner names — `host` and `_dnslink.<host>` — and it
+applies to *every* answer, not only to one that parses as a pointer. A `TXT`
+that is not a pointer (an SPF record, a verification token) is evidence too:
+it is the zone's statement of what that owner holds, and only a signed one may
+be believed. An unsigned substitute that merely *displaces* the pointer walks
+the browser from a content-addressed site down to an address just as
+effectively as a withheld record does (§11.3 rung 3), so an implementation
+**MUST NOT** make the check conditional on the answer's content.
+
+The rule is applied at an owner name until it terminates:
+
+  1. **RCODE.** The reply MUST be NOERROR or NXDOMAIN. Those two are the
+     zone's statements about the owner; anything else (SERVFAIL, REFUSED, any
+     other code) is not a statement at all, and the resolution fails
+     `dnssec-fail` rather than treating it as "no pointer here" — the same
+     three-way distinction the TLSA lookup makes in (g) and §8.
+  2. **`TXT` and `CNAME` MUST NOT coexist at one owner.** RFC 1034 §3.6.2 — a
+     name that owns an alias owns no other data — stated precisely by RFC 2181
+     §10.1. A reply carrying both at one owner is a failure, not a choice
+     between them.
+  3. **A `TXT` RRset present** MUST validate to the anchor, wildcard proof of
+     RFC 4035 §5.3.4 included (§6.7), or the resolution fails closed. Only then
+     are its strings read as pointer syntax.
+  4. **A `CNAME` present** is followed only after the **`CNAME` RRset itself**
+     validates — as type 5, whose canonical RDATA is the target name lowercased
+     in wire form (RFC 4034 §6.2). Then: **exactly one** alias per owner (a
+     second is ambiguous and is refused), **no owner visited twice**, and at
+     most **eight** owner names in one chain. A target **outside this zone** is
+     refused `dnssec-unsupported` — another zone's records need their own trust
+     walk, not this zone's keys — and so is a target that the zone **delegates**
+     (`HS-17`, `HS-18`). A target inside the zone that the same reply did not
+     already answer is asked for with a fresh `TXT` query, under the same rule.
+  5. **Nothing at the owner** — no `TXT`, no `CNAME` — MUST be **proven**:
+     NSEC or NSEC3 denying `TXT` at that owner, validated to the anchor (RFC
+     4035 §5.4, §6.7). An unproven absence is `dnssec-fail`; it is never read
+     as "no pointer".
+
+Without rule 5 an on-path party who merely withholds the `ipfs=` record, or
+withholds the `_dnslink` record of a site that publishes only that one, walks
+the browser from a content-addressed site down to an address. Reading a second
+pointer source without proving its absence would add a rung to the downgrade
+ladder of §11.3 instead of closing a hole.
+
+An **unsigned** zone has no anchor to validate against; its answer is read as
+it is given, aliases included, and the resolution is reported as unvalidated
+(§4).
 
 **f. Address.** Query `A` and `AAAA` for `host` together, with DO=1 (RFC
 3596). Use the `A` when there is one and the `AAAA` when that is all the name
@@ -502,7 +539,10 @@ On a signed zone a `CNAME` in the reply **MUST NOT** be followed until the
 `CNAME` RRset itself validates to the anchor, with the §5.3.4 wildcard proof
 where the answer was wildcard-expanded. Its canonical RDATA is the target name,
 lowercased, in wire form (RFC 4034 §6.2). An unsigned or invalid `CNAME` on a
-signed zone is a validation failure, not an unvalidated answer.
+signed zone is a validation failure, not an unvalidated answer. This is the
+same requirement rule 4 of (e) makes on the pointer path; the two differ only
+in where the target leads — an ICANN host through the seam of §6.11 here, an
+owner inside the same zone there.
 
 No separate proof of the `A` RRset's absence is required alongside it: **RFC
 1034 §3.6.2** — a CNAME stands alone, and a name that owns one owns no other
@@ -625,7 +665,39 @@ exactly the retry the user is already making. An implementation **MUST NOT**
 cache `unreachable` or a validation failure.
 
 A publish flow that moves a pointer SHOULD invalidate the affected name
-explicitly.
+explicitly: `forget(host)` drops that name and everything under it (so a
+`_dnslink.<host>` entry goes with its name), `clearCache()` drops everything.
+
+**An invalidation MUST also cancel the resolutions already in flight.** A
+publish that lands while a lookup is running would otherwise finish after the
+clear and repopulate the cache with exactly the answer the clear was made to
+escape. The reference implementation counts invalidations — an epoch on the
+resolver and on the DoH resolver, incremented by `clearCache()` and by
+`forget()` — and a resolution that completes while the count has moved under it
+is **discarded and re-run**, up to three attempts, after which it reports that
+the name changed during resolution and asks for a retry. An implementation
+**MUST NOT** answer from, or write to, a cache generation that has been
+invalidated.
+
+The same event marks the name for **revalidation** on the DoH route. That route
+keeps no answer cache of its own, but the HTTP client under it may: in the
+reference implementation Electron's `net.fetch` has an HTTP cache, so a query
+for a recently invalidated name is fetched with `cache: 'reload'` and a
+`no-cache` request directive (RFC 9111 §5.2.1.4, WHATWG Fetch *reload*). The
+window is five minutes — after a `forget(host)` for that name and every name
+under it, which is how `_dnslink.<host>` is covered without naming it, and
+after a `clearCache()` for every name — and the per-name memory is bounded at
+512 entries, oldest dropped, because the list is attacker-influenceable like
+every other per-host store here.
+
+Three things this is **not**, because each would be a real claim and none of
+them is true here: it does not change the **transport** (the same endpoint, the
+same oblivious or plain choice, §9); it does not change the **trust decision**
+(an HTTP cache directive is a hint to a client's own store, never a DNS answer,
+and nothing is believed on its account); and it does not reach the **upstream
+recursive resolver**, which still serves its own cache under its own TTL. What
+it buys is that this client does not re-read a response it has just been told
+is stale.
 
 ### 6.9 Resolution kinds
 
@@ -637,7 +709,7 @@ explicitly.
 | `unregistered` | the chain, or the zone, authoritatively has nothing |
 | `unreachable` | we could not ask — **not** the same as the above |
 | `dnssec-fail` | validation failed; fail closed |
-| `dnssec-unsupported` | the zone is signed with an algorithm we do not implement |
+| `dnssec-unsupported` | the zone is signed with an algorithm we do not implement, or the answer needs an authenticated walk this implementation does not make — a `TXT` alias out of the zone or into a delegation (§6.5e, `HS-17`) |
 | `blocked` | the address is not a public-internet address (§11.2) |
 | `unsupported-pointer` | a pointer whose codec we recognise and cannot fetch — refused **by name**, never silently discarded |
 | `pointer-conflict` | the name's own `TXT` and its DNSLink record name **different** content (§6.5d, §10.1); neither is followed |
@@ -679,6 +751,19 @@ chain proof, the DNSSEC validation to the on-chain DS, the denial proofs and
 the DANE pin are all exactly as they are on the direct path. Only the socket
 moves. A dialler that cannot reach the proxy is an error, never a silent direct
 connection.
+
+The seam a resolver depends on is exactly `dial(host, port)` → a connected
+socket, and both of this chapter's callers — the authoritative query
+(`../../src/dns-query.js`) and the site connection of §8.1 — use that and
+nothing more. Two properties of the dial are load-bearing even so, and an
+implementation SHOULD have them: a dial **settles once**, so a timeout that
+fires after the SOCKS reply cannot tear down a connection already handed to a
+caller and reject a promise already resolved; and the dial's timer **MUST NOT**
+keep the process alive on its own account. `socksDialer()`
+(`../../src/socks-dial.js`) also accepts an optional `{ signal, pauseOnConnect }`
+— cancellation, and a socket handed back paused so that not one byte between
+the SOCKS reply and the caller's first read is lost — for callers outside this
+chapter; the two above pass neither.
 
 **`lookup(host)` — how an ICANN host met in the walk becomes an address.** The
 three places one appears — a nameserver name with no glue, a glue-less `NS`
@@ -821,11 +906,17 @@ dialler of `../../src/socks-dial.js`, pointed at the device-local Tor's port,
 and:
 
 - the dial is **by address** — the chain has already resolved the name, so the
-  CONNECT request carries the IPv4 address as ATYP `0x01` (RFC 1928 §4) and
-  **Tor learns an IP and no name**;
-- the server name in the ClientHello is still the Handshake name — it is what
-  the site needs to select its certificate, and it is what the exit sees
-  (§11.6, on ECH);
+  CONNECT request carries the IPv4 address as ATYP `0x01` (RFC 1928 §4) and no
+  name is put in the SOCKS request;
+- that is **not** the same as the name being hidden, and an implementation
+  **MUST NOT** say it is. The very next thing on that socket is a ClientHello
+  carrying `server_name` = the Handshake name (`servername` in
+  `connectDane()`), because it is what the site needs to select its
+  certificate: RFC 8446 §4.2.9 and RFC 6066 §3, sent in the clear before any
+  key is agreed. **The Tor exit therefore sees the name**, and so does anyone
+  on the path between the exit and the site. What removes it is ECH (RFC 9848),
+  which this transport cannot use at all (`HS-3`, §11.6); keeping the name out
+  of the SOCKS request removes one disclosure, to the proxy, and no more;
 - the pin check is **identical on both routes**, by construction: `verifyDane()`
   sees the certificate the same way whether the bytes under it arrived directly
   or through the tunnel, and a pin that fails through Tor fails exactly as it
@@ -991,6 +1082,27 @@ name and the address asking, and the path sees the connection to it; the trust
 state names the endpoint that answered, so the panel shows which transport
 carried a given page (§9.2).
 
+That disclosure describes what the **default** DNS setting does, and says so:
+the Fast/Private control is not necessarily the only DNS control an embedder
+offers, and a separate setting that requires encryption, or that hands lookups
+to the network's own resolver, changes the sentence. An implementation whose
+disclosure names a behaviour its settings can contradict is stating a policy
+the user has already overridden, so the wording MUST hold the default and name
+the other control rather than promise on its behalf (`DISCLOSURE`,
+`../../src/delivery-mode.js`).
+
+**What the rule covers, stated narrowly.** It is a rule about the lookups this
+stack *makes*: a **fresh** lookup in Private mode is oblivious or it fails.
+It is not a claim that no answer in the process came from a plaintext lookup,
+and an implementation **MUST NOT** state it as one. A name resolved in Fast
+mode moments earlier can still be in this chapter's own 60-second positive
+cache (§6.8), and a browser engine's DNS and connection caches are outside this
+chapter altogether. Configuration is evidence about the next query, not about
+what a given page load used — which is why the mode's own disclosure says a
+fresh lookup fails rather than falling back *while a cached answer may still
+work*, and why an implementation that wants the stronger statement has to
+invalidate on the switch (§6.8) rather than assert it.
+
 A mode never changes what a DoH answer is *worth*: an answer carried
 obliviously or plainly is `unverified` either way, on the resolver's word (§4).
 The mode decides whether the plain transport may be used at all.
@@ -1083,8 +1195,25 @@ the name and the pointer in the DNSLink record:
 |---|---|
 | neither | no pointer; continue to the address (§6.5e first) |
 | one of the two | that one **is** the pointer |
-| both, agreeing (same kind, same address) | that pointer, recorded as also published as DNSLink so an interface can name the record it came from |
+| both, agreeing (same kind, same address, **same path**) | that pointer, recorded as also published as DNSLink so an interface can name the record it came from |
 | both, **disagreeing** | `pointer-conflict` (§6.9): refuse, and say what was found |
+
+**The path is part of the address.** `dnslink=/ipfs/<cid>/docs` and
+`dnslink=/ipfs/<cid>` name different content, so the comparison that decides
+agreement MUST include the trailing path: an absent path and a bare `/` both
+mean the root and are the same, and every other path must match **exactly**.
+Comparing kind and identifier alone makes a path silently disappear in the one
+case — two records, one of them carrying a path — where the publisher was most
+explicit about what they meant. The conflict a mismatch produces names each
+pointer *with* its path (`ipfs <cid>/docs`), because a message that prints both
+sides identically tells a publisher nothing.
+
+The paths are compared as published, **byte for byte**. Nothing is
+percent-decoded, case-folded, or `.`/`..`-resolved first: a normalisation that
+made two spellings equal would then have to choose which spelling to fetch, and
+the two spellings can select different content. The cost is that two records
+naming the same content in different spellings are reported as a conflict
+(`HS-19`).
 
 A disagreement **MUST NOT** be settled by preferring one record. Two records
 naming different content is a broken zone or a tampered answer, and a
@@ -1111,6 +1240,14 @@ migration path work in the outward direction, and it is also what makes a
 conflict a real possibility: a publisher that moves one record and not the other
 gets a refusal rather than a coin toss (§6.9), which is the behaviour to design
 a publish flow against.
+
+The path rule above constrains what "both" can say. The `ipfs=`/`ipns=` form at
+the name has **no path in its grammar**, so it can only ever name a root; a
+`dnslink=` record carrying a path therefore disagrees with it. An
+implementation that publishes both records MUST publish content whose entry
+point is the root of what the pointer names, and put the path in neither
+record — or publish the DNSLink record alone, which is the ecosystem's own
+convention and what a path-bearing site should do.
 
 ### 10.2 Content pointers in Private mode
 
@@ -1146,11 +1283,19 @@ on, and the origin fetch is an optimisation rather than a condition.
 **`bt=` and `hyper=`.** A swarm's peers learn the address of whoever asks, by
 design, and the UDP transports of DHT discovery do not traverse Tor at all (row
 19). In Private mode these pointers are **refused**, with
-`privateRefusal('p2p')`: the mode, the protocol by name, that nothing was asked,
-that a name which also publishes a stated origin loads from that origin in
-Private mode, and the control. There is no proxied form of either engine that
-is the same engine, and an implementation **MUST NOT** substitute a weaker one
-silently.
+`privateRefusal('p2p')`: the mode, the protocol by name, that nothing was
+asked, that **a stated origin does not enable this protocol in Private mode**,
+and the control. There is no proxied form of either engine that is the same
+engine, and an implementation **MUST NOT** substitute a weaker one silently.
+
+The stated-origin escape is IPFS's alone, and a refusal for one protocol MUST
+NOT borrow another's remedy. What makes it work above is not that an origin
+exists but that the **whole archive** arrives as a CAR and is verified block by
+block against the CID before anything is served (§10.2, *`ipfs=`*). A torrent's
+infohash and a hypercore's key have no such single-fetch, whole-content form
+here, so "publish a `car=` origin" is not advice that would make a `bt=` or
+`hyper=` name load in Private mode; telling the user it is sends them to fix
+something that cannot help. Chapter 3 owns the origin mechanism and its limits.
 
 **`ar=`** rides the proxied session fetch to a gateway (Chapter 4) and is
 unaffected by the mode beyond the route.
@@ -1228,16 +1373,26 @@ the validator in isolation:
 2. **The DS at a cut.** Prove a missing DS missing. A believed empty DS answer
    lets an attacker delete the DS from a referral and demote a signed child to
    unsigned — re-opening at the cut every hole closed at the leaf.
-3. **The pointer's absence — at both owners.** Prove it. An unproven empty
-   `TXT` lets an attacker delete the `ipfs=` and walk the browser from
-   content-addressed bytes down to an address; with two pointer sources
-   (§6.5d) the rung is two rungs, because a site whose only pointer is its
-   DNSLink record is walked down by withholding `_dnslink.<host>` instead. A
-   second pointer source read without a second denial proof is a new rung on
-   this ladder, not a feature.
-4. **The alias.** Validate the `CNAME` RRset before following it. Otherwise the
-   same trick as (1) works one branch over: strip the signed `A`, inject a
-   `CNAME`, and let the zone's honest "no TLSA" complete the redirect.
+3. **The pointer's absence — at both owners, and its *replacement*.** Prove
+   it. An unproven empty `TXT` lets an attacker delete the `ipfs=` and walk the
+   browser from content-addressed bytes down to an address; with two pointer
+   sources (§6.5d) the rung is two rungs, because a site whose only pointer is
+   its DNSLink record is walked down by withholding `_dnslink.<host>` instead.
+   A second pointer source read without a second denial proof is a new rung on
+   this ladder, not a feature. The subtler half of the same rung is a *present*
+   answer that is not a pointer: validate the `TXT` RRset whatever it says, or
+   an injected unsigned SPF record — which needs no denial proof because the
+   owner is not empty, and needs no signature because it parses as nothing —
+   suppresses the real pointer and takes the same walk down, past both checks
+   (§6.5e).
+4. **The alias, on every path that reads records.** Validate the `CNAME` RRset
+   before following it. Otherwise the same trick as (1) works one branch over:
+   strip the signed `A`, inject a `CNAME`, and let the zone's honest "no TLSA"
+   complete the redirect. The `TXT` path is the same rung: an unvalidated alias
+   at `host` or at `_dnslink.<host>` moves the question to an owner the
+   attacker chose, and whatever is found there — including an authenticated
+   "nothing" at a name that really has nothing — answers a question the zone
+   was never asked (§6.5e rule 4).
 5. **The pin on the fallback path.** A DoH path that reads no TLSA means
    breaking the chain path — one dropped TCP connection to the authoritative
    server — downgrades every pinned site to plaintext (§9.1).
@@ -1314,6 +1469,9 @@ is the cost `HS-16` records. See `../../DEVIATIONS.md` (Chapter 1, §2.5).
   A module that falls back to the platform's global fetch leaves the machine
   unproxied while anonymization is on, and does so silently, because it works.
 - ODoH's guarantee is not what the RFC describes at current relay scale (§9.2).
-- Without ECH (`HS-3`) the server name is in the ClientHello regardless, so an
-  oblivious DNS lookup does not by itself hide which Handshake site was visited,
-  and the Tor exit of §8.1 sees the same server name.
+- Without ECH (`HS-3`) the server name is in the ClientHello regardless — the
+  `server_name` extension of RFC 8446 §4.2.9, defined by RFC 6066 §3, sent
+  before any key is agreed — so an oblivious DNS lookup does not by itself hide
+  which Handshake site was visited, and the Tor exit of §8.1 sees the same
+  server name. Dialling by address keeps the name out of the SOCKS request and
+  out of the proxy's view; it does not keep it off the wire.

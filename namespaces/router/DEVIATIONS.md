@@ -85,7 +85,7 @@ question open for the rest — see §2.3.
 ### RT-3. A single bare label is a Handshake name
 
 **What.** `pinner`, `hnshosting`, `bananas`, `14898` and `🤝` navigate as
-Handshake names (`src/router.js:383-409`). `com`, `org`, `app`, `blog` and
+Handshake names (`src/router.js:386-414`). `com`, `org`, `app`, `blog` and
 `link` — labels that are themselves ICANN top-level domains — are searches.
 Anything containing whitespace is a search.
 
@@ -129,7 +129,7 @@ not adjudicate; a receiver has to choose.
 **Why.** The alternative — treating a known scheme followed by digits as a host
 — breaks `magnet:?…`-shaped inputs and every `did:`-style path.
 
-**Consequence.** A Handshake top-level name spelled the same as one of the 32
+**Consequence.** A Handshake top-level name spelled the same as one of the 30
 registered schemes cannot be typed with a port. `hns:8080`, `ar:8080`,
 `search:8080`, `media:8080` and so on are read as scheme-plus-path. The
 Handshake name `hns` exists; the others are mostly hypothetical. The failure is
@@ -144,7 +144,7 @@ think it is a bug nobody noticed.
 
 **What.** `NAMESPACES.ICANN` is declared and used by the classifier, but no row
 in `SCHEME_TABLE` carries it — an ICANN name is navigated as `https://`, whose
-row is in namespace `web` (`src/router.js:62-84, 368-370`). So:
+row is in namespace `web` (`src/router.js:62-83, 371-373`). So:
 
 ```
 classify('example.com').namespace  === 'icann'
@@ -181,13 +181,13 @@ and considerably more machinery. See RT-D2.
 ### RT-6. None of the schemes we invented is registered, and none uses `web+`
 
 **What.** Checked against the IANA URI Schemes registry rather than assumed. Of
-the 32 rows in `SCHEME_TABLE`:
+the 30 rows in `SCHEME_TABLE`:
 
 | Status | Count | Schemes |
 |---|---|---|
 | **Permanent** | 2 | `http`, `https` |
 | **Provisional** | 11 | `ipfs`, `ipns`, `ar`, `ens`, `web3`, `nostr`, `at`, `did`, `hyper`, `ssb`, `magnet` |
-| **Unregistered** | 19 | `hns`, `ipld`, `pubsub`, `activitypub`, `onion`, `https+raw`, `gemini`, `bittorrent`, `bt`, `wildroot`, `agregore`, `browser`, `search`, `paste`, `editor`, `bluesky`, `mastodon`, `media`, `docview` |
+| **Unregistered** | 17 | `hns`, `activitypub`, `onion`, `https+raw`, `gemini`, `bittorrent`, `bt`, `wildroot`, `agregore`, `browser`, `search`, `paste`, `editor`, `bluesky`, `mastodon`, `media`, `docview` |
 
 **The standard says.** RFC 7595 sets out the registration procedure and the low
 bar for a Provisional entry: a specification of any stability, and an email to
@@ -257,7 +257,7 @@ the shape any fix should take.
 ### RT-8. `classify()` returns `javascript:`, `data:` and `file:` untouched
 
 **What.** L1 says an explicit scheme is authoritative and the classifier does
-not get a vote. It applies to every scheme (`src/router.js:288-300`):
+not get a vote. It applies to every scheme (`src/router.js:285-303`):
 
 ```
 classify('javascript:alert(1)') -> { scheme: 'javascript', namespace: null, known: false }
@@ -309,7 +309,7 @@ interoperability gap with a standard we otherwise implement.
 ### RT-10. `agregore://` and `browser://` are permanent silent aliases
 
 **What.** Two schemes are served identically to `wildroot://` and rewritten to
-it on navigation. They are never advertised (`src/router.js:152-154`).
+it on navigation. They are never advertised (`src/router.js:150-154`).
 
 **The standard says.** Nothing. Listed because the WHATWG URL Standard's origin
 model is what makes it consequential: three schemes are three tuple origins.
@@ -368,7 +368,7 @@ visible to the interface and to a test. See RT-D5.
 ### RT-12. The dispatcher's 400 branch is unreachable through a WHATWG `Request`
 
 **What.** `dispatch` answers `400` with no namespace marker when the URL will
-not parse *and* names no scheme (`src/router.js:504-518`). A WHATWG `Request`
+not parse *and* names no scheme (`src/router.js:509-523`). A WHATWG `Request`
 cannot be constructed with an unparseable URL, so through the documented
 interface the branch is dead; it is reachable only from a caller that passes a
 plain object with a `url` property, which is what the Electron runtime and our
@@ -416,6 +416,57 @@ constraint on the classifier (SPEC §8.2).
 `D-4`. The URL convention that works around the host parser's numeric rule is
 experimental and carries its own deviations under the `NT` prefix in Chapter 10
 (Part B); neither is restated here.
+
+---
+
+### RT-14. An explicit `http(s)://` URL is rewritten into another namespace before it is classified
+
+**What.** L1 says an explicit scheme is final (SPEC §3.1), and SPEC §6.4 requires
+a main-frame navigation to `http://vitalik.eth/`, `http://<addr>.onion/` or
+`http://nathan.woodburn/` to be rewritten to `ens://`, `onion://` and `hns://`
+respectively, preserving everything but the scheme
+(`src/hns-host.js:85-99`, `rewriteToHns`). Both are true because they describe **different
+stages**: the rewrite runs in the embedder, before `classify()` is called, and
+what `classify()` is then handed is the rewritten URL, whose scheme it does not
+touch (`src/router.js:285-303`). The classifier carries a note saying so at the
+boundary (`src/router.js:285-286`), and the embedder's stages are written down
+in the Wildroot tree's `docs/BROWSER-ROUTING-CONTRACT.md`.
+
+**The standard says.** [RFC 3986 §3.1](https://www.rfc-editor.org/rfc/rfc3986#section-3.1)
+makes a URI's scheme the thing that "refers to a specification for assigning
+identifiers within that scheme", and §1.1.3 distinguishes a URI from the
+resource it identifies; neither states a conformance verb about a client
+rewriting one URI into another before dereferencing it, and no RFC does. The
+**MUST NOT** being qualified here is this specification's own — L1: *"An
+implementation **MUST NOT** re-classify, sniff, or 'improve' an input that
+already names a scheme."* [RFC 7686 §2](https://www.rfc-editor.org/rfc/rfc7686#section-2)
+is the one place a standard requires the *effect* for part of this: an
+application **SHOULD NOT** resolve a `.onion` name through DNS, which an
+unrewritten `http://<addr>.onion/` would do.
+
+**Why.** A link on an ordinary web page is written `http://`, because that is
+what the page's author had. Without the rewrite it reaches the system resolver,
+which has never heard of the name: a Handshake site is a blank page with no
+error, an ENS name goes to whoever holds the Handshake name `eth`, and an onion
+address is disclosed to a DNS server. Doing the rewrite *inside* the classifier
+would be the sniffing L1 forbids and would make the guarantee untestable, so the
+two are separated instead.
+
+**Consequence.** "An explicit scheme is authoritative" is only true of a stated
+stage, and an implementation reading L1 alone will find §6.4 contradicts it. The
+cost is a specification that has to name three stages wherever it claims L1
+(SPEC §3.1), and a real behavioural surprise for anyone reasoning about the
+whole browser: `https://vitalik.eth/` typed into this browser does **not** make
+an HTTPS request. The rewrite is bounded by the same host rule the classifier
+uses (§6.2) and moves a URL only into the namespace that rule already assigns,
+so it cannot invent a namespace of its own; and it is main-frame navigation
+only, so a subresource fetch is unaffected.
+
+**Status: DELIBERATE**, with the specification wording corrected rather than the
+routing. A rewrite driven by one shared host rule, at a stage that is named, is
+the smallest thing that makes ordinary links work without putting a guess inside
+the classifier. What would be a defect is the rewrite living in two places with
+two rules, which is RT-7's shape and is guarded against there.
 
 ---
 
@@ -512,7 +563,7 @@ Nothing here is normative.
 
 ### RT-D1. Derive the privileged-scheme declaration from the scheme table
 
-Two hand-maintained lists of the same 32 schemes: `SCHEME_TABLE` and the
+Two hand-maintained lists of the same 30 schemes: `SCHEME_TABLE` and the
 Electron privilege declaration in the browser's `src/main.cjs`. The consequence
 of their diverging is not a lint failure — a scheme that is dispatched but never
 declared is unknown to Chromium, and loading one as a main-frame document has
@@ -545,10 +596,11 @@ should be written down wherever it is made.
 
 ### RT-D4. Register `hns:` with IANA
 
-Of the 19 unregistered schemes, 18 are application-private and should stay that
-way. `hns:` is not: it is meant to interoperate, other Handshake clients already
-spell it the same way, and a Provisional registration under RFC 7595 needs a
-specification of any stability and an email to the reviewer (RT-6).
+Of the 17 unregistered schemes, 16 are application-private or somebody else's
+to register, and should stay as they are. `hns:` is neither: it is meant to
+interoperate, other Handshake clients already spell it the same way, and a
+Provisional registration under RFC 7595 needs a specification of any stability
+and an email to the reviewer (RT-6).
 
 **Recommendation.** File it. This repository contains the specification RFC
 7595 asks for, and nothing in the code changes. It removes the situation where

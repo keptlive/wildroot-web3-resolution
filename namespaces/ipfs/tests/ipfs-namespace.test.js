@@ -12,7 +12,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { NAMESPACES, classify, schemeInfo, namespaceForScheme } from '../../../src/router.js'
+import { NAMESPACES, SCHEME_TABLE, classify, schemeInfo, namespaceForScheme } from '../../../src/router.js'
 import { pointerFrom, txtStringsFrom, originFrom, CID_RE, IPNS_RE } from '../../../src/pointers.js'
 import { decodeContenthash, CODEC } from '../../../src/contenthash.js'
 import { schemeSteps, summarize } from '../../../src/trust-path.js'
@@ -23,29 +23,40 @@ const IPNS = 'k51qzi5uqu5dlvj2baxnqndepeb86cbk3ng7n3i46uzyxzyqj2xjonzllnv0v8'
 
 // -------------------------------------------------------------- the schemes
 
-test('four schemes, one namespace, one root of trust', () => {
-  for (const scheme of ['ipfs', 'ipns', 'ipld', 'pubsub']) {
+test('two schemes, one namespace, one root of trust', () => {
+  for (const scheme of ['ipfs', 'ipns']) {
     assert.equal(namespaceForScheme(scheme), NAMESPACES.IPFS, scheme)
+  }
+  // The namespace is exactly those two: every other scheme the table carries
+  // belongs somewhere else, so a retired scheme cannot come back by accident
+  // and inherit the namespace's trust story (SPEC §3).
+  assert.deepEqual(
+    SCHEME_TABLE.filter((row) => row.namespace === NAMESPACES.IPFS).map((row) => row.scheme),
+    ['ipfs', 'ipns'])
+  for (const gone of ['ipld', 'pubsub']) {
+    assert.equal(schemeInfo(gone), null, `${gone} is not a scheme in this table`)
+    assert.equal(namespaceForScheme(gone), null, gone)
   }
   // The classifier does not get a vote once a scheme is named (L1), and a
   // failure inside one of these never becomes a lookup in another namespace (L2).
-  assert.deepEqual(classify('ipld://bafyfoo/x').namespace, NAMESPACES.IPFS)
-  assert.deepEqual(classify('pubsub://TopicName/').namespace, NAMESPACES.IPFS)
+  assert.deepEqual(classify(`ipfs://${CID}/x`).namespace, NAMESPACES.IPFS)
+  assert.deepEqual(classify(`ipns://${IPNS}/`).namespace, NAMESPACES.IPFS)
+  // An unknown scheme is preserved as itself with no namespace — never
+  // re-sniffed into the namespace it used to belong to.
+  assert.deepEqual(classify('ipld://bafyfoo/x'),
+    { url: 'ipld://bafyfoo/x', scheme: 'ipld', namespace: null, explicit: true, reason: 'explicit-scheme', known: false })
 })
 
 test('what each scheme verifies, stated per scheme and not per namespace', () => {
+  // Both schemes end at a CID, and they do not get there the same way: an
+  // `ipns://` answer rests on a signed record first. The row says so rather
+  // than inheriting the namespace's answer (SPEC §4.3).
   assert.equal(schemeInfo('ipfs').verify, 'CID')
-  assert.equal(schemeInfo('ipld').verify, 'CID')
   assert.equal(schemeInfo('ipns').verify, 'IPNS record + CID')
-  // A pubsub topic is a free-form string, and a message on it is
-  // authenticated — when it is authenticated at all — by the publishing peer's
-  // libp2p signature, never by a CID. The row says so rather than inheriting
-  // the namespace's answer (SPEC §4.4).
-  assert.equal(schemeInfo('pubsub').verify,
-    'libp2p publisher signature — a topic is not a content address')
+  assert.notEqual(schemeInfo('ipns').verify, schemeInfo('ipfs').verify)
 })
 
-test('the trust panel gives each of the four schemes its own step', () => {
+test('the trust panel gives each of the two schemes its own step', () => {
   const cidStep = schemeSteps(`ipfs://${CID}/`)[0]
   assert.equal(cidStep.state, 'verified')
   assert.match(cidStep.detail, /the bytes are verified against the CID/)
@@ -54,18 +65,20 @@ test('the trust panel gives each of the four schemes its own step', () => {
   assert.equal(ipnsStep.state, 'verified')
   assert.match(ipnsStep.detail, /signed pointer/,
     'an IPNS answer is named as a pointer, never as an immutable address')
+  assert.notEqual(ipnsStep.detail, cidStep.detail,
+    'neither scheme borrows the other\'s sentence')
+  assert.equal(summarize(schemeSteps(`ipfs://${CID}/`)).state, 'verified')
 
-  // ipld:// is CID-verified exactly as ipfs:// is, and says so in its own
-  // words: the guarantee is per node on the path.
-  const ipldStep = schemeSteps(`ipld://${CID}/x`)[0]
-  assert.equal(ipldStep.state, 'verified')
-  assert.match(ipldStep.detail, /each node on the path is verified against its CID/)
-
-  // pubsub:// claims nothing, and the lock does not close on it.
-  const topic = schemeSteps('pubsub://topicname/')
-  assert.equal(topic[0].state, 'none')
-  assert.match(topic[0].detail, /not a content address/)
-  assert.equal(summarize(topic).state, 'partial')
+  // A retired scheme gets the default arm — "no verification path" — and NOT
+  // the namespace's content-addressed one. Under-claiming is the safe
+  // direction here; inheriting `verified` from `ipfs` would not be.
+  for (const gone of [`ipld://${CID}/x`, 'pubsub://topicname/']) {
+    const steps = schemeSteps(gone)
+    assert.equal(steps.length, 1, gone)
+    assert.equal(steps[0].state, 'none', gone)
+    assert.match(steps[0].detail, /no verification path/i, gone)
+    assert.notEqual(summarize(steps).state, 'verified', gone)
+  }
 })
 
 test('a bare CID is an address in this namespace, and a CIDv0 is written as its CIDv1 form', async () => {

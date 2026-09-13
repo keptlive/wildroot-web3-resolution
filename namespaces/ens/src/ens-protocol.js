@@ -233,8 +233,9 @@ export default function createEnsHandler ({
    * Resolve a .eth name to a content pointer.
    *
    * THE RULE THAT DECIDES THE SENTENCE. An error is an ANSWER about the name
-   * only when it carries revert data — the chain spoke, and WHICH revert
-   * decides between "not registered" and "no website". Every other failure
+   * only when it carries revert data from the RPC; WHICH revert decides
+   * between "no usable resolver" and "no website". Neither establishes
+   * registration or ownership. Every other failure
    * (no RPC reachable, a CCIP gateway that did not answer, a lookup that did
    * not terminate, a malformed result) is us not getting an answer, and is
    * reported as `unreachable`: nothing was learned about this name, so
@@ -282,12 +283,10 @@ export default function createEnsHandler ({
     try {
       raw = await call(deps.universalResolver, outer)
     } catch (err) {
-      // A REVERT IS THE CHAIN ANSWERING. The Universal Resolver reverts when
-      // no resolver exists for the name, which is "not registered"; a
-      // resolver that does not implement contenthash is registered and
-      // simply has no website. Saying the first about the second tells
-      // someone their own name does not exist. An error WITHOUT revert data
-      // is not an answer at all.
+      // A resolver can be missing or configured to an unusable address.
+      // Both are "no usable resolver", not evidence of registration status.
+      // Other resolver reverts retain the existing no-content classification.
+      // An error WITHOUT revert data supplies no answer about this name.
       const revert = String((err && err.revertData) || '')
       if (!revert) return { kind: 'unreachable', detail: String((err && err.message) || err) }
       return { kind: UR_ERRORS[revert.slice(0, 10).toLowerCase()] || 'no-content' }
@@ -400,8 +399,9 @@ export default function createEnsHandler ({
         `(${escapeHtml(resolution.detail || 'no endpoint answered')})`)
     }
     if (resolution.kind === 'no-resolver') {
-      return page(404, `${escapeHtml(name)} is not registered`,
-        'This .eth name has no resolver set on Ethereum, so there is nothing to load. ' +
+      return page(404, `${name} has no usable resolver`,
+        'The Ethereum resolver lookup found no usable resolver for this name. ' +
+        'This does not establish whether the name is registered. There is no website to load through this resolver. ' +
         'It was NOT looked up as a Handshake name.')
     }
     if (resolution.kind === 'no-content') {

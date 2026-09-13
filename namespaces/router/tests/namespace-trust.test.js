@@ -78,7 +78,7 @@ test('each scheme names its OWN verification step, not a generic one', () => {
   // statements of one fact, and they are checked against each other here.
   const named = {
     gemini: [/Connection/, /nothing establishes who answered/, 'unverified'],
-    pubsub: [/Content/, /not a content address/, 'none'],
+    ipns: [/Content/, /signed pointer/, 'verified'],
     ssb: [/Content/, /feed key/, 'verified'],
     magnet: [/Address/, /only a pointer to a torrent/, 'none'],
     did: [/Identifier/, /not audited/, 'unverified'],
@@ -167,11 +167,32 @@ test('the lock opens on exactly two conditions: a failed step, or a Connection o
   assert.equal(verdict('https://example.com/').open, false, 'unverified is not open')
   assert.equal(verdict('onion://abc.onion/').open, false,
     'the onion Connection step is `unverified`, not `none` — closed, and never green')
-  // A DNS plan that fails closed makes the name step FAIL, which opens the
-  // lock on a page that never loaded.
-  const failedDns = schemeSteps('https://example.com/', { mode: 'secure', servers: [], failClosed: true })
-  assert.equal(failedDns[0].state, 'failed')
-  assert.equal(summarize(failedDns).state, 'failed')
+  // A DNS policy that refuses new lookups is a SETTING, not an observation: the
+  // page in front of the user may have loaded from cache, so the step is
+  // `unverified` and names the policy, and the lock stays closed. Only a step
+  // that was actually checked and did not pass opens it.
+  const failClosed = schemeSteps('https://example.com/', { mode: 'secure', servers: [], failClosed: true })
+  assert.equal(failClosed[0].state, 'unverified')
+  assert.match(failClosed[0].detail, /configured policy, not an observed lookup failure/)
+  assert.equal(summarize(failClosed).state, 'partial')
+  assert.equal(verdict('https://example.com/').open, false)
+  // ...and an observed failure still does open it.
+  assert.equal(summarize([{ label: 'Domain name', state: 'failed', source: 'x' }]).state, 'failed')
+})
+
+test('summarize drops only steps marked NOT APPLICABLE, never a missing one', () => {
+  // `applicable: false` says "this check does not apply to this kind of page".
+  // It must never be reachable from "we could not run it": a `none` step with
+  // no flag still weakens the verdict, which is what keeps an absent
+  // protection from reading as a present one.
+  const base = [{ label: 'Page', state: 'verified', source: 'x' }]
+  assert.equal(summarize(base).state, 'verified')
+  assert.equal(summarize([...base, { label: 'Connection', state: 'none', source: 'x' }]).state, 'open')
+  assert.equal(summarize([...base, { label: 'Content', state: 'none', source: 'x' }]).state, 'partial')
+  assert.equal(summarize([...base, { label: 'Content', state: 'none', source: 'x', applicable: false }]).state,
+    'verified', 'an explicitly inapplicable step is the only kind that drops out')
+  assert.equal(summarize([{ label: 'Content', state: 'none', source: 'x', applicable: false }]).state,
+    'unknown', 'and dropping every step leaves nothing known, not a pass')
 })
 
 test('the lock follows the weakest link, and a failure never closes it', () => {
@@ -211,24 +232,36 @@ test('no scheme step ever claims obliviousness', () => {
   }
 })
 
-test('the ICANN name step distinguishes unencrypted, encrypted and oblivious', () => {
+test('the ICANN name step distinguishes configured, unconfigured and oblivious — and never claims to have watched', () => {
+  // Every arm is `unverified`: none of them observed the lookup this page used.
+  // What varies is the sentence, and each one has to be honest about which of
+  // "configured", "recently active" and "answered this name" it is stating.
   const plain = schemeSteps('https://example.com/', { mode: 'off', servers: [] })[0]
   assert.equal(plain.state, 'unverified')
-  assert.match(plain.source, /System DNS, unencrypted/)
+  assert.match(plain.source, /DNS lookup path not observed/)
+  assert.match(plain.detail, /secure DNS is disabled/i)
 
   const encrypted = schemeSteps('https://example.com/',
     { mode: 'secure', servers: ['https://dns.example/dns-query'] })[0]
-  assert.match(encrypted.source, /NOT oblivious/)
+  assert.match(encrypted.source, /Secure DNS configured: dns\.example — NOT oblivious/)
+  assert.match(encrypted.detail, /configured resolver list, not the endpoint observed/)
   assert.match(encrypted.detail, /Unencrypted DNS is refused/)
 
   const automatic = schemeSteps('https://example.com/',
     { mode: 'automatic', servers: ['https://dns.example/dns-query'] })[0]
   assert.match(automatic.detail, /falls back to unencrypted system DNS/)
 
+  // The oblivious arm needs a RECENT LOOKUP OF THIS HOST, with both endpoints.
   const oblivious = schemeSteps('https://example.com/', null,
-    { live: true, relay: 'relay.example', target: 'target.example' })[0]
-  assert.match(oblivious.source, /Oblivious DoH — relay relay\.example → target target\.example/)
+    { live: true, evidence: 'recent-lookup', host: 'example.com', relay: 'relay.example', target: 'target.example' })[0]
+  assert.match(oblivious.source, /Recent Oblivious DoH lookup — relay relay\.example → target target\.example/)
   assert.equal(oblivious.state, 'unverified', 'oblivious is a privacy property, not a verification')
+  assert.match(oblivious.detail, /not proof that this page used that answer/)
+
+  // A live bridge with no record of THIS host does not license the word.
+  const otherHost = schemeSteps('https://example.com/', { oblivious: true, mode: 'secure', servers: [] },
+    { live: true, evidence: 'recent-lookup', host: 'elsewhere.example', relay: 'relay.example', target: 'target.example' })[0]
+  assert.doesNotMatch(otherHost.source, /Recent Oblivious DoH lookup/)
 })
 
 test('the ICANN step describes the transport PLAN the engine was given', () => {
@@ -243,28 +276,30 @@ test('the ICANN step describes the transport PLAN the engine was given', () => {
   const secureOnly = schemeSteps('https://example.com/',
     { mode: 'secure', servers: ['https://bridge.local/dns-query'], oblivious: true })[0]
   assert.equal(secureOnly.state, 'unverified')
-  assert.match(secureOnly.source, /Oblivious bridge only — this name was not answered by it/)
-  assert.match(secureOnly.detail, /the bridge has no record of answering it/)
+  assert.match(secureOnly.source, /Oblivious bridge configured — no recent lookup evidence/)
+  assert.match(secureOnly.detail, /no recent successful bridge lookup recorded for example\.com/)
+  assert.match(secureOnly.detail, /may have reused a cached answer/)
 
   const automatic = schemeSteps('https://example.com/',
     { mode: 'automatic', servers: ['https://bridge.local/dns-query'], oblivious: true })[0]
-  assert.match(automatic.source, /Resolver not determined/)
-  assert.match(automatic.detail, /this lookup may have gone out in the clear/)
+  assert.match(automatic.source, /Resolver not determined — no recent oblivious lookup evidence/)
+  assert.match(automatic.detail, /does not show that fallback occurred/)
 
-  // `secure` with no server FAILS CLOSED: nothing resolves, rather than
-  // quietly resolving in the clear. That is a FAILED step, not an unverified
-  // one — the name was never looked up.
+  // `secure` with no server is a POLICY to refuse new lookups. The panel says
+  // exactly that and no more: it did not watch a lookup fail, and a cached
+  // answer may be what the page in front of the user loaded from.
   const failClosed = schemeSteps('https://example.com/',
     { mode: 'secure', servers: [], failClosed: true })[0]
-  assert.equal(failClosed.state, 'failed')
-  assert.match(failClosed.source, /Secure DNS with no server — lookups refused/)
-  assert.match(failClosed.detail, /Unencrypted DNS was refused rather than used/)
+  assert.equal(failClosed.state, 'unverified')
+  assert.match(failClosed.source, /Secure DNS configured to refuse new lookups/)
+  assert.match(failClosed.detail, /configured policy, not an observed lookup failure/)
+  assert.match(failClosed.detail, /cached answers may still exist/)
 
-  // A live bridge outranks every plan arm: it is the one case where the
-  // lookup really was oblivious.
+  // A recorded oblivious lookup of this host outranks every plan arm: it is the
+  // one case where anything was actually observed.
   const live = schemeSteps('https://example.com/',
     { mode: 'secure', servers: [], failClosed: true },
-    { live: true, relay: 'r.example', target: 't.example' })[0]
+    { live: true, evidence: 'recent-lookup', host: 'example.com', relay: 'r.example', target: 't.example' })[0]
   assert.match(live.source, /Oblivious DoH/)
 })
 
@@ -273,7 +308,28 @@ test('ens:// is TRUSTED and never green', () => {
   assert.equal(steps.length, 2)
   assert.equal(steps[0].state, 'unverified')
   assert.match(steps[0].detail, /does not run an Ethereum light client/)
-  assert.equal(steps[1].state, 'verified', 'the CONTENT is still content-addressed')
+  // The content step is a SECOND question, and the scheme does not answer it:
+  // an ENS name may point at IPFS, IPNS or Arweave, and which checks a given
+  // fetch completed is not known when this step is written.
+  assert.equal(steps[1].state, 'unverified',
+    'no byte check is claimed from the scheme alone')
+  assert.match(steps[1].detail, /scheme alone does not establish/)
+
+  // With a recorded result for THIS request, from the component that did the
+  // work, the step may say verified — and says which half is still trusted.
+  const evidence = { ens: { url: 'ens://vitalik.eth/', ok: true, protocol: 'ipfs', verifiedBytes: true } }
+  const withEvidence = schemeSteps('ens://vitalik.eth/', null, null, evidence)
+  assert.equal(withEvidence[1].state, 'verified')
+  assert.match(withEvidence[1].detail, /name-to-content mapping remains RPC-trusted/)
+  assert.equal(summarize(withEvidence).state, 'partial', 'and the lock still never goes green')
+  // A record for a DIFFERENT url, or one that did not verify bytes, does not.
+  for (const wrong of [
+    { ens: { url: 'ens://someone-else.eth/', ok: true, protocol: 'ipfs', verifiedBytes: true } },
+    { ens: { url: 'ens://vitalik.eth/', ok: true, protocol: 'arweave' } },
+    { ens: { url: 'ens://vitalik.eth/', ok: false, protocol: 'ipfs', verifiedBytes: true } }
+  ]) {
+    assert.equal(schemeSteps('ens://vitalik.eth/', null, null, wrong)[1].state, 'unverified')
+  }
   // The verdict is `partial` — the neutral closed lock an https:// page gets —
   // because the name→content binding rests on an RPC endpoint's word. The
   // registry row says the same sentence, and the two are checked against each

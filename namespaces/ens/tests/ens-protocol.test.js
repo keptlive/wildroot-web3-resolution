@@ -5,8 +5,8 @@
  *
  * IT ANSWERS THE CALL WE ACTUALLY MAKE. The stub used to model two eth_calls
  * — registry.resolver then resolver.contenthash — which is how this browser
- * resolved ENS until 2026-09-04 and is why `jesse.base.eth` came back "not
- * registered": the REGISTRY holds an entry for `base.eth`, not for names under
+ * resolved ENS until 2026-09-04 and is why `jesse.base.eth` did not resolve at
+ * all: the REGISTRY holds an entry for `base.eth`, not for names under
  * it, so a subname's resolver is only reachable through ENSIP-10 wildcard
  * resolution. A stub that models the old shape would keep passing while every
  * such name failed. It proves:
@@ -34,7 +34,7 @@ const UNIVERSAL_RESOLVER = '0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe'
 const CONTENTHASH_ABI = [{ type: 'function', name: 'contenthash', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'bytes' }] }]
 const UR_ABI = [{ type: 'function', name: 'resolve', stateMutability: 'view', inputs: [{ type: 'bytes' }, { type: 'bytes' }], outputs: [{ type: 'bytes' }, { type: 'address' }] }]
 const TEXT_ABI = [{ type: 'function', name: 'text', stateMutability: 'view', inputs: [{ type: 'bytes32' }, { type: 'string' }], outputs: [{ type: 'string' }] }]
-/** ResolverNotFound(bytes) — what the live contract reverts for an unregistered name. */
+/** ResolverNotFound(bytes) — what the live contract reverts when no resolver is reachable for a name. */
 const RESOLVER_NOT_FOUND = '0x77209fe8' + '00'.repeat(32)
 
 const CHAIN_LIST = [{ id: 1, name: 'Ethereum', rpcUrls: ['http://rpc.test'], contracts: { ensRegistry: { address: REGISTRY } } }]
@@ -119,7 +119,10 @@ test('a name with no resolver fails honestly — and is NOT looked up as Handsha
   const res = await handler(new Request('ens://nothing.eth/'))
   assert.equal(res.status, 404)
   const body = await res.text()
-  assert.match(body, /not registered/i)
+  assert.match(body, /has no usable resolver/i)
+  // The lookup learned something about the RESOLVER only: a registered name
+  // whose owner set no resolver reverts exactly the same way.
+  assert.match(body, /does not establish whether the name is registered/i)
   assert.match(body, /NOT looked up as a Handshake name/i)
   assert.equal(ipfsFetch.seen.length, 0)
   assert.equal(res.headers.get('X-Resolution-Namespace'), 'ens')
@@ -145,10 +148,11 @@ test('resolve() returns a content pointer and never an hns target', async () => 
 })
 
 // ---------------------------------------------------------------------------
-// "Not registered" versus "we could not ask". The rule: an error is an ANSWER
-// about the name only when it carries revert data. Everything else — no RPC
-// reachable, a CCIP gateway that did not answer, a malformed result — is us
-// not getting an answer, and a 404 there would state a fact never obtained.
+// "The chain answered" versus "we could not ask". The rule: an error is an
+// ANSWER only when it carries revert data, and it answers about the RESOLVER,
+// never about registration. Everything else — no RPC reachable, a CCIP gateway
+// that did not answer, a malformed result — is us not getting an answer, and a
+// 404 there would state a fact never obtained.
 // ---------------------------------------------------------------------------
 
 const TWO_RPCS = [{ id: 1, name: 'Ethereum', rpcUrls: ['http://rpc-a.test', 'http://rpc-b.test'] }]
@@ -162,7 +166,7 @@ test('every RPC failing is 502 "unknown, not absent" — never a 404 about the n
   assert.deepEqual(tried, ['http://rpc-a.test', 'http://rpc-b.test'], 'each endpoint gets its own attempt')
   const body = await res.text()
   assert.match(body, /unknown — not absent/)
-  assert.doesNotMatch(body, /not registered|has no website/)
+  assert.doesNotMatch(body, /not registered|usable resolver|has no website/)
   assert.equal(res.headers.get('X-Resolution-Namespace'), 'ens')
 })
 
@@ -180,21 +184,21 @@ test('a CCIP-Read lookup whose gateway never answers is 502, not "has no website
     return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, error: { code: 3, data: revert } }) }
   })(new Request('ens://offchain.eth/'))
   assert.equal(res.status, 502)
-  assert.doesNotMatch(await res.text(), /has no website|not registered/)
+  assert.doesNotMatch(await res.text(), /has no website|usable resolver|not registered/)
 })
 
 test('a malformed RPC result is 502, never a claim about the name', async () => {
   const res = await handlerWith(async () => ({ ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: '0x1234' }) }))(
     new Request('ens://vitalik.eth/'))
   assert.equal(res.status, 502)
-  assert.doesNotMatch(await res.text(), /has no website|not registered/)
+  assert.doesNotMatch(await res.text(), /has no website|usable resolver|not registered/)
 })
 
 test('WHICH revert decides the sentence, and an unknown selector is "no website"', async () => {
   const reverting = (data) => async () => ({ ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, error: { code: 3, data } }) })
-  const notFound = await handlerWith(reverting(RESOLVER_NOT_FOUND))(new Request('ens://nothing.eth/'))
-  assert.equal(notFound.status, 404)
-  assert.match(await notFound.text(), /is not registered/)
+  const noResolver = await handlerWith(reverting(RESOLVER_NOT_FOUND))(new Request('ens://nothing.eth/'))
+  assert.equal(noResolver.status, 404)
+  assert.match(await noResolver.text(), /has no usable resolver/)
   const noProfile = await handlerWith(reverting('0x7b1c461b' + '00'.repeat(32)))(new Request('ens://wallet-only.eth/'))
   assert.equal(noProfile.status, 404)
   assert.match(await noProfile.text(), /has no website/)
@@ -226,7 +230,7 @@ test('an RPC error that merely echoes hex is not revert data — 502, never a cl
   const echo = async () => ({ ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, error: { code: -32602, message: 'invalid argument 0: json: cannot unmarshal 0xeEeEEEeE14D718C2B47D9923Deab1335E144EeEe' } }) })
   const res = await handlerWith(echo)(new Request('ens://vitalik.eth/'))
   assert.equal(res.status, 502)
-  assert.doesNotMatch(await res.text(), /has no website|not registered/)
+  assert.doesNotMatch(await res.text(), /has no website|usable resolver|not registered/)
   // Structured revert data, and a message that says "reverted", are answers.
   const structured = async () => ({ ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, error: { code: 3, message: 'execution reverted', data: RESOLVER_NOT_FOUND } }) })
   assert.equal((await handlerWith(structured)(new Request('ens://nothing.eth/'))).status, 404)

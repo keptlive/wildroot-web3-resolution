@@ -68,20 +68,46 @@ test('a form this browser does not read is refused BY NAME', async () => {
   assert.match(await nothing.text(), /no bittorrent infohash/)
 })
 
-// --- the handler: magnet: -> bittorrent:// ----------------------------------
+// --- the handler: magnet: -> the consent page -------------------------------
 
 test('btih (40 hex) redirects into the infohash branch', async () => {
   const handler = await createMagnetHandler()
   const res = handler(new Request(`magnet:?xt=urn:btih:${INFOHASH}&dn=bunny`))
   assert.equal(res.status, 308)
-  assert.equal(res.headers.get('Location'), `bittorrent://${INFOHASH}/`)
+  // The infohash branch of the consent page — not bittorrent://, which would
+  // add the torrent and start peer traffic for a link that was merely
+  // dispatched here.
+  assert.equal(res.headers.get('Location'), `wildroot://torrents?add=${INFOHASH}&dn=bunny`)
 })
 
 test('btpk (64 hex) redirects into the mutable branch', async () => {
   const handler = await createMagnetHandler()
   const res = handler(new Request(`magnet:?xs=urn:btpk:${PUBKEY}`))
   assert.equal(res.status, 308)
-  assert.equal(res.headers.get('Location'), `bittorrent://${PUBKEY}`)
+  // The mutable branch of the same consent page. A BEP-46 address opens a
+  // site through bt-fetch rather than adding a managed torrent, so the page
+  // is told which of the two it is being asked to confirm — but the answer is
+  // still an inert page, never bittorrent://<key>.
+  assert.equal(res.headers.get('Location'), `wildroot://torrents?mutable=${PUBKEY}`)
+})
+
+test('no magnet reaches a peer-backed URL through the handler', async () => {
+  // Defence in depth: the handler calls the same rewrite the navigation entry
+  // points do, so a redirect or a subresource that arrives here WITHOUT the
+  // main-frame rewrite still lands at consent. No `Location` this handler can
+  // emit carries network authority.
+  const handler = await createMagnetHandler()
+  for (const url of [
+    `magnet:?xt=urn:btih:${INFOHASH}`,
+    `magnet:?xs=urn:btpk:${PUBKEY}`,
+    `magnet:?xs=urn:btpk:${PUBKEY}&xt=urn:btih:${INFOHASH}`,
+    `magnet:?xt=urn:btmh:${V2_MULTIHASH}`,
+    'magnet:?xt=urn:sha1:whatever',
+    'magnet:?dn=nothing'
+  ]) {
+    const location = handler(new Request(url)).headers.get('Location')
+    assert.ok(location === null || location.startsWith('wildroot://torrents?'), url)
+  }
 })
 
 test('the same magnet parses correctly EVERY time (the /g lastIndex trap)', async () => {
@@ -126,7 +152,7 @@ test('a HYBRID v1+v2 magnet resolves in EITHER xt order', async () => {
   ]) {
     const res = handler(new Request(url))
     assert.equal(res.status, 308, url)
-    assert.equal(res.headers.get('Location'), `bittorrent://${INFOHASH}/`, url)
+    assert.equal(res.headers.get('Location'), `wildroot://torrents?add=${INFOHASH}`, url)
   }
 })
 
@@ -141,6 +167,15 @@ test('an infohash magnet becomes a confirmation URL, not a bittorrent one', () =
     `wildroot://torrents?add=${INFOHASH}&dn=Big%20Buck%20Bunny`)
 })
 
+test('a mutable magnet becomes a confirmation URL too', () => {
+  // The consent rule has no exception: a BEP-46 address opens a site through
+  // bt-fetch, which is still peer traffic the user did not ask for.
+  assert.equal(magnetToTorrentsPage(`magnet:?xs=urn:btpk:${PUBKEY}`),
+    `wildroot://torrents?mutable=${PUBKEY}`)
+  assert.equal(magnetToTorrentsPage(`magnet:?xs=urn:btpk:${PUBKEY.toUpperCase()}&dn=My+Site`),
+    `wildroot://torrents?mutable=${PUBKEY}&dn=My%20Site`)
+})
+
 test('a hostile display name cannot break out of the URL', () => {
   const nasty = magnetToTorrentsPage(`magnet:?xt=urn:btih:${INFOHASH}&dn=${encodeURIComponent('" onload=alert(1) &add=evil')}`)
   assert.match(nasty, new RegExp(`^wildroot://torrents\\?add=${INFOHASH}&dn=`))
@@ -149,9 +184,9 @@ test('a hostile display name cannot break out of the URL', () => {
   assert.equal(new URL(nasty).searchParams.get('add'), INFOHASH)
 })
 
-test('non-infohash magnets keep their existing path', () => {
-  assert.equal(magnetToTorrentsPage(`magnet:?xs=urn:btpk:${PUBKEY}`), null)
+test('a magnet with no address this browser reads is declined', () => {
   assert.equal(magnetToTorrentsPage('magnet:?dn=nothing'), null)
+  assert.equal(magnetToTorrentsPage(`magnet:?xt=urn:btmh:${V2_MULTIHASH}`), null)
   assert.equal(magnetToTorrentsPage('https://example.com/'), null)
   assert.equal(magnetToTorrentsPage(''), null)
   assert.equal(magnetToTorrentsPage(null), null)
@@ -159,18 +194,18 @@ test('non-infohash magnets keep their existing path', () => {
 })
 
 test('handler and rewrite AGREE about a magnet carrying both xs and xt', async () => {
-  // The mutable key wins in both readers: the handler 308s to the BEP-46
-  // address, and the rewrite declines the magnet rather than offering to add
-  // the incidental infohash as a static torrent. Which reader sees a magnet
-  // depends on whether the user clicked it (rewrite, via src/window.js) or it
-  // was dispatched (handler), so a disagreement here is one magnet with two
-  // meanings.
+  // The mutable key wins in both readers, and both readers answer with the
+  // SAME consent URL — the handler because it calls the rewrite. Which reader
+  // sees a magnet depends on whether the user clicked it (rewrite, via
+  // src/window.js) or it was dispatched (handler), so a disagreement here is
+  // one magnet with two meanings.
   const both = `magnet:?xs=urn:btpk:${PUBKEY}&xt=urn:btih:${INFOHASH}`
+  const consent = `wildroot://torrents?mutable=${PUBKEY}`
   const handler = await createMagnetHandler()
-  assert.equal(handler(new Request(both)).headers.get('Location'), `bittorrent://${PUBKEY}`)
-  assert.equal(magnetToTorrentsPage(both), null)
+  assert.equal(handler(new Request(both)).headers.get('Location'), consent)
+  assert.equal(magnetToTorrentsPage(both), consent)
   // The precedence is `xs` wherever it sits, not "the first parameter".
   const reversed = `magnet:?xt=urn:btih:${INFOHASH}&xs=urn:btpk:${PUBKEY}`
-  assert.equal(handler(new Request(reversed)).headers.get('Location'), `bittorrent://${PUBKEY}`)
-  assert.equal(magnetToTorrentsPage(reversed), null)
+  assert.equal(handler(new Request(reversed)).headers.get('Location'), consent)
+  assert.equal(magnetToTorrentsPage(reversed), consent)
 })

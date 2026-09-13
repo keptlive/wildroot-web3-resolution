@@ -56,10 +56,9 @@ export function decide (url, resourceType) {
 /**
  * Compose the leak guard with an optional second stage (the ad blocker).
  *
- * The URL filter stays http/https-only, deliberately: routing every scheme
- * through this listener would put hns://, ipfs:// and friends through the
- * blocker's matcher for no benefit — ad networks live on http(s), and the
- * custom-protocol handlers should not have a webRequest hook in their path.
+ * HTTP(S) requests enter the namespace/adblock chain. Wildroot API requests
+ * and WebSockets have separate authority gates in this same listener; they
+ * never enter the blocker's matcher or the HTTP namespace rewrite.
  *
  * @param {import('electron').Session} session
  * @param {{next?: ((details: Electron.OnBeforeRequestListenerDetails) =>
@@ -70,15 +69,21 @@ export function decide (url, resourceType) {
 // can mutate the object every allowed request shares — and it keeps
 // n/no-callback-literal satisfied without an eslint-disable.
 const allow = () => ({})
+const refuse = () => ({ cancel: true })
 
-export function installSubresourceGuard (session, { next = null, chromeApi = null } = {}) {
+export function installSubresourceGuard (session, { next = null, chromeApi = null, websocketPolicy = null } = {}) {
   session.webRequest.onBeforeRequest(
     // `wildroot://` is here for ONE reason: the Files API is reachable by
     // fetch() from any page, and Electron allows exactly one
     // onBeforeRequest per session — so the gate has to live in this listener
     // or not at all. See chromeApi below.
-    { urls: ['http://*/*', 'https://*/*', 'wildroot://*/*'] },
+    { urls: ['http://*/*', 'https://*/*', 'wildroot://*/*', 'ws://*/*', 'wss://*/*'] },
     (details, callback) => {
+      if (/^wss?:/i.test(details.url)) {
+        try { return callback(websocketPolicy ? websocketPolicy(details) : allow()) } catch {
+          return callback(refuse()) // a privacy policy error fails closed
+        }
+      }
       // WHO IS ASKING FOR THE FILES API. Answered by the asking WebContents'
       // URL, because a custom-scheme request carries no Origin, no
       // Sec-Fetch-Site and no initiator (measured in Electron 43). A page

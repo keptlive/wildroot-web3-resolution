@@ -186,7 +186,7 @@ answer.
 
 | Thing | Why not |
 |---|---|
-| **ENS text records** (`text(bytes32,string)`) — `url`, `description`, `com.twitter`, the avatar | Nothing renders them. They would be the natural content of a "name info" panel, which does not exist. |
+| **ENS text records** (`text(bytes32,string)`) beyond the seven keys the no-website page lists (EN-1) | Nothing renders them. They would be the content of a "name info" panel, which does not exist; a successful navigation still reads one record. |
 | **Multichain address records** (ENSIP-9) | A wallet's job, not a browser's. |
 | **`Registry.ttl(bytes32)`** | Nothing caches (EN-6), so there is nothing for a TTL to govern. |
 | **ENS on an L2, read natively** | Reached through CCIP-Read (SPEC §6) like every other client without an L2 light client. Reading the L2 directly would swap one trusted RPC for another. |
@@ -203,6 +203,48 @@ that needs a record other than `contenthash` needs a different tool.
 
 ---
 
+### EN-8. The `Content` trust step needs evidence this specification does not carry a channel for
+
+**What.** The panel's second step (SPEC §7) is `verified` only when it is handed
+a result for the exact request being described — same URL, `ok`, a protocol of
+`ipfs`/`ipns`/`arweave`, and `verifiedBytes` true — through `schemeSteps()`'s
+fourth argument (`../../src/trust-path.js:261`, `ensContentStep` at
+`../../src/trust-path.js:442`). **Nothing in this repository produces that
+object.** It comes from the process that performed the fetch: in Wildroot, the
+main process that ran the IPFS or Arweave handler. An implementation that takes
+this code and wires nothing in gets an `unverified` `Content` step on every ENS
+page, for ever.
+
+**The standard says.** No cited standard governs an interface's trust output.
+The governing rule is the spine's own and this chapter's §7: a step may be
+`verified` only where *this client* completed the check, and a claim the client
+cannot substantiate must not be shown. EIP-1577 defines a **pointer**, and a
+pointer is a statement about what bytes should be, never a record that they
+were checked.
+
+**Why.** The alternative is worse in exactly the way the rule exists to
+prevent. Grading the content from the scheme, the codec or a response header
+produces a green-adjacent claim for a fetch that may have been a plain gateway
+read — and for Arweave it is wrong even in principle, because an immutable
+transaction id says nothing about which bytes a gateway handed over. An absent
+result is honestly reported as absent; an invented one is not recoverable.
+
+**Consequence.** The specification is complete about *when* the step may be
+`verified` and silent about *how* the evidence reaches the trust builder: the
+shape is documented (SPEC §7) and the transport is not. Two conforming
+implementations can therefore differ in a visible way — one showing `Content`
+verified for a CID-checked fetch, one showing it unverified — with neither in
+the wrong. The verdict does not differ: `Name records` is unverified either
+way, so the lock stays **TRUSTED** in both (SPEC §7).
+
+**Status: PARTIALLY IMPLEMENTED.** The rule and the shape are specified and
+pinned by `../../tests/trust-path.test.js`; the channel is not. The evidence
+must keep coming from the process that performed the fetch — a response header
+the fetched host could write is not evidence, and an implementation that reads
+one has re-introduced the claim this entry exists to prevent.
+
+---
+
 ## 2. Things we are not sure about
 
 ### 2.1. Is `ens://` TRUSTED, or OPEN?
@@ -216,7 +258,9 @@ The case for **TRUSTED**: the honest comparison is with an ordinary `https://`
 page, where a CA vouched for the name and the browser believed it. An ENS
 resolution is the same *shape* of trust — one third party's word for a
 name-to-thing binding — over a connection that is at least encrypted, and the
-content at the end is content-addressed, which is more than `https://` offers.
+record names the content by address rather than by location, which is more
+than `https://` offers (whether this page's bytes were checked against that
+address is then a fact about the fetch, EN-8).
 Painting it OPEN puts it in the same bucket as plain `http://`, which is
 strictly worse and is a claim of its own.
 
@@ -309,8 +353,8 @@ time rather than at fetch time.
 `web3` is registered with the peer-to-peer privilege set — standard, secure,
 service-worker-capable, fetch-enabled — so an arbitrary contract gets a real,
 persistent, secure-context origin keyed by its own address. `ens://` is held at
-an opaque origin for a resolution that is better verified, because the content
-at the end of an ENS pointer is at least content-addressed. The privilege
+an opaque origin for a resolution that is better verified, because an ENS
+pointer at least names its content by address. The privilege
 gradient runs the wrong way.
 
 **Recommendation.** Demote `web3` to `ens://`'s posture — non-standard,

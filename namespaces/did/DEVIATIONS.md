@@ -77,8 +77,9 @@ question the callers ask.
 operator's database lookup*. It is the same shape of gap as the `ens://`
 handler's — the binding is RPC-trusted, not chain-proven — and this chapter
 reports it the same way: SPEC §4 marks the step unverified, the lock is
-TRUSTED and never green, and the trust panel says in words that this is the
-server's word.
+TRUSTED and never green, and the trust panel names the hop it took — "DID
+directory over HTTPS" — and says in the same breath that the PLC operation log
+is not audited here.
 
 **Status: OPEN**, and it is the highest-value thing that could be *added*
 rather than fixed. Fetch the audit log, verify the operation chain — each
@@ -178,12 +179,52 @@ keep the AppView only as a last resort reported as unverified. See DI-D1.
 
 ---
 
+### DI-12. A locally derived DID document proves nothing about possession or control
+
+**What.** `did:key`, `did:jwk` and `did:pkh` are answered without a network
+request, from the identifier alone, and the key material is validated rather
+than merely measured: canonical multicodec prefixes, a re-exporting canonical
+PKCS#1 encoding for RSA, prime-order-subgroup checks for Ed25519, a low-order
+rejection for X25519, an OpenSSL-accepted compressed point for every other
+curve, and a full JWK import for `did:jwk` (`src/did-local.js:43`, `:75`,
+`:122`, `:180`; SPEC §5.1a). The response carries
+`X-Resolution-Trust: derived` and the trust step for it stays **unverified**,
+saying in words that deriving a document proves no possession and no control
+(`../../src/trust-path.js:363`).
+
+**The standard says.** The did:key, did:jwk and did:pkh method specifications
+define the document as a **function of the identifier**: a conforming resolver
+computes it and is finished. None of them defines an authentication step, and
+W3C DID Core §5.3 is explicit that a verification method in a document is a
+*claim about* a key, not evidence that anyone holds it — authentication is a
+separate proof, made against the document, at use time.
+
+**Why.** The validation exists so that a document this resolver emits contains
+key material a verifier can actually use, and so that one key has exactly one
+spelling. It cannot do more than that: the identifier is public by
+construction, so anyone may present anyone else's.
+
+**Consequence.** `derived` is the strongest state in this chapter and it is
+still not `verified`. An interface that read "no lookup was needed" as "this is
+the person" would be wrong about every one of these methods, which is why the
+step says the opposite out loud. The residual risk of the validation itself is
+availability, not authenticity: a key type OpenSSL or `@noble/curves` refuses
+is a `400` here even if some other resolver would have derived a document from
+it.
+
+**Status: DELIBERATE.** Validate the key, claim nothing about its holder, and
+say which of the two you did. The honest limit is part of the output, not a
+caveat in a document nobody reads.
+
+---
+
 ### Experimental: identity anchors
 
-The two deviations below are in the **experimental** part of this chapter
-(SPEC §9): record formats that are shipped and signed by the browser's
-keystore but are not a proposed standard and may change. They are separated
-here so a reader does not weigh them against the stable resolution path.
+The deviations below are in the **experimental** part of this chapter
+(SPEC §9): record and receipt formats that are shipped and signed by the
+browser's keystore but are not a proposed standard and may change. They are
+separated here so a reader does not weigh them against the stable resolution
+path.
 
 ### DI-10. Nothing enforces that an identity anchor's `epoch` moves forward
 
@@ -246,6 +287,79 @@ operator's word, exactly the thing `_hns` was built to stop being.
 its own — the `hns:nostr:` `d`-tag prefix, by the same argument that makes
 `hns:atproto:` non-interchangeable with `hns:` (SPEC §9.3) — or remove it from
 the code's documentation until it is real. Half a format is worse than either.
+
+---
+
+### DI-13. Version 1 of the atproto receipt keeps a lowercasing preimage
+
+**What.** An atproto binding receipt is versioned (SPEC §9.3). Version 2
+canonicalises the subject per method. **Version 1 lowercases the whole
+identifier** — `did.trim().toLowerCase()` — and is retained exactly
+(`src/receipt.js:115`). Signing a `did:web:` **path** binding at version 1 is
+refused rather than mis-bound (`src/receipt.js:143`), and a verifier takes the
+version from the receipt and never retries the other one
+(`src/receipt.js:181`).
+
+**The standard says.** The W3C did:web method maps a DID's colon-separated
+segments onto a URL: the first is the domain, with an optional percent-encoded
+port, and the rest are **path** segments. DNS names are case-insensitive
+(RFC 1035 §2.3.3, RFC 4343; label syntax and lengths from RFC 1035 §2.3.1 and
+RFC 1123 §2.1) so folding the domain is sound; a URL path is
+case-sensitive, and RFC 3986 §6.2.2.1 limits case normalisation to the scheme
+and host for exactly that reason. Lowercasing a whole `did:web` identifier is
+therefore not the canonicalisation the method implies.
+
+**Why.** Version-1 receipts are **published and are still verified**. The
+deployed registry reconstructs them with the lowercased subject, so any change
+to that preimage — including a correct one — invalidates every receipt in the
+field. The fix is a new version, not an edit to the old one.
+
+**Consequence.** Two preimages exist, and which one applies is data rather than
+inference. A version-1 receipt cannot express a case-sensitive `did:web` path,
+so those bindings are refused at signing time instead of being silently folded
+into a different subject — including when the path is already lowercase, since
+the receipt would then be indistinguishable from one binding a differently
+cased path. The cost is that path bindings need a version-2-aware registry
+before they can be issued at all.
+
+**Status: DELIBERATE** for as long as version-1 receipts are deployed. The
+compatibility is deliberate; the lowercasing is not defended on its merits, and
+version 2 is what an implementation starting today should sign.
+
+---
+
+### DI-14. Only `did:plc` and `did:web` may be the subject of a binding receipt
+
+**What.** `canonicalAtprotoDid()` admits a `did:plc` of exactly 24 lowercase
+base32 characters and a `did:web` whose domain is valid (labels of at most 63
+characters, name of at most 253, not an IP literal, optional `%3A<port>` in
+1–65535) with path segments that are non-empty, are not `.` or `..`, and carry
+no separator or control character once percent-decoded. Every other method,
+and every malformed instance of those two, is refused before signing
+(`src/receipt.js:152`).
+
+**The standard says.** The AT Protocol identity specification admits `did:plc`
+and `did:web` as account DIDs and says a client should reject others; the
+did:plc method fixes its identifier as base32 of a truncated hash, which is
+where the 24-character form comes from. W3C DID Core §3.1 permits any
+registered method in the syntax itself, so this is narrower than DID Core
+alone.
+
+**Why.** A receipt is an authorisation, and an authorisation over a subject
+nobody can resolve is a signature over a string. Narrowing at signing time also
+removes the case-folding question for every method that is not one of these
+two, rather than answering it per method later.
+
+**Consequence.** A binding to an account whose DID uses another method — a
+`did:key` account, a future method — cannot be signed here, and would need this
+rule extended alongside a canonicalisation for it. A malformed `did:plc` fails
+at signing rather than producing a receipt that never verifies against a real
+account.
+
+**Status: DELIBERATE.** The admissible set matches the network the binding is
+for, and refusal happens where the user can still be told.
+
+---
 
 ---
 
@@ -486,10 +600,15 @@ more than a tidy package (SPEC, *Layout*).
 reading or writing a repository, rendering a feed. This chapter ends at "here
 is the DID document / here is the PDS / here is the key".
 
-**Dependencies.** This chapter adds exactly one runtime dependency beyond the
-Node standard library and the shared modules of `../../src/`:
-**`@noble/curves`**, for BIP-340 over secp256k1, reached through `src/keys.js`
-and `src/nostr-event.js`. `src/did-protocol.js`, `src/unimplemented-protocol.js`,
+**Dependencies.** Beyond the Node standard library and the shared modules of
+`../../src/`, this chapter uses two runtime dependencies:
+**`@noble/curves`**, for BIP-340 over secp256k1 through `src/keys.js` and
+`src/nostr-event.js`, and for the Ed25519 and X25519 point checks in
+`src/did-local.js` (SPEC §5.1a); and **`multiformats`**, for the base58btc
+decode of a `did:key` identifier. `src/did-local.js` also uses `node:crypto`
+— `createPublicKey` and `ECDH.convertKey` — to import a key rather than only
+measure it, which is what makes an unusable key a `400` here instead of a
+verifier's problem later. `src/did-protocol.js`, `src/unimplemented-protocol.js`,
 `src/bsky.js` and `src/xrpc.js` need nothing beyond `fetch`, `Response`, `URL`
 and `AbortSignal` from the platform; `src/gate.js` adds only the shared
 `../../src/delivery-mode.js`, for the words its refusal carries.

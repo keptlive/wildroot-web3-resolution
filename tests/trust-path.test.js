@@ -171,24 +171,36 @@ test('a NON-oblivious Handshake lookup says NOT oblivious, loudly', () => {
   assert.match(name.detail, /saw your address and the name together/)
 })
 
-test('ICANN names name the real resolver, and never imply obliviousness', () => {
-  // What the user actually asked for: the lock must say how THIS name was
-  // resolved, for every name — and https:// does not use our oblivious path.
+test('ICANN names name the CONFIGURED resolver, never imply obliviousness, and never claim the path was observed', () => {
+  // The lock must say how THIS name was resolved — and for an http(s) host
+  // the answer is that this process did not see the lookup. Chromium resolves
+  // it, from its own setting and its own cache. So the step names the
+  // configuration, says it is configuration, and claims nothing more.
   const dns = {
     mode: 'automatic',
     servers: ['https://dns.quad9.net/dns-query', 'https://cloudflare-dns.com/dns-query']
   }
   const step = byLabel(schemeSteps('https://example.com', dns), 'Domain name')
-  assert.match(step.source, /dns\.quad9\.net/, 'name the resolver that did it')
+  assert.equal(step.state, 'unverified')
+  assert.match(step.source, /dns\.quad9\.net/, 'name the resolver that was configured')
   assert.match(step.source, /NOT oblivious/)
+  assert.match(step.detail, /not the endpoint observed serving this page/)
   assert.match(step.detail, /falls back to/, 'automatic mode must disclose the plaintext fallback')
 
   const strict = byLabel(schemeSteps('https://example.com', { mode: 'secure', servers: dns.servers }), 'Domain name')
-  assert.match(strict.detail, /refused/)
+  assert.match(strict.detail, /Unencrypted DNS is refused/)
+
+  // A secure plan with nothing to point at is a configured refusal of new
+  // lookups, not an observed failure: a cached answer may still have served
+  // the page, so the state is `unverified` and never `failed`.
+  const closed = byLabel(schemeSteps('https://example.com', { mode: 'secure', servers: [], failClosed: true }), 'Domain name')
+  assert.equal(closed.state, 'unverified')
+  assert.match(closed.source, /Secure DNS configured to refuse new lookups/)
+  assert.match(closed.detail, /not an observed lookup failure/)
 
   const none = byLabel(schemeSteps('https://example.com', { mode: 'off', servers: [] }), 'Domain name')
-  assert.match(none.source, /unencrypted/i)
-  assert.match(none.detail, /in the clear/)
+  assert.match(none.source, /not observed/i)
+  assert.match(none.detail, /not observed here/)
 })
 
 test('no scheme step ever claims obliviousness it did not have', () => {
@@ -325,17 +337,41 @@ test('an unreachable zone carries its REASON into the panel', () => {
   assert.match(records.detail, /DS lookup for pinner\.hns failed/)
 })
 
-test('ens:// names the RPC hop instead of claiming no verification path', () => {
+test('ens:// names the RPC hop, and its Content step waits for evidence', () => {
   // ens-protocol.js marks its responses `ens-rpc-unverified` and keeps the
-  // lock open for it. Nothing read that header, and schemeSteps had no case,
-  // so the panel fell through to "this browser has no verification path for
-  // this scheme" — silent about the one hop that needs saying, on a page whose
-  // content IS verified. The `_op` route already gets this right.
+  // lock open for it, so the panel names that hop rather than falling through
+  // to "this browser has no verification path for this scheme". What it may
+  // NOT do is grade the content from the scheme: an ENS name can point at
+  // IPFS, at IPNS or at Arweave, and only a result for THIS request says
+  // whether the bytes were checked.
   const steps = schemeSteps('ens://vitalik.eth/')
   const records = steps.find((s) => s.label === 'Name records')
   assert.equal(records.state, 'unverified')
   assert.match(records.source, /RPC/)
-  assert.equal(steps.find((s) => s.label === 'Content').state, 'verified')
+  const content = steps.find((s) => s.label === 'Content')
+  assert.equal(content.state, 'unverified', 'no evidence, no claim')
+  assert.match(content.source, /not recorded/)
   assert.equal(summarize(steps).state, 'partial')
   assert.ok(!steps.some((s) => /no verification path/i.test(s.detail || '')))
+
+  // With a main-process result for this exact request, the Content step is
+  // verified — and still says the name-to-content mapping is RPC-trusted.
+  const url = 'ens://vitalik.eth/'
+  const withEvidence = schemeSteps(url, null, null,
+    { ens: { url, ok: true, protocol: 'ipfs', verifiedBytes: true } })
+  const verified = withEvidence.find((s) => s.label === 'Content')
+  assert.equal(verified.state, 'verified')
+  assert.match(verified.detail, /remains RPC-trusted/)
+  assert.equal(summarize(withEvidence).state, 'partial', 'the RPC hop still decides the verdict')
+
+  // Evidence for a DIFFERENT request proves nothing about this one.
+  const stale = schemeSteps(url, null, null,
+    { ens: { url: 'ens://other.eth/', ok: true, protocol: 'ipfs', verifiedBytes: true } })
+  assert.equal(stale.find((s) => s.label === 'Content').state, 'unverified')
+
+  // An Arweave-backed name gets its own sentence: an immutable id is not a
+  // byte check.
+  const ar = schemeSteps(url, null, null,
+    { ens: { url, ok: true, protocol: 'arweave', verifiedBytes: false } })
+  assert.match(ar.find((s) => s.label === 'Content').detail, /immutable transaction id does not by itself verify gateway bytes/)
 })

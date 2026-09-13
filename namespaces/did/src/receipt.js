@@ -108,21 +108,24 @@ export function verifyClaim ({ name, publicKey, epoch, createdAt, sig }) {
 
 /**
  * The unsigned atproto-binding event, reconstructed the same way by signer and
- * verifier. `did` is lowercased to match what the panel stores and verifies.
+ * verifier. Version 1 retains the historical lowercase preimage EXACTLY.
+ * Version 2 is explicit: a verifier must get its version from the receipt,
+ * never infer it or retry another version after a failed signature.
  */
-export function atprotoEvent ({ name, publicKey, did, epoch, createdAt }) {
+export function atprotoEvent ({ name, publicKey, did, epoch, createdAt, version = 1 }) {
   if (!isPublicKeyHex(publicKey)) throw new Error('publicKey must be 64 lowercase hex')
   requireEpoch(epoch)
   if (!Number.isInteger(createdAt) || createdAt <= 0) {
     throw new Error('createdAt must be a unix timestamp in seconds')
   }
   if (typeof did !== 'string' || !did.trim()) throw new Error('did is required')
+  if (version !== 1 && version !== 2) throw new Error('unsupported atproto receipt version')
   return {
     pubkey: publicKey,
     created_at: createdAt,
     kind: CLAIM_KIND,
-    tags: [['v', 'hns1'], ['d', `hns:atproto:${normalizeName(name)}`],
-      ['epoch', String(epoch)], ['did', did.trim().toLowerCase()]],
+    tags: [['v', `hns${version}`], ['d', `hns:atproto:${normalizeName(name)}`],
+      ['epoch', String(epoch)], ['did', version === 1 ? did.trim().toLowerCase() : canonicalAtprotoDid(did)]],
     content: ''
   }
 }
@@ -132,20 +135,53 @@ export function atprotoEvent ({ name, publicKey, did, epoch, createdAt }) {
  * full event plus the compact { createdAt, sig } the API and the `_atproto`
  * record embed.
  */
-export function signAtproto ({ name, publicKey, did, epoch, createdAt }, privateKey) {
+export function signAtproto ({ name, publicKey, did, epoch, createdAt, version = 1 }, privateKey) {
+  did = canonicalAtprotoDid(did)
+  // The deployed registry reconstructs hns1 receipts. Its lowercase subject
+  // cannot represent a case-sensitive web path safely, even when THIS path
+  // happens to be lowercase. New path bindings need coordinated v2 support.
+  if (version === 1 && did.startsWith('did:web:') && did.slice(8).includes(':')) {
+    throw new Error('did:web path bindings require atproto receipt version 2 and registry support')
+  }
   const event = finalizeEvent(
-    atprotoEvent({ name, publicKey, did, epoch, createdAt }), privateKey)
-  return { event, receipt: { createdAt, sig: event.sig } }
+    atprotoEvent({ name, publicKey, did, epoch, createdAt, version }), privateKey)
+  return { event, receipt: { createdAt, sig: event.sig, ...(version === 2 ? { version } : {}) } }
+}
+
+/** Supported binding subjects. Domain case folds; web path case never does. */
+export function canonicalAtprotoDid (value) {
+  if (typeof value !== 'string') throw new Error('did is required')
+  const did = value.trim()
+  if (/^did:plc:[a-z2-7]{24}$/.test(did)) return did
+  if (!did.startsWith('did:web:')) throw new Error('expected a canonical did:plc or did:web identifier')
+  const [authority, ...path] = did.slice(8).split(':')
+  const match = /^([a-z0-9.-]+)(?:%3[aA]([0-9]{1,5}))?$/i.exec(authority)
+  if (!match) throw new Error('did:web requires a domain and an optional percent-encoded port')
+  const [, domain, port] = match
+  if (domain.length > 253 || /^[0-9.]+$/.test(domain) || domain.split('.').some((label) =>
+    label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label))) {
+    throw new Error('did:web has an invalid domain')
+  }
+  if (port && (Number(port) < 1 || Number(port) > 65535)) throw new Error('did:web has an invalid port')
+  if (path.some((part) => {
+    if (!part || !/^(?:[A-Za-z0-9._-]|%[0-9a-fA-F]{2})+$/.test(part)) return true
+    const decoded = decodeURIComponent(part)
+    return decoded === '.' || decoded === '..' || /[/#?\\]/.test(decoded) ||
+      [...decoded].some((char) => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127)
+  })) {
+    throw new Error('did:web has an invalid path')
+  }
+  return `did:web:${domain.toLowerCase()}${port ? `%3A${Number(port)}` : ''}${path.length ? ':' + path.join(':') : ''}`
 }
 
 /**
  * Verify a compact atproto receipt against exactly these fields. Malformed
  * input is `false`, never an exception -- this runs on untrusted zone data.
  */
-export function verifyAtproto ({ name, publicKey, did, epoch, createdAt, sig }) {
+export function verifyAtproto ({ name, publicKey, did, epoch, createdAt, sig, version = 1 }) {
   try {
     if (typeof sig !== 'string' || !/^[0-9a-f]{128}$/.test(sig)) return false
-    const event = atprotoEvent({ name, publicKey, did, epoch, createdAt })
+    const event = atprotoEvent({ name, publicKey, did, epoch, createdAt, version })
     const id = computeEventId(event)
     return verifyEvent({ ...event, id, sig }).ok
   } catch {

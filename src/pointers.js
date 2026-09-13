@@ -326,7 +326,10 @@ export function mergePointers (direct, dnslink) {
   if (!dnslink) return { pointer: direct }
   if (!direct) return { pointer: { ...dnslink, dnslink: true } }
   const same = direct.kind === dnslink.kind &&
-    (direct.cid || direct.key || direct.txid) === (dnslink.cid || dnslink.key)
+    (direct.cid || direct.key || direct.txid) === (dnslink.cid || dnslink.key) &&
+    // An absent path and '/' both identify the root. Preserve every other
+    // path exactly: decoding/normalizing here can select different content.
+    (direct.path === '/' ? '' : direct.path || '') === (dnslink.path === '/' ? '' : dnslink.path || '')
   if (same) return { pointer: { ...direct, dnslink: true } }
   // A non-IPFS direct pointer (ar=, bt=, hyper=) beside a dnslink is not a
   // disagreement about the same content: DNSLink can only name IPFS content,

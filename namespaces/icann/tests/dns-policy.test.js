@@ -1,6 +1,7 @@
 /*
- * The ICANN transport plan: what the engine's host resolver is told, and what
- * is therefore true about the lookups it makes.
+ * The ICANN transport plan: what the engine's host resolver is told. Not what
+ * its lookups then did — the engine resolves, out of its own cache when it
+ * has one, and says nothing about either (SPEC §6.2).
  *
  * The failures guarded here are all of one kind — a configuration that reads
  * as private and is not:
@@ -11,8 +12,9 @@
  *     a plaintext fallback, and must not pass unreported;
  *   - the any-host certificate must be minted only for a bridge that runs, so
  *     the certificate gate and the bridge gate must be ONE predicate;
- *   - the plan the engine was configured with must be recorded, because it is
- *     what the interface is allowed to describe (SPEC §6.2).
+ *   - the plan the engine was configured with must be recorded, because it and
+ *     the bridge's record of the exact names it answered are the only two
+ *     things the interface is allowed to describe (SPEC §6.2).
  *
  * Every expectation is traced to a line of `../src/dns-policy.js`, which is
  * the Wildroot module the composition layer calls at both gates.
@@ -214,27 +216,49 @@ test('the plan the engine was given is recorded, and is what the interface reads
 // --- what the interface may claim -------------------------------------------
 
 test('obliviousness is claimed per NAME answered, never per setting', () => {
+  // The claim is the bridge's own record of the exact host, with the route
+  // that answered it — not the configured relay/target pair, and not a
+  // parent name. `example.com` does not vouch for `sub.example.com`.
+  const answered = {
+    host: 'example.com',
+    queryType: 1,
+    relay: 'answering-relay.example',
+    target: 'answering-target.example',
+    rcode: 0,
+    at: Date.now(),
+    withinMs: 10 * 60 * 1000,
+    evidence: 'recent-lookup'
+  }
   const bridge = {
     server: {},
     transport: {
       relays: ['https://odoh-relay.numa.rs/relay'],
       targets: [{ host: 'odoh.hns.one', path: '/dns-query' }]
     },
-    servedRecently: (host) => host === 'example.com' || host === 'sub.example.com'
+    recentEvidence: (host) => host === 'example.com' ? answered : null
   }
-  const state = icannBridgeState(bridge, 'example.com')
-  assert.deepEqual(state, { live: true, relay: 'odoh-relay.numa.rs', target: 'odoh.hns.one' })
-  // A name the bridge never answered gets no claim, even with the bridge up.
+  assert.deepEqual(icannBridgeState(bridge, 'example.com'), { live: true, ...answered })
+  // The route in the claim is the one that answered, never the configured
+  // first relay and first target the bridge happens to hold.
+  assert.equal(icannBridgeState(bridge, 'example.com').relay, 'answering-relay.example')
+  // A SUBDOMAIN of an answered name is not an answered name. One lookup for
+  // `example.com` says nothing about a host nobody looked up.
+  assert.equal(icannBridgeState(bridge, 'sub.example.com'), null)
+  // Nor does a name the bridge never answered, with the bridge up.
   assert.equal(icannBridgeState(bridge, 'other.example.net'), null)
-  // A bridge that failed to start gets no claim at all.
+  // A bridge that failed to start gets no claim at all, and neither does a
+  // caller with no host to ask about: there is no name-free form of this claim.
   assert.equal(icannBridgeState({ ...bridge, server: null }, 'example.com'), null)
   assert.equal(icannBridgeState(null, 'example.com'), null)
+  assert.equal(icannBridgeState(bridge), null)
 })
 
 test('a hostile probe object can never make the panel throw', () => {
-  const nasty = { server: {}, get transport () { throw new Error('boom') }, servedRecently: () => true }
+  const nasty = { server: {}, get recentEvidence () { throw new Error('boom') } }
   assert.equal(icannBridgeState(nasty, 'example.com'), null)
-  assert.equal(icannBridgeState({ server: {}, servedRecently: () => { throw new Error('x') } }, 'a'), null)
+  assert.equal(icannBridgeState({ server: {}, recentEvidence: () => { throw new Error('x') } }, 'a'), null)
+  // An object with no evidence method at all is a null claim, not a crash.
+  assert.equal(icannBridgeState({ server: {} }, 'a'), null)
 })
 
 // ---------------------------------------------------------------- Private mode
@@ -262,21 +286,29 @@ test('Private with the bridge up: oblivious only, nothing plaintext, never a poo
   assert.equal(plan.plaintextFallback, false)
   assert.equal(plan.failClosed, false)
   assert.equal(plan.configure, true)
-  // The panel, for a name the bridge did not answer: refused, not "in the clear".
+  // The panel, for a name the bridge did not answer: the configuration
+  // refuses plaintext, and the panel says that about the CONFIGURATION —
+  // never that this page's lookup was seen going out in the clear.
   const [step] = schemeSteps('https://example.com/', plan, null)
-  assert.match(step.detail, /unencrypted DNS is refused/i)
+  assert.match(step.detail, /configured to refuse unencrypted fallback/i)
   assert.doesNotMatch(step.detail, /in the clear/)
 })
 
-test('Private with NO bridge fails closed: configured secure with an empty list, and the panel says refused', () => {
+test('Private with NO bridge configures secure with an empty list, and the panel names the configuration', () => {
   const plan = planDnsTransport({ dns: { mode: 'automatic', servers: POOL }, odoh: ODOH, bridge: null, privateMode: true })
   assert.equal(plan.configure, true)
   assert.deepEqual(plan.servers, [], 'the configured pool is never used as a fallback in Private mode')
   assert.equal(plan.failClosed, true)
   assert.equal(plan.plaintextFallback, false)
   const [step] = schemeSteps('https://example.com/', plan, null)
-  assert.equal(step.state, 'failed')
-  assert.match(step.source, /refused/i)
+  // The configuration asks for secure DNS with nothing to point it at. That
+  // is a policy, and the step says so; no refusal was observed from here, so
+  // the step is `unverified` and must not report one as a fact.
+  assert.equal(step.state, 'unverified')
+  assert.match(step.source, /Secure DNS configured to refuse new lookups/)
+  assert.match(step.detail, /not an observed lookup failure/)
+  assert.match(step.detail, /cached answers may still exist/)
+  assert.doesNotMatch(step.source, /System DNS/)
 })
 
 test('Fast is the configured plan, untouched', () => {

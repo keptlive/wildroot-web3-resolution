@@ -18,7 +18,7 @@
 // This module is pure: URL and resolution facts in, steps out. No I/O, so it
 // is unit-testable and cannot itself become a source of surprises.
 
-/** @typedef {{label:string, state:'verified'|'unverified'|'failed'|'none', source:string, detail?:string}} Step */
+/** @typedef {{label:string, state:'verified'|'unverified'|'failed'|'none', source:string, detail?:string, applicable?:boolean}} Step */
 
 const step = (label, state, source, detail) => ({ label, state, source, ...(detail ? { detail } : {}) })
 
@@ -34,11 +34,14 @@ const step = (label, state, source, detail) => ({ label, state, source, ...(deta
  * verified and only the name->content binding depends on the chain, which is
  * why they share one branch and one caveat below.
  *
- * Arweave is NOT in this set. An `ar=` pointer names immutable content, but
- * src/hns/ar.js fetches the bytes from a gateway and does not check them
- * against the transaction's data_root, so the gateway is trusted the way any
- * HTTPS host is. The panel says so (ARWEAVE_CONTENT below) instead of
- * borrowing the content-addressed sentence.
+ * Arweave is NOT in this set. An `ar=` pointer names immutable content, and
+ * src/hns/ar.js does check what it can — the transaction header authenticated
+ * against the id, and a whole raw body under 8 MiB against the signed data
+ * root — but only per fetch, and never for a larger transaction, a Range, a
+ * manifest path or a bundled item. This step is written at RESOLUTION time,
+ * before any of that is known, so it stays unverified and says which hop is
+ * trusted (ARWEAVE_CONTENT below) instead of borrowing the content-addressed
+ * sentence. The per-fetch truth is the X-Arweave-Verified response header.
  */
 const CONTENT_ADDRESSED = new Set(['ipfs', 'ipns', 'bittorrent', 'hyper'])
 
@@ -255,7 +258,7 @@ export function hnsSteps (host, resolution = {}, extra = {}) {
  * whole point of this panel.
  * @param {string} url
  */
-export function schemeSteps (url, dns = null, bridge = null) {
+export function schemeSteps (url, dns = null, bridge = null, evidence = null) {
   let protocol = ''
   let host = ''
   try {
@@ -288,21 +291,11 @@ export function schemeSteps (url, dns = null, bridge = null) {
       ]
     case 'ipfs':
     case 'ipns':
-    case 'ipld':
       return [step('Content', 'verified', `IPFS ${protocol === 'ipns' ? 'IPNS name' : 'CID'} ${host}`,
         protocol === 'ipns'
           ? 'An IPNS name is a signed pointer; the content it names is ' +
             'CID-verified once fetched.'
-          : protocol === 'ipld'
-            ? 'Content-addressed: each node on the path is verified against its CID.'
-            : 'Content-addressed: the bytes are verified against the CID.')]
-    case 'pubsub':
-      // A topic is a free-form string. The only authentication a message
-      // carries is its publishing peer's libp2p signature, which says who sent
-      // it and nothing about what the topic "should" contain.
-      return [step('Content', 'none', `IPFS pubsub topic ${host}`,
-        'A pubsub topic is not a content address: messages are signed by ' +
-        'whichever peer published them, and anyone may publish to a topic.')]
+          : 'Content-addressed: the bytes are verified against the CID.')]
     case 'hyper':
       // A hypercore KEY verifies its own feed. A DOTTED host is a DNSLink name,
       // and the name→key mapping came from a DoH resolver's unsigned answer
@@ -367,32 +360,33 @@ export function schemeSteps (url, dns = null, bridge = null) {
           'shown all of them — or the newest one. The page lists which relays ' +
           'answered.')
       ]
-    case 'did':
-      return [step('Identifier', 'unverified', 'DID document fetched over HTTPS',
-        'This identifier was looked up at a directory (did:plc) or on the ' +
-        'domain it names (did:web). The document is checked to be about the ' +
-        'identifier asked for, but for did:plc the operation log that would ' +
-        'prove it was not audited — so this is that server\'s word.')]
+    case 'did': {
+      const did = String(url).replace(/^did:\/\//, 'did:')
+      const method = /^did:([^:]+):/.exec(did)?.[1]
+      if (['key', 'jwk', 'pkh'].includes(method)) {
+        return [step('Identifier', 'unverified', 'Local DID derivation — no remote lookup',
+          'This method derives its document from the identifier itself. ' +
+          'The security panel has no recorded result for this page. ' +
+          'Deriving a document does not prove anyone possesses the corresponding private key or controls the account.')]
+      }
+      if (method === 'plc' || method === 'web') {
+        return [step('Identifier', 'unverified', method === 'plc' ? 'DID directory over HTTPS' : 'DID domain over HTTPS',
+          'This method retrieves its document over HTTPS and checks its id. ' +
+          'The security panel has no recorded result for this page. ' +
+          (method === 'plc' ? 'The PLC operation log is not audited here.' : 'The domain and WebPKI remain trusted.'))]
+      }
+      return [step('Identifier', 'unverified', 'DID method not established', 'No successful resolution has been recorded for this identifier.')]
+    }
     case 'ens':
-      // The bytes ARE content-addressed once fetched. What is not verified is
-      // the mapping — which contenthash this name points at — read from a
-      // public Ethereum RPC with no light client and no proof against a block
-      // header. src/protocols/ens-protocol.js already marks its responses
-      // `ens-rpc-unverified` and stays TRUSTED (never green) for this reason;
-      // without a case here the panel fell through to "this browser has no
-      // verification path for this scheme", which is both wrong and silent
-      // about the one hop that actually needs saying. The `_op` route says the
-      // same thing about the same shape of gap.
+      // The name mapping is RPC-trusted. Integrity varies by resolved
+      // protocol and response, so no completed byte check follows from ens:.
       return [
-        step('Name records', 'unverified', `Ethereum name ${host}, read via a public RPC`,
-          'What this name points at was read from an Ethereum RPC endpoint. ' +
+        step('Name records', 'unverified', `Ethereum name ${host}, resolved through a public RPC`,
+          'ENS lookups use an Ethereum RPC endpoint. ' +
           'This browser does not run an Ethereum light client, so that ' +
           'endpoint\'s answer is taken on its word — a wrong or hostile one ' +
           'could name different content.'),
-        step('Content', 'verified', 'Content-addressed once resolved',
-          'Whatever address the record named, the bytes fetched are checked ' +
-          'against it — so the content cannot have been altered in transit, ' +
-          'even though the pointer to it is unverified.')
+        ensContentStep(evidence?.ens, url)
       ]
     case 'wildroot':
     case 'agregore':
@@ -437,67 +431,71 @@ export function schemeSteps (url, dns = null, bridge = null) {
 }
 
 /**
- * How an ordinary ICANN name was looked up. This is NOT our oblivious path
- * and the panel must not let anyone assume it is: Chromium resolves http(s)
- * hosts itself, through its own secure-DNS setting (`app.configureHostResolver`
- * in index.js), and Chromium speaks plain DoH only — it accepts https DoH
- * templates and has no ODoH support, so ICANN lookups are ENCRYPTED but not
- * OBLIVIOUS. In `automatic` mode it also falls back to unencrypted system DNS
- * when those resolvers cannot be reached, which is the weakest link left and
- * therefore the thing to say out loud.
- * @param {string} host
- * @param {{mode?:string, servers?:string[]}} [dns]
+ * Exact-request evidence from trusted content handlers. This helper never
+ * promotes a content-addressed identifier alone into a byte-integrity claim.
+ * @param {{url:string, ok:boolean, protocol:string, verifiedBytes?:boolean}} evidence
+ * @param {string} url
  */
+// `evidence` is a main-process result for this exact request, never an
+// assertion copied from arbitrary response headers. Callers without it must
+// not infer byte integrity from the ens:// scheme or a contenthash alone.
+function ensContentStep (evidence, url) {
+  if (!evidence || evidence.url !== url || evidence.ok !== true || !['ipfs', 'ipns', 'arweave'].includes(evidence.protocol)) {
+    return step('Content', 'unverified', 'Resolved content verification not recorded',
+      'ENS may point to IPFS, IPNS or Arweave. The scheme alone does not establish that this page’s bytes were verified.')
+  }
+  if (evidence.verifiedBytes === true) {
+    return step('Content', 'verified', `${evidence.protocol} bytes verified for this request`,
+      'The content handler checked these bytes. The ENS name-to-content mapping remains RPC-trusted.')
+  }
+  return step('Content', 'unverified', `${evidence.protocol} content — bytes not verified`,
+    evidence.protocol === 'arweave'
+      ? 'An immutable transaction id does not by itself verify gateway bytes; this request has no successful byte verification result.'
+      : 'No successful content-integrity result was recorded for this request.')
+}
+
+// Recent bridge traffic is narrower evidence than page-specific provenance.
+// A configured Chromium/OS policy alone does not establish packets observed.
 function icannNameStep (host, dns, bridge = null) {
   const servers = (dns && dns.servers) || []
   const mode = (dns && dns.mode) || 'automatic'
-  if (bridge && bridge.live) {
+  if (bridge?.live && bridge.evidence === 'recent-lookup' && bridge.host === host && bridge.relay && bridge.target) {
     // The oblivious path, for an ordinary web address. Same property the
     // Handshake side has had all along, and worth stating in the same words.
     return step('Domain name', 'unverified',
-      `Oblivious DoH — relay ${bridge.relay || '(configured relay)'} → target ${bridge.target || 'odoh.hns.one'}`,
-      `${host} was looked up obliviously: the relay saw your address and only ` +
-      'ciphertext, the target saw the question and only the relay. Neither ' +
-      'alone can link you to this site. The ANSWER is still the resolver\'s ' +
-      'word — that is what "not verified" means here.')
+      `Recent Oblivious DoH lookup — relay ${bridge.relay} → target ${bridge.target}`,
+      `The bridge recently answered a lookup for ${host} through these endpoints. ` +
+      'That is evidence of recent lookup activity, not proof that this page used that answer. ' +
+      'The relay handles ciphertext and the target sees the relay; the answer remains the resolver’s word.')
   }
   if (dns && dns.oblivious) {
-    // The bridge is the ONLY resolver the engine was given, and it did not
-    // answer this name. In `secure` mode nothing else could have; in
-    // `automatic` mode the engine may have fallen back to system DNS in the
-    // clear, and there is no way to tell from here which it was. Say that,
-    // rather than naming a pool the engine no longer has.
+    // The bridge was configured, but no recent successful activity is
+    // available. Cache reuse and configuration are not packet evidence.
     return step('Domain name', 'unverified',
       mode === 'secure'
-        ? 'Oblivious bridge only — this name was not answered by it'
-        : 'Resolver not determined — the oblivious bridge did not answer this name',
-      mode === 'secure'
-        ? `${host} could only have been resolved through the oblivious bridge ` +
-          '(unencrypted DNS is refused), but the bridge has no record of ' +
-          'answering it — the answer may have come from the engine\'s cache.'
-        : `${host} was not resolved by the oblivious bridge, which is the only ` +
-          'encrypted resolver the engine was given. In automatic mode the ' +
-          'engine falls back to unencrypted system DNS when that fails, so ' +
-          'this lookup may have gone out in the clear.')
+        ? 'Oblivious bridge configured — no recent lookup evidence'
+        : 'Resolver not determined — no recent oblivious lookup evidence',
+      `There is no recent successful bridge lookup recorded for ${host}. ` +
+      'The page may have reused a cached answer; this panel cannot establish the lookup path. ' +
+      (mode === 'secure' ? 'Secure DNS is configured to refuse unencrypted fallback.' : 'Automatic DNS permits system fallback; this does not show that fallback occurred.'))
   }
   if (dns && dns.failClosed) {
-    return step('Domain name', 'failed', 'Secure DNS with no server — lookups refused',
-      `dns.mode is "secure" and no resolver is configured, so ${host} could ` +
-      'not be looked up at all. Unencrypted DNS was refused rather than used.')
+    return step('Domain name', 'unverified', 'Secure DNS configured to refuse new lookups',
+      'No secure resolver is configured. This is the configured policy, not an observed lookup failure; cached answers may still exist.')
   }
   if (!servers.length || mode === 'off') {
-    return step('Domain name', 'unverified', 'System DNS, unencrypted',
-      `${host} was looked up in the clear: your router, your ISP and anyone ` +
-      'on the path saw the name.')
+    return step('Domain name', 'unverified', 'DNS lookup path not observed',
+      mode === 'off'
+        ? 'Browser secure DNS is disabled. The operating system resolver and any encryption it provides are not observed here.'
+        : 'The browser supplied no explicit resolver list. Chromium or operating system defaults and cached answers may apply; their transport was not observed here.')
   }
   let label = servers[0]
   try { label = new URL(servers[0]).host } catch {}
   const extra = servers.length > 1 ? ` (+${servers.length - 1} more)` : ''
   return step('Domain name', 'unverified',
-    `Encrypted DNS to ${label}${extra} — NOT oblivious`,
-    `${host} was resolved by the browser's own secure DNS, so the lookup was ` +
-    'encrypted in transit — but that resolver saw your address and the name ' +
-    'together, which our oblivious path for Handshake names avoids. ' +
+    `Secure DNS configured: ${label}${extra} — NOT oblivious`,
+    'This names the configured resolver list, not the endpoint observed serving this page. ' +
+    'Direct DoH gives its resolver both the client address and question when used. ' +
     (mode === 'secure'
       ? 'Unencrypted DNS is refused.'
       : 'If those resolvers cannot be reached, this falls back to ' +
@@ -513,6 +511,9 @@ function icannNameStep (host, dns, bridge = null) {
  * @param {Step[]} steps
  */
 export function summarize (steps) {
+  // Only explicit non-applicability may be excluded. Missing required
+  // protection with state "none" still weakens the verdict.
+  steps = steps.filter((s) => s.applicable !== false)
   if (!steps.length) return { state: 'unknown', summary: 'Nothing is known about this page yet.' }
   if (steps.some((s) => s.state === 'failed')) {
     const bad = steps.find((s) => s.state === 'failed')

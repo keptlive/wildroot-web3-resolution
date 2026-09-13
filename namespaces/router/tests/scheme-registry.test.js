@@ -52,8 +52,9 @@ test('the verification story names what is actually checked, and no more', () =>
   assert.match(schemeInfo('gemini').verify, /^none — TLS with no certificate verification/,
     'gemini: not TOFU — nothing is pinned or remembered')
   assert.match(schemeInfo('gemini').verify, /not TOFU/)
-  assert.match(schemeInfo('pubsub').verify, /libp2p publisher signature/,
-    'pubsub: a topic is not a content address')
+  assert.match(schemeInfo('ipns').verify, /^IPNS record \+ CID$/,
+    'ipns: a signed record stands between the name and the CID, and the row says so')
+  assert.equal(schemeInfo('ipfs').verify, 'CID')
   assert.match(schemeInfo('did').verify, /id checked; not proven/,
     'did: fetched, not proven')
   assert.match(schemeInfo('hyper').verify, /DNSLink name.*resolver-trusted/,
@@ -77,13 +78,13 @@ test('no scheme is registered twice, and every namespace with a scheme is reacha
     assert.equal(seen.has(row.scheme), false, `${row.scheme} appears once`)
     seen.add(row.scheme)
   }
-  // Several schemes may share a namespace (ipfs/ipns/ipld/pubsub), which is the
-  // point: L2 is enforced at namespace boundaries, not scheme boundaries.
+  // Several schemes may share a namespace (ipfs/ipns), which is the point: L2
+  // is enforced at namespace boundaries, not scheme boundaries.
   const perNamespace = new Map()
   for (const row of SCHEME_TABLE) {
     perNamespace.set(row.namespace, (perNamespace.get(row.namespace) || 0) + 1)
   }
-  assert.equal(perNamespace.get(NAMESPACES.IPFS), 4)
+  assert.equal(perNamespace.get(NAMESPACES.IPFS), 2)
   assert.equal(perNamespace.get(NAMESPACES.BITTORRENT), 2)
   assert.equal(perNamespace.get(NAMESPACES.WEB), 3)
 })
@@ -154,11 +155,15 @@ test('register() refuses a handler that is not a function', () => {
 
 test('register() takes a list, lowercases, and reports what it holds', () => {
   const router = new ProtocolRouter()
-  router.register(['ipfs', 'IPNS', 'ipld'], noop)
-  assert.deepEqual(router.registeredSchemes(), ['ipfs', 'ipld', 'ipns'])
+  router.register(['ipfs', 'IPNS', 'hyper'], noop)
+  assert.deepEqual(router.registeredSchemes(), ['hyper', 'ipfs', 'ipns'])
   assert.equal(router.has('IPFS'), true)
   assert.equal(typeof router.handlerFor('ipns'), 'function')
   assert.equal(router.handlerFor('nope'), null)
+  // Every name in the list is held to the table, not just the first: a scheme
+  // that has been retired cannot be registered alongside live ones.
+  assert.throws(() => new ProtocolRouter().register(['ipfs', 'pubsub'], noop),
+    /no SCHEME_TABLE row/)
 })
 
 // --- dispatch ---------------------------------------------------------------

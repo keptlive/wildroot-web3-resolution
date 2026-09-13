@@ -228,6 +228,7 @@ export class HNSResolver {
     // of subresources from one name, and the reason is the same every time.
     this.opFallbacksLogged = new Set()
     this.cache = new Map()
+    this.cacheEpoch = 0
     this.cacheTtl = 60 * 1000
     this.cacheMax = 512 // bound the map: a hostile page can name thousands of subhosts
   }
@@ -237,6 +238,7 @@ export class HNSResolver {
    *  one re-resolution each, and per-host eviction would miss exactly the
    *  stale record the user is hard-reloading to escape. */
   clearCache () {
+    this.cacheEpoch++
     this.cache.clear()
   }
 
@@ -260,6 +262,7 @@ export class HNSResolver {
   forget (host) {
     const h = String(host || '').toLowerCase().replace(/\.$/, '')
     if (!h) return 0
+    this.cacheEpoch++
     let dropped = 0
     for (const key of [...this.cache.keys()]) {
       if (key === h || key.endsWith(`.${h}`)) {
@@ -284,7 +287,15 @@ export class HNSResolver {
     }
     if (cached) this.cache.delete(host)
 
-    const value = await this._resolve(host)
+    // A publish can finish while DNS is in flight. Discard that older
+    // answer and resolve again rather than repopulating a just-cleared cache.
+    let value
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const epoch = this.cacheEpoch
+      value = await this._resolve(host)
+      if (epoch === this.cacheEpoch) break
+      if (attempt === 2) throw new Error('The name changed during resolution; retry the lookup.')
+    }
     // Only a POSITIVE resolution is remembered. A transient empty answer would
     // otherwise pin a real name as dead for the whole TTL, and — the case
     // that bit on 2026-09-04 — one dropped DNSKEY query or a nameserver mid-
@@ -802,13 +813,14 @@ export class HNSResolver {
    * Used for the pointer at the name and for its `_dnslink` record, which
    * are held to the same standard.
    */
-  async _validateTxtRRset (owner, reply, ctx, fetchDnskeys, missing) {
+  async _validateTxtRRset (owner, reply, ctx, fetchDnskeys, missing, type = TYPES.TXT) {
     const { dsRecords } = ctx
     const rrsig = reply.answers.find(
-      (r) => r.type === TYPES.RRSIG && r.typeCovered === TYPES.TXT)
+      r => r.type === TYPES.RRSIG && r.typeCovered === type && norm(r.name) === norm(owner))
     const rdatas = reply.answers
-      .filter((r) => r.type === TYPES.TXT && r.rdataRaw)
-      .map((r) => r.rdataRaw)
+      .filter(r => r.type === type && norm(r.name) === norm(owner))
+      .map(r => type === TYPES.CNAME ? wireName(norm(r.target)) : r.rdataRaw)
+      .filter(Boolean)
     let result = null
     try {
       const { dnskeys, dnskeyRRSIG } = await fetchDnskeys()
@@ -819,7 +831,7 @@ export class HNSResolver {
         dnskeys,
         dnskeyRRSIG,
         leafOwner: owner,
-        leafType: TYPES.TXT,
+        leafType: type,
         leafRdatas: rdatas,
         leafRRSIG: rrsig,
         denial
@@ -829,6 +841,58 @@ export class HNSResolver {
     }
     if (!result || !result.ok) return dnssecFailure(result, missing)
     return null
+  }
+
+  // Authenticate the DNS answer before interpreting application TXT syntax.
+  // A signed SPF record can prove there is no pointer; an unsigned substitute
+  // cannot. Aliases need their own signatures and a terminal TXT/denial proof.
+  async _validatedTxtAnswer (owner, initialReply, ctx, fetchDnskeys, opts) {
+    let name = norm(owner)
+    let reply = initialReply
+    const seen = new Set()
+    const deps = { dsRecords: ctx.dsRecords, fetchDnskeys }
+    for (let i = 0; i < 8; i++) {
+      if (seen.has(name)) return { failure: dnssecFailure(null, 'TXT CNAME loop') }
+      seen.add(name)
+      if (reply.rcode !== 0 && reply.rcode !== 3) {
+        return { failure: dnssecFailure(null, 'TXT query did not return an answer or authenticated denial') }
+      }
+      const own = reply.answers.filter(r => norm(r.name) === name)
+      const texts = own.filter(r => r.type === TYPES.TXT)
+      const aliases = own.filter(r => r.type === TYPES.CNAME)
+      if (texts.length && aliases.length) return { failure: dnssecFailure(null, 'TXT and CNAME coexist at one owner') }
+      if (texts.length) {
+        const failure = await this._validateTxtRRset(name, reply, ctx, fetchDnskeys, 'TXT RRSIG missing or invalid')
+        return failure ? { failure } : { answers: texts }
+      }
+      if (aliases.length) {
+        if (aliases.length !== 1) return { failure: dnssecFailure(null, 'Ambiguous TXT CNAME target') }
+        const failure = await this._validateTxtRRset(name, reply, ctx, fetchDnskeys, 'TXT CNAME RRSIG missing or invalid', TYPES.CNAME)
+        if (failure) return { failure }
+        const target = norm(aliases[0].target)
+        // A different zone requires a new trust walk, not this zone's keys.
+        if (!target || !(target === norm(ctx.zone) || target.endsWith('.' + norm(ctx.zone)))) {
+          return { failure: { kind: 'dnssec-unsupported', reason: 'Cross-zone TXT aliases require a separate authenticated lookup' } }
+        }
+        name = target
+        if (!reply.answers.some(r => norm(r.name) === name && (r.type === TYPES.TXT || r.type === TYPES.CNAME))) {
+          reply = await query(ctx.server.server, ctx.server.port, name, TYPES.TXT, { ...opts, dnssec: true })
+          if (referralIn(reply, ctx.zone, name)) {
+            return { failure: { kind: 'dnssec-unsupported', reason: 'Delegated TXT aliases require a separate authenticated lookup' } }
+          }
+        }
+        continue
+      }
+      const nsecs = await this._validatedNsecs(reply.authority, deps)
+      if (!provesDenial(nsecs, name, TYPES.TXT, ctx.zone)) {
+        return {
+          failure: await this._anchorFailure(fetchDnskeys, ctx.dsRecords, ctx.zone,
+            'the zone did not prove that ' + name + ' has no content pointer (TXT; RFC 4035 §5.4)')
+        }
+      }
+      return { answers: [] }
+    }
+    return { failure: dnssecFailure(null, 'TXT CNAME chain is too deep') }
   }
 
   async _fromZone (host, ctx, depth) {
@@ -891,16 +955,12 @@ export class HNSResolver {
       return this._fromZone(host, next.ctx, depth + 1)
     }
 
-    const strings = txtStringsFrom(answersAbout(txt.answers, host, TYPES.CNAME), TYPES.TXT)
+    const txtEvidence = dnssecZone
+      ? await this._validatedTxtAnswer(host, txt, ctx, fetchDnskeys, opts)
+      : { answers: answersAbout(txt.answers, host, TYPES.CNAME) }
+    if (txtEvidence.failure) return txtEvidence.failure
+    const strings = txtStringsFrom(txtEvidence.answers, TYPES.TXT)
     const direct = withOrigin(strings)
-    if (direct && dnssecZone) {
-      // The zone is signed, so the pointer must PROVE itself up to the
-      // on-chain DS, exactly like a TLSA pin. A signed zone whose pointer
-      // does not validate is an attack or a broken zone — fail closed
-      // rather than render whatever an on-path answer named.
-      const failure = await this._validateTxtRRset(host, txt, ctx, fetchDnskeys, 'pointer TXT RRSIG missing')
-      if (failure) return failure
-    }
 
     // THE SECOND POINTER SOURCE: DNSLink (dnslink.dev), `_dnslink.<host>`.
     // It is the record every other IPFS client reads — IPFS Companion, Brave,
@@ -915,18 +975,15 @@ export class HNSResolver {
     const dnslinkOwner = `${DNSLINK_PREFIX}.${host}`
     const dl = await query(server.server, server.port, dnslinkOwner, TYPES.TXT,
       { ...opts, dnssec: dnssecZone })
-    const dlStrings = referralIn(dl, zone, dnslinkOwner)
-      ? [] // a delegation at the underscore label is not a DNSLink answer
-      : txtStringsFrom(answersAbout(dl.answers, dnslinkOwner, TYPES.CNAME), TYPES.TXT)
-    const viaDnslink = dnslinkPointerFrom(dlStrings)
-    if (viaDnslink && dnssecZone) {
-      const failure = await this._validateTxtRRset(dnslinkOwner, dl, ctx, fetchDnskeys, 'DNSLink TXT RRSIG missing')
-      if (failure) return failure
-    }
+    const dlEvidence = dnssecZone
+      ? await this._validatedTxtAnswer(dnslinkOwner, dl, ctx, fetchDnskeys, opts)
+      : { answers: referralIn(dl, zone, dnslinkOwner) ? [] : answersAbout(dl.answers, dnslinkOwner, TYPES.CNAME) }
+    if (dlEvidence.failure) return dlEvidence.failure
+    const viaDnslink = dnslinkPointerFrom(txtStringsFrom(dlEvidence.answers, TYPES.TXT))
 
     const merged = mergePointers(direct, viaDnslink)
     if (merged.conflict) {
-      const show = (p) => `${p.kind} ${p.cid || p.key || p.txid}`
+      const show = (p) => `${p.kind} ${p.cid || p.key || p.txid}${p.path || '/'}`
       return {
         kind: 'pointer-conflict',
         reason: `${host} publishes two content pointers that disagree: ` +
@@ -953,32 +1010,8 @@ export class HNSResolver {
       return pointer
     }
 
-    // NO POINTER. On a signed zone that absence has to be PROVEN before the
-    // question moves on to the A record, for the same reason the TLSA absence
-    // below does: a content-addressed site is the most protected thing a zone
-    // can publish, and an on-path answer that simply withholds its `ipfs=`
-    // TXT — or its `_dnslink` TXT — must not be able to walk the browser down
-    // to an address instead. Only an EMPTY answer needs the proof — a TXT
-    // that exists and is not a pointer (SPF, a verification token) is an
-    // ordinary non-answer.
-    const txtAbout = answersAbout(txt.answers, host, TYPES.CNAME)
-      .filter((r) => r.type === TYPES.TXT || r.type === TYPES.CNAME)
-    if (dnssecZone && !txtAbout.length) {
-      const nsecs = await this._validatedNsecs(txt.authority, { dsRecords, fetchDnskeys })
-      if (!provesDenial(nsecs, host, TYPES.TXT, zone)) {
-        return await this._anchorFailure(fetchDnskeys, dsRecords, zone,
-          `the zone did not prove that ${host} has no content pointer (RFC 4035 §5.4)`)
-      }
-    }
-    const dlAbout = answersAbout(dl.answers, dnslinkOwner, TYPES.CNAME)
-      .filter((r) => r.type === TYPES.TXT || r.type === TYPES.CNAME)
-    if (dnssecZone && !dlAbout.length) {
-      const nsecs = await this._validatedNsecs(dl.authority, { dsRecords, fetchDnskeys })
-      if (!provesDenial(nsecs, dnslinkOwner, TYPES.TXT, zone)) {
-        return await this._anchorFailure(fetchDnskeys, dsRecords, zone,
-          `the zone did not prove that ${host} has no DNSLink record (RFC 4035 §5.4)`)
-      }
-    }
+    // Both pointer sources are authenticated above, including nonpointer data
+    // and genuine absence, before selecting an address.
 
     // A and AAAA, asked together (one round trip, the same as A alone was),
     // and the IPv4 is used when the name has one: it reaches the site from

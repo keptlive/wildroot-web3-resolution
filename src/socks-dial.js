@@ -101,16 +101,27 @@ export function replyLength (buf) {
 export function socksDialer (socksUrl, { timeout = 20000 } = {}) {
   const proxy = parseSocksUrl(socksUrl)
   if (!proxy) throw new Error(`not a socks5:// URL: ${String(socksUrl).slice(0, 60)}`)
-  return (host, port) => new Promise((resolve, reject) => {
+  return (host, port, { signal, pauseOnConnect = false } = {}) => new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(signal.reason || new Error('SOCKS5: canceled')); return }
     const socket = net.connect({ host: proxy.host, port: proxy.port })
     let stage = 'greeting'
     let buf = Buffer.alloc(0)
-    const fail = (message) => {
+    let settled = false
+    const cleanup = () => {
       clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+    }
+    const fail = (message) => {
+      if (settled) return
+      settled = true
+      cleanup()
       socket.destroy()
       reject(new Error(`SOCKS5 via ${proxy.host}:${proxy.port}: ${message}`))
     }
+    const onAbort = () => fail('canceled')
     const timer = setTimeout(() => fail('timed out'), timeout)
+    timer.unref?.()
+    signal?.addEventListener('abort', onAbort, { once: true })
     socket.once('error', (err) => fail(err.message))
     socket.once('close', () => { if (stage !== 'done') fail('closed before the connect reply') })
     socket.once('connect', () => {
@@ -135,7 +146,9 @@ export function socksDialer (socksUrl, { timeout = 20000 } = {}) {
         if (buf[0] !== VERSION) return fail('malformed connect reply')
         if (buf[1] !== 0x00) return fail(REPLY_TEXT[buf[1]] || `connect failed (${buf[1]})`)
         stage = 'done'
-        clearTimeout(timer)
+        settled = true
+        cleanup()
+        if (pauseOnConnect) socket.pause()
         socket.removeAllListeners('data')
         socket.removeAllListeners('close')
         const leftover = buf.subarray(len)

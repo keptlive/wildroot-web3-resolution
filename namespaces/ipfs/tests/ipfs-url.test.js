@@ -15,14 +15,13 @@ test('the host of an ipfs:// URL is the root CID; the path is not part of the ad
   assert.equal(rootCidOf(`ipfs://${V0}/index.html`), V0, 'a CIDv0 keeps its case here')
 })
 
-test('only ipfs:// — a sibling scheme in the same namespace is not a CID', () => {
-  // ipns:// names a KEY, not a content address; ipld:// and pubsub:// are
-  // different objects again (SPEC §4.2–4.4). None of them is a root CID, and
-  // answering as though they were is how a mutable name gets cached as
+test('only ipfs:// — the sibling scheme in the same namespace is not a CID', () => {
+  // ipns:// names a KEY, not a content address (SPEC §4.2) — even when the key
+  // is spelled as a CID, which a libp2p-key CIDv1 is. It is not a root CID,
+  // and answering as though it were is how a mutable name gets cached as
   // immutable content.
   assert.equal(rootCidOf(`ipns://${V1}`), null)
-  assert.equal(rootCidOf(`ipld://${V1}`), null)
-  assert.equal(rootCidOf('pubsub://topic'), null)
+  assert.equal(rootCidOf('ipns://k51qzi5uqu5dlvj2baxnqndepeb86cbk3ng7n3i46uzyxzyqj2xjonzllnv0v8'), null)
   assert.equal(rootCidOf(`https://ipfs.io/ipfs/${V1}`), null, 'a gateway URL is an HTTPS URL')
   assert.equal(rootCidOf(`hns://alice.w3/?cid=${V1}`), null)
 })

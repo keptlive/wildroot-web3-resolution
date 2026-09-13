@@ -16,6 +16,8 @@
  * is handled in did-protocol.js, on that someone's word.
  */
 
+import { createPublicKey, ECDH } from 'node:crypto'
+import { ed25519, x25519 } from '@noble/curves/ed25519'
 import { base58btc } from 'multiformats/bases/base58'
 
 /** Multicodec public-key prefixes did:key admits, with the key length each fixes. */
@@ -39,6 +41,7 @@ const DID_V1 = 'https://www.w3.org/ns/did/v1'
  * @returns {object|null}
  */
 export function localDidDocument (did) {
+  if (typeof did === 'string' && did.length > 16384) throw new Error('local DID exceeds the supported identifier size')
   const m = /^did:([a-z0-9]+):(.+)$/s.exec(String(did || ''))
   if (!m) return null
   const [, method, rest] = m
@@ -58,8 +61,12 @@ function readVarint (bytes) {
   let value = 0
   let shift = 0
   for (let i = 0; i < bytes.length && i < 5; i++) {
+    if (i === 4 && bytes[i] > 15) throw new Error('did:key: multicodec prefix is too large')
     value |= (bytes[i] & 0x7f) << shift
-    if ((bytes[i] & 0x80) === 0) return [value >>> 0, i + 1]
+    if ((bytes[i] & 0x80) === 0) {
+      if (i > 0 && bytes[i] === 0) throw new Error('did:key: non-canonical multicodec prefix')
+      return [value >>> 0, i + 1]
+    }
     shift += 7
   }
   throw new Error('did:key: the multicodec prefix is not a valid varint')
@@ -76,6 +83,23 @@ function didKeyDocument (did, id) {
   const key = bytes.subarray(prefixLength)
   if (spec.length !== null && key.length !== spec.length) {
     throw new Error(`did:key: a ${spec.name} key is ${spec.length} bytes, this one is ${key.length}`)
+  }
+  try {
+    if (spec.name === 'RSA') {
+      const imported = createPublicKey({ key: Buffer.from(key), format: 'der', type: 'pkcs1' })
+      if (imported.asymmetricKeyType !== 'rsa' || !imported.export({ format: 'der', type: 'pkcs1' }).equals(key)) {
+        throw new Error('expected one canonical PKCS#1 public key')
+      }
+      validateJwk(imported.export({ format: 'jwk' }))
+    } else if (spec.name === 'Ed25519' || spec.name === 'X25519') {
+      validateOkp(spec.name, key)
+    } else {
+      const curve = { secp256k1: 'secp256k1', 'P-256': 'prime256v1', 'P-384': 'secp384r1', 'P-521': 'secp521r1' }[spec.name]
+      if (key[0] !== 2 && key[0] !== 3) throw new Error('expected a compressed curve point')
+      ECDH.convertKey(key, curve, undefined, undefined, 'compressed')
+    }
+  } catch (err) {
+    throw new Error(`did:key: invalid ${spec.name} public key (${err.message})`)
   }
   const vmId = `${did}#${id}`
   const vm = { id: vmId, type: 'Multikey', controller: did, publicKeyMultibase: id }
@@ -98,7 +122,10 @@ function didKeyDocument (did, id) {
 function didJwkDocument (did, id) {
   let jwk
   try {
-    jwk = JSON.parse(Buffer.from(id, 'base64url').toString('utf8'))
+    const bytes = base64urlBytes(id)
+    const json = bytes.toString('utf8')
+    if (!Buffer.from(json).equals(bytes)) throw new Error('invalid UTF-8')
+    jwk = JSON.parse(json)
   } catch {
     throw new Error('did:jwk: the identifier is not a base64url JSON Web Key')
   }
@@ -109,6 +136,7 @@ function didJwkDocument (did, id) {
   for (const secret of ['d', 'p', 'q', 'dp', 'dq', 'qi', 'k']) {
     if (secret in jwk) throw new Error('did:jwk: the key carries private material and is refused')
   }
+  try { validateJwk(jwk) } catch (err) { throw new Error(`did:jwk: invalid public key (${err.message})`) }
   const vmId = `${did}#0`
   const doc = {
     '@context': [DID_V1, 'https://w3id.org/security/suites/jws-2020/v1'],
@@ -125,6 +153,55 @@ function didJwkDocument (did, id) {
     doc.capabilityDelegation = [vmId]
   }
   return doc
+}
+
+function base64urlBytes (value, length = null) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]+$/.test(value)) throw new Error('expected unpadded base64url')
+  const bytes = Buffer.from(value, 'base64url')
+  if (bytes.toString('base64url') !== value || (length !== null && bytes.length !== length)) {
+    throw new Error('invalid base64url encoding or key length')
+  }
+  return bytes
+}
+
+function validateOkp (curve, key) {
+  if (key.length !== 32) throw new Error(`${curve} requires 32 bytes`)
+  if (curve === 'Ed25519') {
+    const point = ed25519.ExtendedPoint.fromHex(key, false)
+    point.assertValidity()
+    if (point.isSmallOrder() || !point.isTorsionFree()) throw new Error('invalid signing subgroup')
+  } else {
+    // Public deterministic probe: rejects low-order keys, not a possession
+    // challenge. No user secret or network is involved.
+    x25519.getSharedSecret(new Uint8Array(32).fill(7), key)
+  }
+}
+
+function validateJwk (jwk) {
+  if (jwk.use !== undefined && jwk.use !== 'sig' && jwk.use !== 'enc') throw new Error('unsupported key use')
+  if (jwk.kty === 'EC') {
+    const size = { 'P-256': 32, 'P-384': 48, 'P-521': 66, secp256k1: 32 }[jwk.crv]
+    if (!size) throw new Error('unsupported EC curve')
+    base64urlBytes(jwk.x, size)
+    base64urlBytes(jwk.y, size)
+  } else if (jwk.kty === 'OKP') {
+    if (!['Ed25519', 'X25519'].includes(jwk.crv)) throw new Error('unsupported OKP curve')
+    if ((jwk.crv === 'Ed25519' && jwk.use === 'enc') || (jwk.crv === 'X25519' && jwk.use === 'sig')) {
+      throw new Error('key use does not match its curve')
+    }
+    validateOkp(jwk.crv, base64urlBytes(jwk.x, 32))
+  } else if (jwk.kty === 'RSA') {
+    const n = base64urlBytes(jwk.n)
+    const e = base64urlBytes(jwk.e)
+    if (!n[0] || !e[0] || n.length < 128 || n.length > 1024 || e.length > 8 || !(n.at(-1) & 1) || !(e.at(-1) & 1)) {
+      throw new Error('invalid RSA modulus or exponent')
+    }
+    const exponent = BigInt('0x' + e.toString('hex'))
+    if (exponent < 3n || exponent >= BigInt('0x' + n.toString('hex'))) throw new Error('invalid RSA exponent')
+  } else throw new Error('unsupported key type')
+  // OpenSSL checks supported JWK structure and EC point validity. Length
+  // checks alone allowed nonexistent curve points to become DID documents.
+  createPublicKey({ key: jwk, format: 'jwk' })
 }
 
 /** CAIP-2 namespaces did:pkh admits, with the verification-method type each fixes. */

@@ -256,16 +256,27 @@ engine, and the peer handshakes disclose the real address anyway (§K.11). The
 gate reads the live mode per request, so leaving Private mode lets the next
 request through with no restart.
 
-**A named site is not refused.** The refusal is for *discovery* — asking
-strangers where content is. A Handshake name whose zone also states an
-**origin** for its content loads from that origin in Private mode over the
-proxied fetch (Chapter 3 §8; row 9 of the inventory), and the refusal page the
-Handshake handler builds for a named peer-to-peer site says so in its own
-words — *"A name that also publishes a stated origin for its content loads from
-that origin in Private mode"*, the `host` form of the same `privateRefusal`.
-For a named site the private answer is a stated origin, not a mode; §K.8 is
-where a name reaches these namespaces, and this is the second half of what it
-inherits.
+**A named site is refused on the same terms.** A Handshake name that points at a
+torrent or a hypercore drive reaches these namespaces through the same handlers
+(§K.8), so it meets the same gate. The refusal the Handshake handler builds for
+a named peer-to-peer site is the `host` form of the same `privateRefusal`, and
+it closes by saying what the mode does **not** offer here —
+*"A stated origin does not enable this protocol in Private mode."*
+(`../../src/delivery-mode.js:184`).
+
+That sentence is the honest scope of the origin path, and it is the boundary
+between this chapter and Chapter 3. The stated origin of Chapter 3 §8 (`car=`,
+and experimental there) is an **IPFS CAR fetch** — one HTTPS `GET` of an archive
+whose blocks are hash-checked into the local node
+(`../ipfs/src/origin-warm.js`) — and it exists for IPFS content, which is why
+the `ipfs` form of `privateRefusal` is the one that names it. The whole-archive
+remedy the Handshake handler applies is IPFS's alone (Chapter 1 §10.2), and
+there is no counterpart for `hyper=`, `bt=` or SSB: an origin that stated where
+a torrent's bytes are would still have to be fetched *as a torrent*, by the
+engine the gate refuses. For this chapter the
+private answer is therefore the refusal itself, and an implementation **MUST
+NOT** promise an origin route for a namespace whose origin engine it does not
+have.
 
 `gemini://` is **routed**, and is therefore not behind the gate. Its transport
 is a single TCP connection to a single host, which is exactly what a SOCKS5
@@ -642,6 +653,10 @@ infohash" is kept for a magnet of which it is true. An implementation
 that describes a *different* identifier sends its reader looking for the wrong
 fault.
 
+The `xs` parameter does not have that treatment, and the gap is recorded rather
+than smoothed over: an `xs` this browser cannot read is refused as though the
+magnet carried no `xs` at all (D **KY-12**).
+
 ### K.7.2 Dispatch, and the boundary inside the namespace
 
 `bittorrent://<key>/…` is split on the key's **shape**, not on any lookup:
@@ -681,26 +696,35 @@ dispatcher passes everything that is not a 40-hex infohash through
 (§K.7.2). See D **KY-9**, and `../../DEVIATIONS.md` §3 **KY-D4** for the
 refusal that would close it.
 
-### K.7.4 `magnet:` — a redirect, not a resolution
+### K.7.4 `magnet:` — a hand-off, not a resolution
 
-The `magnet:` handler resolves nothing and fetches nothing. It reads the URI's
-parameters and answers a **308** into `bittorrent://`:
+The `magnet:` handler resolves nothing, fetches nothing, and asks for nothing.
+It reads the URI's parameters (RFC 3986 §3.4 query syntax, through
+`URLSearchParams`) and answers a **308** into the consent page of §K.7.5:
 
 ```
-xs=urn:btpk:<64 hex>     →  308  bittorrent://<pubkey>        (checked FIRST)
-xt=urn:btih:<40 hex>     →  308  bittorrent://<infohash>/
+xs=urn:btpk:<64 hex>     →  308  wildroot://torrents?mutable=<pubkey>  (checked FIRST)
+xt=urn:btih:<40 hex>     →  308  wildroot://torrents?add=<infohash>
+either of those with dn= →  … &dn=<display name>
 an xt this browser
   recognises and cannot
   use (urn:btmh, base32) →  400, naming that form (§K.7.1)
 any other xt             →  400, "Magnet has no bittorrent infohash"
-no xt and no xs          →  400, naming the missing parameter
+no usable xt or xs       →  400, "Magnet link has no `xt` or `xs`
+                                  parameter" — which an `xs` this browser
+                                  cannot read also reaches (D **KY-12**)
 ```
 
-Every refusal is in-namespace and carries no `Location`.
+Every refusal is in-namespace and carries no `Location`. **No answer this
+handler can produce is a `bittorrent://` URL**, which is the whole of §K.7.5's
+rule restated as a property of the dispatch path
+(`src/magnet-protocol.js:86-90`).
 
 `xs` is tested before `xt`, wherever in the query string each sits. For a
 BEP-46 magnet that is right — the mutable key is the address, and the infohash
-it currently points at is incidental.
+it currently points at is incidental — and the consent page is told which of
+the two it is confirming, because a mutable address opens a site through
+`bt-fetch` rather than adding a managed torrent.
 
 Two rules make that precedence stable, and both are pinned by tests:
 
@@ -710,34 +734,63 @@ Two rules make that precedence stable, and both are pinned by tests:
   scanned for the first that is a v1 infohash. One magnet has one meaning; a
   publisher's parameter order is not part of the address. The same applies to
   `xs`.
-- **The two readers of a magnet agree.** The handler above and the navigation
-  rewrite below apply the same precedence: when any `xs` carries a BEP-46 key,
-  the rewrite declines the magnet (returns `null`) rather than offering its
-  incidental infohash as a torrent to add. An implementation with more than one
-  reader of an identifier **MUST** give them one precedence; otherwise the same
-  string means different things depending on how the user arrived at it.
+- **The two readers of a magnet agree, because there is one reader.** The
+  handler calls `magnetToTorrentsPage()` — the same function the navigation
+  rewrite calls — so a magnet carrying both an `xs` and an `xt` yields the
+  identical URL whether the user clicked it or it was dispatched here. An
+  implementation with more than one reader of an identifier **MUST** give them
+  one precedence; sharing the function is the cheapest way to hold that,
+  because the same string cannot then mean different things depending on how
+  the user arrived at it.
 
-### K.7.5 Consent: a clicked magnet adds nothing
+### K.7.5 Consent: a magnet adds nothing
 
-A magnet handled as above would start peer traffic the moment it was clicked,
-because the `bittorrent://` handler adds whatever infohash it is asked for so
-it can stream. Every other browser asks first.
+A magnet that answered with the address itself would start peer traffic the
+moment it was clicked, because the `bittorrent://` handler adds whatever
+infohash it is asked for so it can stream, and opens whatever key it is asked
+for so it can browse. Every other browser asks first.
 
-So navigation is rewritten one layer up: `magnetToTorrentsPage()` maps an
-infohash magnet to `wildroot://torrents?add=<hash>[&dn=<name>]`, a page that
-shows an "Add this torrent?" card and adds **nothing** until the user says so.
-The display name rides along, truncated to 200 characters and percent-encoded,
-so the card can name the torrent before any metadata has been fetched —
-otherwise the user would be asked to approve a bare 40-hex string.
+> **The rule.** An implementation **MUST NOT** begin peer traffic for a magnet
+> the user merely followed a link to — **for either form of magnet**. A BEP-46
+> mutable address is not an exception: opening it dials peers exactly as adding
+> an infohash does, and the user approved neither.
 
-An implementation **MUST NOT** begin peer traffic for a magnet the user merely
-followed a link to. The rewrite **MUST** be applied at every navigation entry
-point; one gap is a bypass.
+`magnetToTorrentsPage()` (`src/magnet-protocol.js:32-42`) is the one function
+that maps a magnet to its confirmation URL, and it covers both forms:
 
-Only the infohash form is rewritten: a `urn:btpk:` magnet is an address to be
-browsed, not a torrent to be managed — and that holds whether or not the same
-magnet also carries an `xt`, because the handler gives the mutable key
-precedence and the two readers must agree (§K.7.4).
+| Magnet | Confirmation URL |
+|---|---|
+| `xs=urn:btpk:<64 hex>` | `wildroot://torrents?mutable=<key>[&dn=<name>]` |
+| `xt=urn:btih:<40 hex>` | `wildroot://torrents?add=<hash>[&dn=<name>]` |
+| both | the **mutable** form (§K.7.4) |
+| neither | `null` — there is nothing to confirm |
+
+The page shows a confirmation card — "Add this torrent?" for the infohash form,
+"Open this mutable site?" for the key — and does **nothing** until the user says
+so. The display name rides along, truncated to 200 characters and
+percent-encoded, so the card can name the torrent before any metadata has been
+fetched — otherwise the user would be asked to approve a bare 40- or 64-hex
+string.
+
+The page is the browser's and is not in this package, so the rule is specified
+here and fulfilled there: what this chapter's tests establish is that nothing
+peer-backed is reached *without* the page, and the requirement that the page
+then asks is binding on whoever writes it (`../../DEVIATIONS.md` §2.8).
+
+**Defence in depth: the handler applies it too.** The rewrite **MUST** be
+applied at every navigation entry point, and one gap would be a bypass — so the
+protocol handler does not rely on there being no gap. It calls
+`magnetToTorrentsPage()` first and redirects to whatever that returns
+(`src/magnet-protocol.js:86-87`), which means a magnet reaching dispatch by
+some path that never saw the main-frame rewrite — a server-side redirect chain,
+a subresource, a programmatic `fetch` — still lands at the inert consent page.
+An `xt` the rewrite could not use is a refusal (`:88-90`), not a bare
+`bittorrent://`. **Asking for a magnet resource grants no network authority**,
+whoever asks and however they arrived.
+
+*(`tests/magnet.test.js`, "no magnet reaches a peer-backed URL through the
+handler" and "handler and rewrite AGREE about a magnet carrying both xs and
+xt".)*
 
 ### K.7.6 Human input
 
@@ -803,8 +856,9 @@ Three properties an implementation **MUST** preserve:
 
 1. **The pointer is served through the same handler a typed address is.** A
    name-hosted torrent inherits every rule in §K.7 — the same dispatch, the
-   same Private-mode gate (§K.3.6) and the same way past it, a stated origin
-   for the content, the same in-namespace failure.
+   same Private-mode refusal (§K.3.6), the same in-namespace failure. Having a
+   name in front of the key adds no route: the only way past the gate is the
+   mode.
 2. **A malformed pointer is not a pointer.** A `bt=` whose value is neither 40
    nor 64 hex parses to `null` rather than to a half-trusted address.
 3. **The trust states compose, weakest link wins.** The Handshake side proves
@@ -938,8 +992,11 @@ open, and an implementation should be explicit about all four:
    address anyway. `gemini://` is the exception because its transport is one TCP
    connection to one host, which a SOCKS circuit carries exactly — so it is
    routed through Tor rather than refused. Routing it buys the address and the
-   lookup, and nothing else: every Gemini connection in the session shares the
-   same circuits, because no SOCKS credential is sent (Chapter 8, TO-3).
+   lookup, and nothing else: no SOCKS credential is sent, so **no stream
+   isolation is requested**, and Tor may carry several of these connections —
+   and connections this browser makes for other reasons — over one circuit.
+   Which circuit any of them gets is Tor's decision, is not observed here, and
+   **MUST NOT** be described as though it were (Chapter 8, TO-3).
 
 **And one that is not about the network at all.** Four of these five schemes are
 registered *standard and secure*, which gives them a real, persistent tuple

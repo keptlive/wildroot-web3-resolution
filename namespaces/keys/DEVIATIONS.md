@@ -166,7 +166,9 @@ stated correctly. The engineering item is §3, **KY-D2**.
 
 **What.** `magnet` has a namespace of its own, distinct from `bittorrent`
 (`../../src/router.js`, `NAMESPACES.MAGNET`), even though every successful
-magnet is a 308 into `bittorrent://` and every failing one is a 400.
+magnet is a 308 into the consent page (`wildroot://torrents?…`,
+`src/magnet-protocol.js:86-87`) and every failing one is a 400. No answer in
+this namespace is a `bittorrent://` URL at all.
 
 **The standard says.** Nothing: the namespace is this specification's own unit,
 defined in the spine. BEP 9 defines the magnet URI and says nothing about how a
@@ -181,10 +183,12 @@ the swarm was consulted when nothing was.
 `X-Resolution-Namespace: magnet`, so anything counting failures per namespace
 sees two namespaces where a user sees one protocol.
 
-**Status: DELIBERATE.** A redirect is an answer, not a fallback — the same
-reasoning that justifies the key-shape split inside the BitTorrent namespace
-(SPEC §K.7.2). Stated because a reader comparing the namespace list to the
-scheme list will notice the extra row.
+**Status: DELIBERATE**, and the consent hand-off makes it more so: a magnet is
+answered by a page that asks the user, and the BitTorrent namespace is not
+entered at all until they agree (SPEC §K.7.5). A redirect is an answer, not a
+fallback — the same reasoning that justifies the key-shape split inside the
+BitTorrent namespace (SPEC §K.7.2). Stated because a reader comparing the
+namespace list to the scheme list will notice the extra row.
 
 ---
 
@@ -328,12 +332,13 @@ and **KY-D4**.
 ### KY-10. Every magnet parameter except `xt`, `xs` and `dn` is ignored
 
 **What.** `tr=` (tracker), `ws=` (web seed), `so=` (select file indices),
-`x.pe=` (peer address) and everything else are read and discarded. Only the
-info-hash or public key and the display name survive the 308 into
-`bittorrent://`.
+`x.pe=` (peer address) and everything else are read and discarded
+(`src/magnet-protocol.js:32-42`). Only the info-hash or public key and the
+display name survive the 308 into the consent page, and only those two reach
+the `bittorrent://` address the user may then approve.
 
 **The standard says.** BEP 9 defines `tr=` and `dn=` alongside `xt=`; BEP 53
-defines `so=`.
+defines `so=` (§"Select specific file indices for download").
 
 **Why.** The `bittorrent://` URL form has no room for them: the address is a
 key and a path and nothing more. Discovery is the DHT's job (BEP 5), and file
@@ -384,6 +389,49 @@ refusal to render a lower one without saying so, and a trust step that reports
 "newest seen" rather than staying silent. Written down because "the address is
 the key, so it is verified" is a claim that quietly excludes freshness, and a
 reader is entitled to know that.
+
+---
+
+### KY-12. A malformed `xs` is refused as though the magnet carried no `xs`
+
+**What.** A magnet whose only address parameter is an `xs` the browser cannot
+read — a `urn:btpk:` whose key is not 64 hex characters, or an `xs` carrying
+some other URN — is answered *"Magnet link has no `xt` or `xs` parameter"*
+(`src/magnet-protocol.js:92`). That sentence is untrue of it: it has an `xs`.
+The path there is `magnetToTorrentsPage()` declining the magnet (`:86`) and the
+`xt` branch not applying (`:88`), which leaves the final message meant for a
+magnet that really carries neither parameter. `urn:btpk:` + 63 hex — a
+truncated paste, the likeliest way to produce this — is refused with those
+words.
+
+**The standard says.** BEP 9 defines `xt` (*exact topic*) and BEP 46 defines the
+`xs=urn:btpk:` (*exact source*) parameter this refusal denies the existence of.
+The conformance verb is this chapter's own: SPEC §K.7.1 states that an
+implementation **SHOULD** refuse a form it recognises and cannot use *by naming
+it*, "a refusal that describes a *different* identifier sends its reader looking
+for the wrong fault". This is that failure, applied to `xs` rather than `xt`.
+
+**Why.** The named refusals were written for the `xt` branch: `refusalFor()`
+(`:67-76`) reads `searchParams.getAll('xt')` and names the BEP-52 `urn:btmh:`
+and BEP-9 base32 forms it finds there (KY-2, KY-3). Nothing equivalent reads
+`xs`, so an `xs` that fails `PUBLIC_KEY_MATCH` falls past both branches to the
+catch-all.
+
+**Consequence.** A user with a truncated or mistyped BEP-46 magnet is told to
+look for a parameter that is in front of them, which is the specific
+wrong-fault-hunting this chapter's own rule exists to prevent. No security
+consequence: the refusal is in-namespace, carries no `Location`, and nothing is
+dialled either way (SPEC §K.7.5). It is an accuracy defect in a message, in a
+chapter that holds accurate refusals to be part of the specification.
+
+**Status: OPEN.** Give `xs` the treatment `xt` already has: test
+`searchParams.getAll('xs')` before the catch-all and name what was found — an
+`xs` carrying `urn:btpk:` with the wrong number of hex characters is a malformed
+public key, and an `xs` carrying another URN is a source form this browser does
+not read — keeping *"Magnet link has no `xt` or `xs` parameter"* for the magnet
+of which it is true. A few lines beside `refusalFor()`, and the same test shape
+as "a form this browser does not read is refused BY NAME"
+(`tests/magnet.test.js`).
 
 ---
 
@@ -502,6 +550,32 @@ type* and nothing about latency, exit-policy refusals, or what a capsule that
 blocks known exits does. Gemini servers are hobby infrastructure and some of
 them will refuse Tor; the honest statement is that the route is correct and
 unmeasured.
+
+### 2.8. The consent contract is specified here and fulfilled somewhere else
+
+SPEC §K.7.5 specifies the two confirmation URLs a magnet becomes —
+`wildroot://torrents?add=<infohash>` and `wildroot://torrents?mutable=<key>` —
+and `tests/magnet.test.js` pins both, on both readers. Every test in this
+package therefore establishes one half of the rule: **nothing peer-backed is
+reached without the page.** The other half — that the page then *asks* — is
+behaviour this package contains no code for and can write no test against.
+
+That is a split, not an unknown. The reference implementation honours both
+forms: Wildroot's torrents page reads `?mutable=`, requires exactly one such
+parameter matching the same 64-hex shape rather than guessing at a malformed
+one, and renders an "Open this mutable site?" confirmation with the key shown —
+the mutable twin of the "Add this torrent?" card the `?add=` form gets. It is
+named here as an existence proof that the contract is satisfiable and is
+satisfied, not as a normative citation: it is a browser file, outside this
+package, and nothing in this specification depends on its internals.
+
+What remains genuinely uncertain is what a *second* implementation would do.
+An implementation that wired `magnetToTorrentsPage()` to a page which acted on
+the URL without asking would pass every test in this directory and break the
+rule the chapter is built on, because the rule lives across a boundary the tests
+cannot cross. We do not have a way to close that from here, and a reader copying
+this design should treat §K.7.5's consent requirement as binding on the page
+they write, not as something the resolution layer can enforce for them.
 
 ---
 

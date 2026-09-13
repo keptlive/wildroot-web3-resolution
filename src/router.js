@@ -57,7 +57,7 @@ export { ICANN_TLDS, NEVER_HNS_TLDS, isReservedHost, isOnionHost, isEthName, cla
 
 // --- Namespaces -------------------------------------------------------------
 // A namespace is "a distinct address space with its own root of trust." Two
-// schemes may share one namespace (ipfs/ipns/ipld/pubsub are all IPFS). A
+// schemes may share one namespace (ipfs/ipns are both IPFS). A
 // failure must never cross a namespace boundary (L2).
 export const NAMESPACES = Object.freeze({
   HNS: 'hns', // Handshake names, SPV chain-proof + DANE/CID (L3)
@@ -106,10 +106,6 @@ export const SCHEME_TABLE = Object.freeze([
   { scheme: 'hns', namespace: NAMESPACES.HNS, status: 'live', trust: 'trustless', verify: 'SPV chain proof + DANE (TLSA 3 1 1) or content CID' },
   { scheme: 'ipfs', namespace: NAMESPACES.IPFS, status: 'live', trust: 'trustless', verify: 'CID' },
   { scheme: 'ipns', namespace: NAMESPACES.IPFS, status: 'live', trust: 'trustless', verify: 'IPNS record + CID' },
-  { scheme: 'ipld', namespace: NAMESPACES.IPFS, status: 'live', trust: 'trustless', verify: 'CID' },
-  // A topic is a free-form string, not a content address: the only thing a
-  // message carries is the publishing peer's libp2p signature.
-  { scheme: 'pubsub', namespace: NAMESPACES.IPFS, status: 'live', trust: 'trusted', verify: 'libp2p publisher signature — a topic is not a content address' },
   // Honest status: with the header check on, the transaction header is
   // authenticated against the id (its signature verified over the fields, not
   // merely hashed — src/hns/ar-tx.js) and a whole raw body under 8 MiB is
@@ -286,6 +282,8 @@ export function classify (input, opts = {}) {
     return { url: searchURL(''), scheme: 'search', namespace: NAMESPACES.SEARCH, explicit: false, reason: 'empty' }
   }
 
+  // Browser adapters may already have mapped HTTP(S) namespace hosts; see
+  // docs/BROWSER-ROUTING-CONTRACT.md. L1 applies to this stage's input.
   // L1: an explicit scheme is authoritative. We do not reclassify it, we do not
   // "improve" it — we route it to whatever it named, known or not. An unknown
   // scheme is still returned as itself (dispatch will fail closed in-namespace).

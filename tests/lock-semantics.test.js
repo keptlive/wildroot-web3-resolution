@@ -40,7 +40,7 @@ function verdictFor (url) {
 test('content-addressed schemes are TRUSTLESS', () => {
   // The bytes are checked against the address they were asked for, so there is
   // nobody to believe.
-  for (const url of ['ipfs://bafyfoo/', 'ipld://bafyfoo/x', 'hyper://key/',
+  for (const url of ['ipfs://bafyfoo/', 'ipns://12D3Koofoo/', 'hyper://key/',
     'bittorrent://' + 'a'.repeat(40) + '/', 'bt://' + 'b'.repeat(64) + '/', 'ssb://%25abc/']) {
     assert.equal(verdictFor(url).state, 'verified', url)
   }
@@ -75,8 +75,8 @@ test('nostr: proves authorship, never completeness — the lock is never green',
   assert.equal(summarize(steps).state, 'partial')
 })
 
-test('gemini:// and did: and pubsub:// are never called verified', () => {
-  for (const url of ['gemini://x.test/', 'did:plc:abc', 'pubsub://topic/']) {
+test('gemini:// and did: are never called verified', () => {
+  for (const url of ['gemini://x.test/', 'did:plc:abc']) {
     const steps = schemeSteps(url)
     assert.ok(steps.length, url)
     assert.ok(!steps.some((s) => s.state === 'verified'), `${url} claimed a verified step`)

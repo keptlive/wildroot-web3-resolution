@@ -56,7 +56,12 @@ test('the disclosure says each side\'s cost in plain words, and that the lock is
   assert.match(DISCLOSURE.fast, /falls back to your network's DNS/)
   assert.match(DISCLOSURE.private, /^Private — /)
   assert.match(DISCLOSURE.private, /Tor client on this device/)
-  assert.match(DISCLOSURE.private, /nothing is looked up in the clear/)
+  // The disclosure says what is CONFIGURED, not what was observed: a fresh
+  // lookup has no plaintext fallback, and a cached answer may still work.
+  assert.match(DISCLOSURE.private, /without a plaintext fallback/)
+  assert.match(DISCLOSURE.private, /a cached answer may still work/)
+  assert.ok(!/nothing is looked up in the clear/.test(DISCLOSURE.private),
+    'the blanket claim is not made: the engine\'s cache is not observed from here')
   assert.match(DISCLOSURE.private, /fails rather than falling back/)
   assert.match(DISCLOSURE.private, /load more slowly/)
   assert.match(DISCLOSURE.private, /some sites block Tor/)

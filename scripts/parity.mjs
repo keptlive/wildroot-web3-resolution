@@ -75,6 +75,7 @@ export const MAP = {
   'namespaces/ens/src/html.js': 'src/protocols/html.js',
   'namespaces/ens/src/web3-protocol.js': 'src/protocols/web3-protocol.js',
   'namespaces/icann/src/dns-policy.js': 'src/hns/dns-policy.js',
+  'namespaces/ipfs/src/block-presence.js': 'src/hns/block-presence.js',
   'namespaces/ipfs/src/cid.js': 'src/files/cid.js',
   'namespaces/ipfs/src/origin-warm.js': 'src/hns/origin-warm.js',
   'namespaces/keys/src/fetch-to-handler.js': 'src/protocols/fetch-to-handler.js',

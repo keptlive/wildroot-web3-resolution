@@ -223,16 +223,26 @@ export class TorNode extends EventEmitter {
     try { fs.writeFileSync(pidFile, String(this.child.pid), { mode: 0o600 }) } catch {}
 
     let died = null
-    this.child.on('error', (err) => { died = err; this.child = null })
-    this.child.on('exit', (code) => {
+    const child = this.child
+    child.on('error', (err) => {
+      died = err
+      if (this.child !== child) return
+      this._routeUnavailable('Tor process failed')
+      this.child = null
+    })
+    child.on('exit', (code) => {
       died = died || new Error(`tor exited ${code}`)
-      this._ready = false
+      if (this.child !== child) return
+      this._routeUnavailable('Tor process exited')
+      this.child = null
     })
     const onLine = (buf) => {
       const s = String(buf)
       const progress = parseBootstrap(s)
       if (progress) this._setBootstrap(progress.percent, progress.message)
       if (/Bootstrapped 100%/.test(s)) {
+        if (this.child !== child || this._stopped) return
+        this._available = true
         this._ready = true
         this._flushReady(true)
       }
@@ -253,7 +263,7 @@ export class TorNode extends EventEmitter {
     // the bootstrap timeout — whichever comes first.
     if (!this._ready) {
       this._bootDeadline = setTimeout(() => {
-        if (!this._ready) this._flushReady(false)
+        if (!this._ready) this._routeUnavailable('Tor bootstrap timed out')
       }, this._bootstrapTimeout)
       if (this._bootDeadline.unref) this._bootDeadline.unref()
     }
@@ -307,6 +317,16 @@ export class TorNode extends EventEmitter {
     for (const r of waiters) { try { r(ok) } catch {} }
   }
 
+  _routeUnavailable (reason) {
+    const wasAvailable = this._available
+    this._ready = false
+    this._available = false
+    this._flushReady(false)
+    // Startup can still choose its external fallback. Once a route was
+    // offered, revoke it synchronously so no pending raw socket can reuse it.
+    if (wasAvailable) this.emit('route-unavailable', { reason })
+  }
+
   /**
    * A bundled tor can die under us. Probe the SOCKS port every 30s; after 3
    * consecutive failures, respawn our own — but only ours. An external tor the
@@ -316,12 +336,12 @@ export class TorNode extends EventEmitter {
     if (this._superviseTimer || this._stopped || this._external) return
     this._superviseFails = 0
     this._superviseTimer = setInterval(async () => {
-      if (this._recovering || this._stopped || !this._available) return
-      if (await detectConnect('127.0.0.1', this._socksPort, 1500).then(() => true, () => false)) {
+      if (this._recovering || this._stopped) return
+      if (this._available && await detectConnect('127.0.0.1', this._socksPort, 1500).then(() => true, () => false)) {
         this._superviseFails = 0
         return
       }
-      this._superviseFails++
+      this._superviseFails = this._available ? this._superviseFails + 1 : 3
       if (this._superviseFails < 3) return
       console.error('IP protection: bundled Tor stopped answering — recovering')
       this._recovering = true
@@ -354,12 +374,14 @@ export class TorNode extends EventEmitter {
    * never adopted — unlike spv.js, which adopts and reaps its orphan here.
    */
   async stopChild () {
+    this._routeUnavailable('Tor process stopped')
     if (this.child) killTree(this.child)
     this.child = null
   }
 
   async stop () {
     this._stopped = true
+    this._routeUnavailable('Tor stopped')
     if (this._superviseTimer) { clearInterval(this._superviseTimer); this._superviseTimer = null }
     if (this._bootDeadline) { clearTimeout(this._bootDeadline); this._bootDeadline = null }
     this._flushReady(false)

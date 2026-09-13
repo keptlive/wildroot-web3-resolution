@@ -15,10 +15,12 @@ key — holds, and the pin is proven through a real spliced connection by
 `tests/ws-proxy.test.js` ("e2e: the tunnel preserves end-to-end TLS so a DANE
 pin verifies through it"). The five fences hold and each is pinned by a test,
 including on the anonymized route, where the upstream is dialled through the
-device-local Tor by address and the name is never given to the proxy.
-Everything below is about the *other* things: the authentication that cannot
-exist, the service worker we do not allow, the origin the token is bound to, the
-manifest nobody signs, and a long list of what we have not measured.
+device-local Tor using an address in the SOCKS request, so the proxy performs no
+lookup for us. Everything below is about the *other* things: the authentication
+that is not reachable, the caller the tunnel cannot identify, the name the TLS
+handshake still discloses, the service worker we do not allow, the origin the
+token is bound to, the manifest nobody signs, and a long list of what we have not
+measured.
 
 Paths written `../../src/…` are shared modules of the top-level package; paths
 written `src/…` and `tests/…` are this chapter's, under `namespaces/apps/`.
@@ -29,43 +31,55 @@ extracted into this repository (SPEC.md, "Paths").
 
 ## 1. Deviations
 
-### AP-2. The tunnel cannot require proxy authentication, and ships with none
+### AP-2. The tunnel authenticates no requesting application
 
 **What.** The tunnel is an unauthenticated local proxy. It accepts a `CONNECT`
 from any process on the machine that can reach `127.0.0.1:<port>`, subject only
-to the port, Handshake-only, SSRF and Tor fences. The `Proxy-Authorization`
-check is implemented and constant-time (`src/ws-proxy.js:217`, `:276-280`,
-`:300-303`) but is skipped because no credential is passed
-(browser `src/protocols/index.js:267-277`).
+to the port, Handshake-only, SSRF and Tor fences and to the limits of SPEC
+§4.5.3. The `Proxy-Authorization` check is implemented and constant-time
+(`src/ws-proxy.js:228`, `:374-378`, `:399-402`) but is skipped because no
+credential is passed (browser `src/protocols/index.js:267-277`). Nothing else
+identifies the caller: the listener binds `127.0.0.1` (`:332`), and a loopback
+bind is a statement about which *device* may reach the port, not about which
+*program* on that device did.
 
 **The standard says.** RFC 9110 §11 (with RFC 7235's mechanism) defines exactly
 this: a proxy answers `407` with `Proxy-Authenticate` and the client retries
-with `Proxy-Authorization`. RFC 1928/1929 define the SOCKS5 equivalent. Both
-are available on paper and neither is reachable in practice: Chromium's SOCKS5
-client offers only the "no authentication" method, and Chromium does not
-surface a proxy-auth challenge to its embedder for a `wss://` handshake, so the
-`407` is never answered and the socket dies instead of retrying.
+with `Proxy-Authorization`. RFC 1928/1929 define the SOCKS5 equivalent. Both are
+available on paper and neither was reachable in the runtime this implementation
+targets: in the tested Electron build Chromium's SOCKS5 client offered only the
+"no authentication" method, and on the tested path Chromium surfaced no
+proxy-auth challenge to its embedder for a `wss://` handshake, so the `407` was
+never answered and the socket died instead of retrying (SPEC §4.3). Those are
+measurements of one build and one code path, not properties of the protocols,
+and they have not been repeated on every engine version this implementation has
+since run on: an old experiment is not evidence about a future version.
 
 **Why.** Two implementations were built and neither could connect once. The
-choice is between a fence that cannot be enforced and an honest statement that
-the boundary is the loopback bind plus the four content fences.
+choice is between a fence that could not be enforced in that runtime and an
+honest statement of what the boundary actually is.
 
 **Consequence.** Any local process can use the tunnel to resolve a Handshake
-name and open a TCP connection to its public address on port 443. That is a real
-widening of what this component does compared with an authenticated proxy, and
-the argument that it is acceptable is a specific one: a process already on
-loopback can resolve the same name over public DoH and dial the same address by
-itself, so the tunnel confers no capability it lacked — while the port,
-Handshake-only and SSRF fences mean it confers rather *less* than a general
-proxy would. In Private mode that connection is made through the user's own
-Tor client rather than directly — or, while that Tor is blocked, not at all —
-which is a route the local process could also have taken itself.
+name with the browser's own resolver and open a TCP connection to that name's
+public address on port 443 — in Private mode, through the user's own Tor client;
+while Tor is blocked, not at all. The fences bound what it can reach (one port,
+Handshake names only, public addresses only) and the limits bound how much of it
+it can hold at once, but nothing bounds *who* may ask. A host on which any local
+process is assumed benign loses nothing; a host on which it is not has a local
+capability here that no user interface shows and no grant covers.
 
-**Status: DELIBERATE.** The credential path is retained and tested
-(`tests/ws-proxy.test.js`, "OPTIONAL auth (future platform)") so that a platform
-which can authenticate a `wss://` proxy re-enables the gate with no code change.
-Until then, no document, comment or interface may describe proxy authentication
-as a protection of this feature.
+**Status: OPEN.** We would still ship without a proxy credential — there was
+none to be had — but we would not again describe the loopback bind as the access
+control, and the gap is real rather than notional. Two things would close it and
+neither is done: authenticate the peer at the operating-system level (match the
+connecting process to this browser's own — `SO_PEERCRED` on Linux,
+`LOCAL_PEERPID` on macOS, `GetExtendedTcpTable` on Windows — and refuse every
+other caller), or use a platform that can answer a proxy challenge for a
+`wss://` CONNECT, for which the credential path is retained and tested
+(`tests/ws-proxy.test.js`, "OPTIONAL auth (future platform)") so the gate
+re-enables with no code change. Until one exists, no document, comment or
+interface may describe proxy authentication, or the loopback bind, as
+authenticating the caller.
 
 ### AP-3. No service workers at a Handshake name
 
@@ -118,8 +132,12 @@ whether a Handshake name is live and holds a socket, and can reach a Handshake
 application's socket API with whatever credentials that application accepts
 cross-origin. It learns nothing the name does not already publish, and the
 application's own `Origin` check is the defence the platform intends — but a
-Handshake application author should know that their socket is reachable from
-the whole web, not only from their own origin.
+Handshake application author should know two things about it. Their socket is
+reachable from the whole web, not only from their own origin; and an `Origin`
+header is a statement made by the requesting user agent about itself, so it is a
+filter against ordinary cross-origin pages and not a proof of who is connecting.
+Anything the server must be *sure* of belongs in the authentication of SPEC §5.4,
+not in a header.
 
 **Status: DELIBERATE.** Matching the web platform is right here; diverging would
 make Handshake sockets behave unlike every other socket, which is a worse trap
@@ -198,7 +216,7 @@ warned about.
 ### AP-7. A Handshake WebSocket is reachable on port 443 and nowhere else
 
 **What.** The tunnel accepts a `CONNECT` to 443 and refuses every other port
-before resolving (`TUNNEL_PORT`, `src/ws-proxy.js:90`, `:317-319`; SPEC §4.4
+before resolving (`TUNNEL_PORT`, `src/ws-proxy.js:87`, `:416-418`; SPEC §4.4
 fence 1). The PAC still routes `wss://<name>:8443/…` to the tunnel — it decides
 on scheme and host, not port — so an application that serves its socket
 anywhere but 443 is routed here and then refused with a `403` the page cannot
@@ -215,13 +233,22 @@ Chapter 1's own deviation HS-6 — and the
 engine's certificate-verification request carries a hostname with **no port**
 (browser `src/index.js:1330-1351`), so even a resolver that fetched the right
 RRset would have nothing to select it with at verification time. Accepting an
-arbitrary port would therefore mean splicing TLS that the pin check cannot
-cover — which is exactly what fence 1 exists to prevent.
+arbitrary port would therefore mean splicing TLS that this profile's pin check
+could not cover — which is what fence 1 exists to prevent.
 
 **Consequence.** A publisher must terminate its WebSocket on 443 at the
 Handshake name (SPEC §4.8), which is what every reference deployment does
 anyway, and a non-default port is a dead end with a bad error. The cost is
-carried by the deployment, not by the trust story.
+carried by the deployment, not by the trust story. Two things the port rule is
+**not** must be stated with it, because both are easy to assume and neither is
+true. It does not guarantee the pin: the pin is checked by the engine's
+certificate-verification procedure (SPEC §4.7), and a splice on 443 whose name
+publishes no TLSA still fails there, not here. And it does not guarantee TLS:
+the tunnel reads no byte after the `200`, so it cannot tell a TLS ClientHello
+from a plaintext WebSocket handshake. What the rule actually does is confine
+every splice to the one port this implementation's pin lookup covers, and
+decline the plaintext case that the web platform can actually produce — a
+`ws://` from a non-secure page, which arrives as `CONNECT <name>:80`.
 
 **Status: DELIBERATE**, with a clean fix if a port ever needs to be. Give the
 resolution a port parameter, read `_<port>._tcp.<name>`, and thread the port
@@ -229,6 +256,48 @@ from the CONNECT through to the certificate check; until the engine's
 verification callback carries the port, the honest set is the one port the pin
 covers, and refusing is better than splicing unpinned. Both halves must move
 together, or the port becomes reachable before it becomes pinned.
+
+### AP-8. On the anonymized route the name is still disclosed to the exit, in SNI
+
+**What.** In Private mode the upstream is dialled through the device-local Tor,
+and the SOCKS request carries the **resolved address** (`ATYP` IPv4 or IPv6),
+never a name (`socksDialer`, `../../src/socks-dial.js:104-159`; the fence-4
+branch at `src/ws-proxy.js:426-432`). That is all it does: the SOCKS server
+performs no lookup on our behalf. The stream it then carries is the user agent's
+own TLS handshake, spliced end to end (`:473-475`), and that handshake names the
+host in the clear.
+
+**The standard says.** [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446)
+§4.2.9 and [RFC 6066](https://www.rfc-editor.org/rfc/rfc6066) §3 define
+`server_name`: the client **SHOULD** include the server name in the ClientHello,
+and the ClientHello is not encrypted, so every hop that carries it can read the
+name. RFC 6066 §3 says so itself, and directs a deployment that needs the name
+hidden to another mechanism.
+[RFC 9848](https://www.rfc-editor.org/rfc/rfc9848) (Encrypted ClientHello) is
+that mechanism; it is not deployed on this path (Chapter 1, HS-3: the SVCB
+record that would carry the ECH configuration is parsed but not queried, and the
+runtime exposes no ECH option).
+
+**Why.** The address-form SOCKS request was chosen for two reasons that both
+still hold — it keeps a name out of the proxy's own resolver, and it leaves the
+SSRF guard an address to inspect — and neither of them was ever a claim about
+the ClientHello. The over-claim ("by address, so Tor learns no name") came from
+reading a property of the SOCKS hop as a property of the stream.
+
+**Consequence.** A Tor exit relay carrying a Handshake `wss://` sees which name
+the socket is for, and so does anything between that exit and the origin. What
+Private mode does hide on this path is the user's own address from the origin,
+and the lookup from the local network. An interface that says more than that is
+wrong, and a user choosing Private mode to keep *which name they are using*
+private is not getting it.
+
+**Status: OPEN.** The fix is ECH, which is blocked on the same two things
+Chapter 1 records for the document path — querying SVCB for the ECH
+configuration, and a runtime that exposes an ECH option — plus a decision about
+what to do when a Handshake name publishes no ECH configuration at all, which
+today is all of them. Until then the honest statement is the one SPEC §4.4 and
+§8 now make, and the claim must not be restated as "the name never leaves this
+device".
 
 ---
 
@@ -267,26 +336,51 @@ The Tor route of SPEC §4.4 fence 4 is pinned by test against a stub SOCKS
 server; it has not been measured against a real Tor circuit. Two things are
 therefore unquantified: what a WebSocket handshake costs through a circuit that
 may still be building (Chapter 8 §7.2 routes before readiness deliberately), and
-what a long-lived socket does to a session whose circuits are shared by
-everything in it (Chapter 8 TO-3). Neither is a correctness question — the
+what a long-lived socket does to the rest of the session, which asks for no
+stream isolation and whose actual circuit assignment is Tor's own decision and
+not something we have observed (Chapter 8 TO-3). Neither is a correctness
+question — the
 fences and the pin are the same on both routes — but a realtime application is
 the one kind of page for which "it works, slowly, forever" is a different
 product from "it works".
 
-### 2.3. Whether the PAC leaves loopback traffic reachable in Private mode
+### 2.3. What reaches a loopback service in Private mode, and by which rule
 
+Three mechanisms decide this and only one of them is ours, which is why it took
+a review to state it correctly.
+
+Chromium applies an **implicit bypass** for loopback destinations, and the
+`<-loopback>` token *removes* that implicit bypass rather than restoring it
+([`net/docs/proxy.md`](https://chromium.googlesource.com/chromium/src/+/HEAD/net/docs/proxy.md#overriding-the-implicit-bypass-rules)).
 The privacy controller's own configuration carries
 `proxyBypassRules: '<-loopback>'` (`_defaultConfig` in
-`namespaces/tor/src/anonymize.js`). The PAC decorator replaces the whole
-configuration with `{mode: 'pac_script', …}` (browser `src/index.js`), and the
-PAC has no loopback branch: in Private mode, its non-WebSocket answer for
-`http://127.0.0.1:<port>/` is the anonymizer's SOCKS directive — the Tor port
-while routed, the blackhole port while blocked. Whether Chromium applies an
-implicit loopback bypass to a PAC-configured session is exactly the thing we
-could not establish from the specification or from a measurement. If it does
-not, then every in-process loopback service a page fetches (a content-gateway
-port, a media sidecar) is routed into Tor — which refuses it — for as long as
-Private mode and the tunnel are both on. See AP-D1.
+`namespaces/tor/src/anonymize.js`), so what that configuration asks for is that
+loopback *be* proxied; the PAC decorator then replaces the whole configuration
+with `{mode: 'pac_script', …}` (browser `src/index.js`) and the bypass list goes
+with it. The PAC has no loopback branch, so its non-WebSocket answer for
+`http://127.0.0.1:<port>/` in Private mode is the anonymizer's SOCKS directive.
+
+What the token is documented to do and what it did are two different facts, and
+the second is version-specific. In the reference implementation's integration
+testing on **Electron 43.4.1 / Chromium 150**, `<-loopback>` was **ignored**
+under a PAC configuration in the native test: loopback stayed DIRECT whatever
+the configuration asked for. That is an observation about one build on one path,
+not a rule about Chromium, and an implementation relying on the token should
+repeat the measurement on its own engine version rather than inherit ours.
+
+WebSockets therefore do not rest on it at all. They are decided by an explicit
+policy at the request level rather than by a proxy return value
+(`localWsPolicy`, browser `src/hns/ws-proxy-policy.js:8-21`; SPEC §4.6): a
+Private-mode `ws:`/`wss:` to a local host is cancelled unless it is the exact
+endpoint of an already-running, granted Local App whose page and frame origins
+both match it, while a WebSocket to a remote host keeps the base Tor route with
+no DIRECT fallback.
+
+What remains unmeasured is everything that is **not** a WebSocket: whether an
+ordinary loopback fetch under this PAC is likewise left DIRECT by the implicit
+bypass, or is routed into the session's SOCKS directive — where Tor refuses it —
+for as long as Private mode and the tunnel are both on. The two look identical
+in the configuration and completely different on the wire. See AP-D1.
 
 ### 2.4. Cookie behaviour on an `hns://` origin
 
@@ -313,8 +407,10 @@ The decorator returns the base configuration unchanged for any session that is
 not the web-content session (browser `src/index.js:1133`). That is right for the
 sessions we know about, and we have not enumerated every session in the
 application that could host a document able to open a `wss://`. A session
-without the PAC sends `wss://<handshake name>` DIRECT, where it fails as an
-unresolvable host — a failure, not a leak, but an obscure one.
+without the PAC sends `wss://<handshake name>` along that session's own base
+route — direct in Fast mode, the session proxy in Private — where it fails as an
+unresolvable host, because only the tunnel can resolve a Handshake name. A
+failure, not a leak, but an obscure one.
 
 ### 2.7. Internationalised hosts in the PAC
 
@@ -351,20 +447,35 @@ the memory of one successful run is not one.
 Work we know is worth doing and have not done. Each names the file and lines to
 start from.
 
-### AP-D1. Give the PAC a loopback and private-literal branch
+### AP-D1. Decide the non-WebSocket loopback policy, and state it somewhere it can be enforced
 
 `FindProxyForURL` has exactly two answers — the tunnel for Handshake
-WebSockets, the anonymizer's directive for everything else
-(`src/ws-proxy-pac.js:58-63`) — and installing it discards the
+WebSockets, the base directive for everything else
+(`src/ws-proxy-pac.js:63-68`) — and installing it discards the
 `proxyBypassRules: '<-loopback>'` the privacy controller would otherwise apply
-(browser `src/hns/anonymize.js:243-247`, `src/index.js:1142-1145`). Whether that
-matters depends on §2.3, which we could not settle.
+(browser `src/hns/anonymize.js:243-247`, `src/index.js:1142-1145`).
 
-**Recommendation.** Return `DIRECT` from the PAC for `localhost`, for IPv4 and
-IPv6 loopback and private literals, and for a bracketed literal — before the
-WebSocket branch, so it holds for both. It costs four lines, it restores the
-bypass the controller intended in the one configuration where the controller no
-longer owns it, and it removes the need to answer §2.3 at all.
+**Not the recommendation.** Adding a `DIRECT` branch for loopback and private
+literals is the obvious four lines, and it is the wrong move for two separate
+reasons. First, the reasoning it rests on is backwards: `<-loopback>` *removes*
+Chromium's implicit loopback bypass
+([`net/docs/proxy.md`](https://chromium.googlesource.com/chromium/src/+/HEAD/net/docs/proxy.md#overriding-the-implicit-bypass-rules)),
+so a PAC branch returning `DIRECT` would not be "restoring the bypass the
+controller intended" — the controller asked for the opposite. Second, a PAC
+answer is a route hint and not a decision: on **Electron 43.4.1 / Chromium 150**
+the reference implementation's integration testing found the token ignored under
+a PAC and loopback DIRECT regardless (§2.3), which is precisely why the local
+WebSocket rule is a request guard that can *cancel*.
+
+**Recommendation.** Decide the policy as a policy, then enforce it where a
+request can be cancelled rather than merely routed. For WebSockets that is done
+(`localWsPolicy`, browser `src/hns/ws-proxy-policy.js:8-21`; its contract is
+SPEC §4.6). What is left is the non-WebSocket half: measure which rule actually
+governs a loopback fetch under a PAC configuration (§2.3), then either extend
+the same request-level gate to those requests or state, in the privacy
+interface, that loopback services are reachable in Private mode and why.
+Whichever way it goes, it should be one written policy with one enforcement
+point, not a bypass token in one configuration and a PAC branch in another.
 
 ### AP-D4. Decide the service-worker question for `hns://`
 
@@ -399,26 +510,38 @@ so the change is in the discovery base and its test.
 
 ### AP-D8. Surface the tunnel's refusal reason
 
-Every fence answers a distinct HTTP status that the WebSocket API discards, so
+Every refusal answers a distinct HTTP status that the WebSocket API discards, so
 "this is not port 443", "Private mode, and the Tor client is not connected",
-"this name has no address", "this name resolves to a private address" and "the origin
-is down" are one untyped `error` event to the page and nothing at all to the
-user (`src/ws-proxy.js:264-274`).
+"this name has no address", "this name resolves to a private address", "the
+origin is down", "we are at capacity" (`503`) and "it timed out" (`504`) are one
+untyped `error` event to the page and nothing at all to the user
+(`src/ws-proxy.js:358-372`).
 **Recommendation.** Record each refusal with its reason and the name, and show
 it where the connection's trust state is already shown. The information exists
 and is thrown away at the socket boundary.
 
-### AP-D9. Bound the tunnel's concurrency
+### AP-D9. Per-name resolution limiting, and the connection that is dropped unanswered
 
-The tunnel accepts and tracks unbounded connections
-(`src/ws-proxy.js:230-235`), and every accepted CONNECT to an unresolved
-Handshake host costs one resolution. **Recommendation.** A cap on live tunnels
-and a small per-name rate limit on resolutions, refusing with `503` beyond it.
-The risk today is bounded by the loopback bind, so this is hygiene rather than a
-hole — but it is the kind of hygiene that is much easier to add before the
-tunnel's dials are, in Private mode, made through the user's own Tor circuit
-(SPEC §4.4 fence 4), where every accepted CONNECT costs circuit capacity
-as well as a resolution.
+The concurrency bound exists: 128 live client sockets, 32 connections in setup,
+32 outstanding resolutions or dials, each with its own deadline, and `503`
+beyond the pending limit (`WS_LIMITS`, `src/ws-proxy.js:93`; the accept gate at
+`:316`; the pending gate at `:279`; SPEC §4.5.3). Two things around it are not
+done.
+
+There is **no per-name limit**: one name that resolves slowly can occupy the
+whole pending budget from a page that opens sockets in a loop, and in Private
+mode each of those dials costs circuit capacity as well as a resolution (SPEC
+§4.4 fence 4). **Recommendation.** A small per-name rate limit on resolutions,
+refusing with `503` like the global one, and a shorter deadline for a name
+already known to be failing.
+
+And a connection over `maxConnections` is **destroyed without a response**
+(`:316`), where every other refusal in this chapter is a complete HTTP response
+followed by a graceful half-close (SPEC §4.5.1). RFC 9110 §15.6.4 gives `503`
+exactly this meaning and RFC 9110 §10.2.3 gives it a `Retry-After`.
+**Recommendation.** Answer the over-cap connection with `503` as the pending
+gate does, unless a measurement shows that writing to a client at that point
+costs more than it tells anyone.
 
 ---
 

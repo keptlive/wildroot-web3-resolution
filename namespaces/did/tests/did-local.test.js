@@ -12,8 +12,14 @@ import createDidHandler from '../src/did-protocol.js'
 
 // did:key spec §"Example": an Ed25519 key.
 const ED = 'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK'
-// did:jwk spec example: a P-256 key.
-const JWK = 'did:jwk:eyJjcnYiOiJQLTI1NiIsImt0eSI6IkVDIiwieCI6ImFjYklRaXVNczNpOF91c3pFakoydHBUdFJNNEVVM3l6OTFQSDZDZEgyVjAiLCJ5IjoiX0tjeUxqOXZXTXB0bnBLaEpwZmVQZUh0NmZ1WTZoUXNuVUpFN24xdTJFNCJ9'
+// A P-256 key in the did:jwk spec example's exact shape and member order:
+// {"crv":"P-256","kty":"EC","x":…,"y":…}, base64url with no padding.
+//
+// The specification's own printed example is NOT used, because the point it
+// prints is not on P-256 (y² ≠ x³ - 3x + b) and the resolver imports the key
+// rather than measuring it. This vector is the public point of the fixed
+// scalar 0xc0ffee, so the fixture stays deterministic and re-derivable.
+const JWK = 'did:jwk:eyJjcnYiOiJQLTI1NiIsImt0eSI6IkVDIiwieCI6IjAyQXpMNjJieURyNl8wcDBEZWlsRnI4Ymo3UDk0MkRfSFFPWG5CLVVQdUkiLCJ5IjoiNktaZ0JfMG5hd0p4Smx4dHNKTEVvTVhyakVYOXhEWlFMSW9KWDExWFJmSSJ9'
 // did:pkh spec example: an Ethereum mainnet account.
 const PKH = 'did:pkh:eip155:1:0xb9c5714089478a327f09197987f16f9e5d936e8a'
 
@@ -46,7 +52,7 @@ test('did:key: an X25519 key is for key agreement only; wrong lengths and unknow
   assert.throws(() => localDidDocument('did:key:z0OIl'), /base58btc/)
 })
 
-test('did:jwk: the spec\'s P-256 example, with every relationship; a private key is refused', () => {
+test('did:jwk: a P-256 key, with every relationship; a bent point and a private key are refused', () => {
   const doc = localDidDocument(JWK)
   assert.equal(doc.id, JWK)
   const vm = doc.verificationMethod[0]
@@ -55,17 +61,30 @@ test('did:jwk: the spec\'s P-256 example, with every relationship; a private key
   assert.deepEqual(vm.publicKeyJwk, {
     crv: 'P-256',
     kty: 'EC',
-    x: 'acbIQiuMs3i8_uszEjJ2tpTtRM4EU3yz91PH6CdH2V0',
-    y: '_KcyLj9vWMptnpKhJpfePeHt6fuY6hQsnUJE7n1u2E4'
+    x: '02AzL62byDr6_0p0DeilFr8bj7P942D_HQOXnB-UPuI',
+    y: '6KZgB_0nawJxJlxtsJLEoMXrjEX9xDZQLIoJX11XRfI'
   })
   for (const rel of ['authentication', 'assertionMethod', 'capabilityInvocation', 'capabilityDelegation', 'keyAgreement']) {
     assert.deepEqual(doc[rel], [vm.id], rel)
   }
-  const enc = 'did:jwk:' + Buffer.from(JSON.stringify({ kty: 'OKP', crv: 'X25519', x: 'AAAA', use: 'enc' })).toString('base64url')
+  // `use: enc` on a real X25519 key — the did:key X25519 spec example's own
+  // 32 bytes, written as a JWK.
+  const X25519 = 'BIiFcQEn3dfvB2pjlhOQQour6jXy9d5s2FKEJNTOJik'
+  const enc = 'did:jwk:' + Buffer.from(JSON.stringify({ kty: 'OKP', crv: 'X25519', x: X25519, use: 'enc' })).toString('base64url')
   const encDoc = localDidDocument(enc)
   assert.deepEqual(encDoc.keyAgreement, [`${enc}#0`])
   assert.equal(encDoc.authentication, undefined, 'an encryption key signs nothing')
   assert.equal(encDoc.assertionMethod, undefined)
+  // A key that is the right shape and the wrong curve point is refused: the
+  // key is imported, not measured.
+  const bent = 'did:jwk:' + Buffer.from(JSON.stringify({
+    crv: 'P-256',
+    kty: 'EC',
+    x: 'acbIQiuMs3i8_uszEjJ2tpTtRM4EU3yz91PH6CdH2V0',
+    y: '_KcyLj9vWMptnpKhJpfePeHt6fuY6hQsnUJE7n1u2E4'
+  })).toString('base64url')
+  assert.throws(() => localDidDocument(bent), /invalid public key/)
+  // Private material is refused before the key is ever imported.
   const priv = 'did:jwk:' + Buffer.from(JSON.stringify({ kty: 'OKP', crv: 'Ed25519', x: 'AAAA', d: 'secret' })).toString('base64url')
   assert.throws(() => localDidDocument(priv), /private/)
   assert.throws(() => localDidDocument('did:jwk:not-base64-json'), /JSON Web Key/)

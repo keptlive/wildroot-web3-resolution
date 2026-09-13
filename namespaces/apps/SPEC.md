@@ -276,63 +276,92 @@ lookup an `hns://` navigation makes — dials the resolved address, answers
 An implementation of this chapter:
 
 - **MUST** parse exactly one request head, terminated by a blank line, and
-  **MUST** bound it (the reference bound is 8 KiB, `src/ws-proxy.js:95`); an
-  oversized or truncated head is dropped without a response.
+  **MUST** bound it in bytes *and* in time (the reference bounds are 8 KiB,
+  `src/ws-proxy.js:92`, and 10 s, `readHead`, `:124-161`); an oversized,
+  truncated or slow head is dropped without a response.
+- **MUST** count only header bytes against that byte bound. A client may
+  coalesce tunnel payload into the same TCP segment as the head, and payload is
+  not a header: the reference reader bounds the buffered prefix only (`:131`),
+  returns everything after the blank line as `leftover`, and **pauses** the
+  client socket the moment the head is complete (`:134`) so that further tunnel
+  bytes are retained by the kernel while the resolution and the dial await.
 - **MUST** treat anything that is not a well-formed HTTP/1.x request head as an
   error, not as another protocol. A SOCKS greeting is not an HTTP head
-  (`parseConnectHead`, `src/ws-proxy.js:157-174`).
+  (`parseConnectHead`, `src/ws-proxy.js:168-181`).
 - **MUST** accept only `CONNECT`; any other method is `405` with
-  `Allow: CONNECT` (`:304-306`). A proxied `GET` is not a tunnel.
+  `Allow: CONNECT` (`:405-407`). A proxied `GET` is not a tunnel.
 - **MUST** require the target to be exactly `<host>:<port>` with the port in
-  1–65535 (`parseAuthority`, `:177-183`), and **MUST** keep an IPv6 literal
+  1–65535 (`parseAuthority`, `:188-194`), and **MUST** keep an IPv6 literal
   bracketed so that it is refused by the host classifier rather than mistaken
   for a name.
 - **MUST** decode the numeric-TLD marker of Chapter 10 Part B from the CONNECT
-  host before classifying or resolving it (`decodeHnsHost`, `:312`), because
+  host before classifying or resolving it (`decodeHnsHost`, `:411`), because
   the host the engine sends is the *URL* form of the name.
 - **MUST** forward, not discard, any bytes that arrive after the blank line
-  before the `200` is written (`:371`). A well-behaved client sends none, but
+  before the `200` is written (`:474`). A well-behaved client sends none, but
   bytes that do arrive belong to the tunnel.
+- **MUST** run one listener at most. The reference `start()` refuses a second
+  call (`:312`) and binds an ephemeral port when given none (`:313`, `:332`),
+  so the port is the operating system's answer rather than a guess that another
+  process may already hold.
 - **MUST NOT** parse, rewrite or terminate anything after the `200`. The
   WebSocket handshake of RFC 6455 and the TLS handshake are performed by the
-  user agent, end to end, through the splice. **A tunnel that cannot see
-  plaintext cannot weaken it**, and this is the reason the design is a pipe and
-  not a bridge: terminating TLS in the browser process would substitute the
-  implementation's certificate for the origin's and destroy the DANE binding
+  user agent, end to end, through the splice. This is the reason the design is a
+  pipe and not a bridge: terminating TLS in the browser process would substitute
+  the implementation's certificate for the origin's and destroy the DANE binding
   (§4.7), which is the entire trust story.
+
+The converse is the limit of what the tunnel can promise. **It is an opaque TCP
+pipe, not a TLS verifier**: it does not inspect a byte after the `200`, so it
+cannot tell TLS from plaintext, cannot check a certificate, and contributes
+nothing to the pin. Everything this chapter claims about the *endpoint* is
+supplied by the certificate gate of §4.7 — in the reference implementation the
+engine's `setCertificateVerifyProc`, which is a property of connections the
+engine makes, not of connections the tunnel carries.
 
 ### 4.3 The proxy-authentication problem
 
-The obvious fence on a local proxy — require a per-session credential — cannot
-be built for this traffic, and the reasons are worth recording because they
-constrain any implementation, not just this one.
+The obvious fence on a local proxy — require a per-session credential — is not
+reachable for this traffic **in the runtime this chapter is written from**, and
+the measurements are worth recording because an implementer on another engine
+must repeat them rather than inherit the conclusion. Both statements below are
+about the tested Electron build and the tested code path (a `wss://` CONNECT
+from the web-content session); neither is a property of HTTP, of SOCKS, or of
+every version of Chromium, and neither has been re-measured on every engine
+version this implementation has since run on. An implementation on another
+engine, or another version of this one, **MUST** measure rather than inherit
+the conclusion.
 
-- **SOCKS5 (RFC 1928) cannot carry it.** Chromium's SOCKS5 client offers only
-  the "no authentication" method and does not implement RFC 1929
-  username/password at all, so a proxy that demands it answers "no acceptable
-  method" and every socket dies in the greeting. Chromium additionally ignores
-  a `user:pass@` embedded in a PAC proxy string, so the credential cannot reach
-  the proxy by that route either.
-- **HTTP proxy authentication (RFC 9110 §11, RFC 7235) is never answered for a
-  WebSocket handshake.** The tunnel may send `407 Proxy Authentication
-  Required` with a `Basic` challenge, but the engine does not surface a
-  proxy-auth challenge to its embedder for a `wss://` CONNECT — the embedder's
-  `login` event does not fire — so the challenge is never answered and every
-  socket dies.
+- **SOCKS5 (RFC 1928) did not carry it.** In that build Chromium's SOCKS5
+  client offered only the "no authentication" method — it does not implement
+  RFC 1929 username/password — so a proxy that demanded it answered "no
+  acceptable method" and every socket died in the greeting. Chromium
+  additionally ignores a `user:pass@` embedded in a PAC proxy string, so the
+  credential did not reach the proxy by that route either.
+- **HTTP proxy authentication (RFC 9110 §11, RFC 7235) was never answered for a
+  WebSocket handshake.** The tunnel sends `407 Proxy Authentication Required`
+  with a `Basic` challenge, and on that path the engine surfaced no proxy-auth
+  challenge to its embedder for a `wss://` CONNECT — the embedder's `login`
+  event did not fire — so the challenge was never answered and the socket died.
 
 The reference implementation therefore **ships with no credential** (the
 browser constructs the tunnel with a resolver and the anonymizer's `isOn` and
 `torSocks`, and no credential), and the credential check is
-retained but inert (`src/ws-proxy.js:217`, `:300-303`): a well-formed
+retained but inert (`src/ws-proxy.js:228`, `:399-402`): a well-formed
 `{user, pass}` still enforces `Proxy-Authorization: Basic` in constant time, so
-a future platform that *can* authenticate a `wss://` proxy re-enables the gate
-with no code change. `tests/ws-proxy.test.js` pins both halves — that a plain
-CONNECT is served by default, and that a configured credential still challenges
-with `407` and resolves nothing.
+a platform that *can* authenticate a `wss://` proxy re-enables the gate with no
+code change. `tests/ws-proxy.test.js` pins both halves — that a plain CONNECT is
+served by default, and that a configured credential still challenges with `407`
+and resolves nothing.
 
-The boundary is therefore the loopback bind plus the four content fences of
-§4.4, and an implementation **MUST NOT** describe proxy authentication as one of
-its protections. See AP-2.
+The boundary is therefore the loopback bind plus the content fences of §4.4, and
+two consequences follow that an implementation **MUST NOT** soften. Proxy
+authentication is not one of this feature's protections, and no document,
+comment or interface may present it as one. And the loopback bind is not
+authentication either: **it limits access to this device, and it does not
+identify or authenticate the application making the request.** Any process on
+the machine that can open `127.0.0.1:<port>` meets exactly the fences of §4.4
+and nothing else. See AP-2.
 
 ### 4.4 The fences
 
@@ -342,45 +371,52 @@ normative, each has a reason, and each is pinned by a test in
 `tests/ws-proxy.test.js` or `tests/native-origin.test.js`.
 
 **(0) Loopback only.** The listener **MUST** bind `127.0.0.1` and **MUST NOT**
-bind a routable interface (`src/ws-proxy.js:238-242`). *Reason:* a LAN peer must
-not be able to reach a proxy that resolves Handshake names and dials for it.
-This is what makes the absence of authentication tolerable: a process already
-on loopback can resolve a Handshake name over public DoH and open a TCP
-connection to its public address by itself, so the tunnel grants it nothing new.
+bind a routable interface (`src/ws-proxy.js:311-339`, the bind at `:332`).
+*Reason:* a LAN peer must not be able to reach a proxy that resolves Handshake
+names and dials for it. State the guarantee at its real width: **loopback limits
+access to this device; it does not authenticate the requesting application**
+(§4.3). Every other process on the machine is inside this fence, and what
+confines it there is fences 1–4 and nothing else.
 *Pinned by:* `tests/native-origin.test.js`, "FENCE 0: the tunnel binds loopback only".
 
-**(1) One port, and it is the pinned one.** A CONNECT **MUST** name port
-**443**; any other port **MUST** be refused `403`, before the name is resolved
-(`TUNNEL_PORT`, `src/ws-proxy.js:90`; the check at `:317-319`). *Reason:* a DANE
-pin is published at `_443._tcp.<name>` (Chapter 1 §8, HS-6), so 443 is the only
-port on which the TLS the user agent runs through this tunnel is pinned to the
-name — a splice on any other port would carry TLS with nothing to check the
-certificate against. It is also what disposes of plaintext `ws://`, which no
-secure page can produce but a non-secure one can: such a URL arrives as
-`CONNECT <name>:80` and is refused here. Refusing *here* is the only outcome
-that puts no Handshake name into a system-resolver query — declining it in the
-PAC instead, by sending it DIRECT, would hand the name to the very resolver this
-whole design exists to keep it away from (§4.6). An implementation **MAY** make
-the accepted set injectable so a test can stand a TLS origin elsewhere (the
-reference constructor takes `ports`, `:208`), and **MUST** ship with the single
-port its pin covers. *Pinned by:* "a CONNECT to any port but 443 is refused
-before the name is resolved — a plaintext ws:// is never spliced".
+**(1) One port, and it is the one this profile looks a pin up at.** A CONNECT
+**MUST** name port **443**; any other port **MUST** be refused `403`, before the
+name is resolved (`TUNNEL_PORT`, `src/ws-proxy.js:87`; the check at `:416-418`).
+*Reason:* this implementation reads a DANE pin at `_443._tcp.<name>` and only
+there, whatever port a URL names (Chapter 1 §8, HS-6), so 443 is the only port
+for which its certificate gate has a pin to check — a splice on any other port
+would carry TLS the gate could not bind to the name. The rule is a **destination
+restriction**, and it is worth being exact about what that does and does not
+buy. It does not inspect a byte, so it cannot establish that what rides the
+splice is TLS at all, and it does not perform the pin check: that is §4.7's, in
+the engine. What it does buy is that no splice this tunnel makes falls outside
+the range the pin lookup covers, and that the commonest plaintext case is
+declined — a `ws://` from a non-secure page arrives as `CONNECT <name>:80` and
+is refused here. Refusing *here* rather than excluding `ws:` in the PAC is what
+keeps the name out of a system-resolver query: excluded there it would take the
+session's base route and, in Fast mode, be handed as a name to the very resolver
+this design exists to keep it away from (§4.6). An implementation
+**MAY** make the accepted set injectable so a test can stand a TLS origin
+elsewhere (the reference constructor takes `ports`, `:219`), and **MUST** ship
+with the single port its own pin lookup covers. *Pinned by:* "a CONNECT to any
+port but 443 is refused before the name is resolved — a plaintext ws:// is never
+spliced".
 
 **(2) Handshake hosts only.** A CONNECT whose target host is not a Handshake
 host **MUST** be refused `403`, before any resolution
-(`src/ws-proxy.js:337-339`). The classification **MUST** be the implementation's
+(`src/ws-proxy.js:437-439`). The classification **MUST** be the implementation's
 one host classifier (`isHnsHost` → `classifyHost`, `../../src/hns-host.js` →
 `../../src/classify-host.cjs`, re-exported by `../../src/router.js`), never a
 second copy of the TLD rules. An IP literal —
 dotted-quad or bracketed IPv6 — is refused by the same predicate, because a
-Handshake host always arrives as a name. *Reason:* the PAC already sends
-ordinary relays DIRECT (§4.6); this is the defence in depth for the case where
-one arrives anyway, and it is what stops the tunnel being a general-purpose
-open proxy. *Pinned by:* "FENCE 2" (two tests).
+Handshake host always arrives as a name. *Reason:* the PAC sends an ordinary
+relay along the session's base privacy route and never here (§4.6); this is the
+defence in depth for the case where one arrives anyway, and it is what stops the
+tunnel being a general-purpose open proxy. *Pinned by:* "FENCE 2" (two tests).
 
 **(3) SSRF refusal.** The **resolved** address **MUST** be run through the same
 public-address guard as every other fetch in the namespace
-(`isPublicAddress`, `../../src/safe-address.js`; `src/ws-proxy.js:358-360`), and
+(`isPublicAddress`, `../../src/safe-address.js`; `src/ws-proxy.js:459-461`), and
 a loopback, private, link-local, CGNAT or cloud-metadata address — v4 or v6 —
 **MUST** be refused `403` with no dial. *Reason:* a Handshake name is an
 attacker-chosen input (Chapter 1 §11.2). Anyone can register a name and point
@@ -401,17 +437,30 @@ fence are exactly what they are on the direct route, and the certificate the
 origin presents is still pinned end to end (§4.7) because the tunnel is still a
 pipe. Two sub-rules are what make that true rather than hoped for:
 
-- The dial through Tor **MUST** be by **address** — the resolved address is sent
-  to the SOCKS server as an address, `ATYP` IPv4 or IPv6 (RFC 1928 §4), never as
-  a name — so the name is never disclosed to the proxy and the SSRF guard still
-  has an address to inspect. A tunnel that let the proxy resolve for it would
-  give up both.
+- The dial through Tor **MUST** use an **address in the SOCKS request** — the
+  resolved address is sent to the SOCKS server as an address, `ATYP` IPv4 or
+  IPv6 (RFC 1928 §4), never as a name — so the proxy is never asked to resolve
+  for the tunnel and the SSRF guard still has an address to inspect. A tunnel
+  that let the proxy resolve for it would give up both.
 - The resolver the tunnel is given **MUST** itself resolve without leaving the
   anonymized path. In the reference composition it is the one shared Chapter 1
   resolver, whose authoritative queries and whose three ICANN lookups both ride
   the same Tor dial and the implementation's own DoH client. A tunnel whose
   socket rides Tor while its lookups do not has moved the disclosure, not
   removed it.
+
+**What this does not hide is the name.** An address in the SOCKS request means
+the SOCKS server performs no lookup for us; it does not mean the name is absent
+from the stream. The user agent's TLS handshake runs end to end through the
+splice, and its ClientHello carries the server name in the SNI extension
+(RFC 8446 §4.2.9; RFC 6066 §3) in the clear, so the exit that carries the stream
+— and anything on the path between that exit and the origin — can read which
+Handshake name is being reached. An implementation **MUST NOT** describe the
+address-form SOCKS request as hiding the name from Tor. Encrypted ClientHello
+(RFC 9848) is the mechanism that would close this, and it is not deployed on
+this path (Chapter 1, HS-3); until it is, the honest claim is that the anonymized
+route hides the **user's address from the origin**, not the **name from the
+route**. See AP-8.
 
 The tunnel's two inputs for this fence are the anonymizer's `isOn()` and
 `torSocks()` (`namespaces/tor/src/anonymize.js`), and together they name the
@@ -422,7 +471,7 @@ Mode**, one control whose policy table is `policyFor()` in
 | Mode | Anonymizer | `isAnonymized()` | `torSocks()` | The tunnel |
 |---|---|---|---|---|
 | Fast | `off` | false | — | dials the resolved address directly |
-| Private, Tor connected | `tor` | true | the SOCKS URL | dials the resolved address through the SOCKS port, by address |
+| Private, Tor connected | `tor` | true | the SOCKS URL | dials through the SOCKS port, with the resolved address in the SOCKS request |
 | Private, blocked | `blocked` | true | `null` | refuses `403` before resolving |
 
 The third state is the anonymizer's fail-closed answer to a Tor that cannot be
@@ -435,13 +484,14 @@ produces a direct dial, which is the whole of the rule.
 
 *Pinned by:* "with IP Protection on, the dial goes THROUGH the Tor SOCKS port
 when there is one, and is refused when there is not", which asserts that the
-SOCKS server was asked for the resolved address **by address and never by
-name**; and "FENCE 4", which asserts that with no Tor port nothing is
-resolved and nothing is dialed.
+SOCKS request carried **the resolved address and never the name**; and
+"FENCE 4", which asserts that with no Tor port nothing is resolved and nothing
+is dialed. Neither test says anything about the TLS that then runs through the
+splice, which is where the name reappears — see the paragraph above.
 
 **The order they are evaluated in** is: the head is parsed and the method and
 target validated; the port; the Tor decision; the Handshake-only check;
-resolution; the SSRF guard; the dial (`src/ws-proxy.js:282-373`). The three
+resolution; the SSRF guard; the dial (`src/ws-proxy.js:380-476`). The three
 gates that can be decided without touching the network are decided first, and
 the port is first of those, so a refused port costs no lookup and a
 Private-mode request with no Tor circuit produces no network activity of any
@@ -450,25 +500,122 @@ kind — not even a name lookup.
 There is one further rule that is not a fence but a failure mode: when
 resolution yields no dialable address — an unregistered name, or a name whose
 only record is a content pointer with no TCP origin — the tunnel **MUST** refuse
-`502` (`:349-354`). A content-addressed Handshake name has no socket to hold.
+`502` (`:450-454`). A content-addressed Handshake name has no socket to hold.
 
-### 4.5 Refusals
+### 4.5 Refusals, resource limits and route revocation
+
+#### 4.5.1 The shape of a refusal
 
 A refusal **MUST** be a complete HTTP response (`Content-Length: 0`,
 `Connection: close`) and the socket **MUST** then be half-closed gracefully
-rather than destroyed (`src/ws-proxy.js:264-274`). *Reason:* `end` flushes the
+rather than destroyed (`src/ws-proxy.js:358-372`). *Reason:* `end` flushes the
 response before the FIN, where a bare `destroy` can drop the queued bytes and
 leave the page with a transport reset instead of a clean proxy error; the
 difference is whether the page reliably gets an `error` event.
 
-The status codes are `400` (malformed head or target), `403` (a fence),
-`405` (not CONNECT), `407` (only when a credential is configured) and `502`
-(resolution failed, no address, or the dial failed). Note that **none of them
-reaches the page**: the WebSocket API surfaces a failed handshake as an
-untyped `error` event, so every refusal in this section is indistinguishable to
-the application. That is a deliberate property of the web platform, not of this
-design, and it is why the reasons live here and in the implementation's own
-diagnostics (AP-D8).
+Two rules keep that from becoming a leak of its own. A refusal **MUST NOT** be
+written to a client that is already destroyed (`:359`) — there is no socket to
+flush and the write is an error, not a diagnostic — and a client that does not
+close after the response **MUST** be destroyed on a bounded timer (the reference
+timer is 1 s, `:369-371`), so a peer that never reads cannot hold a slot open.
+
+#### 4.5.2 The status a refusal carries
+
+The status codes are `400` (malformed head or target), `403` (a fence), `405`
+(not CONNECT), `407` (only when a credential is configured) and the three
+gateway statuses, which **MUST** be distinguished as RFC 9110 §15.6 defines
+them:
+
+| Status | Meaning here | Where |
+|---|---|---|
+| `502` Bad Gateway | resolution failed, resolution yielded no dialable address, or the dial failed | `src/ws-proxy.js:447`, `:450-454`, `:469` |
+| `503` Service Unavailable | the tunnel is at its pending-operation limit and is refusing work it would otherwise do (§4.5.3) | `:447`, `:469`, from the `EBUSY` of `:279` |
+| `504` Gateway Timeout | the resolution or the dial exceeded its own deadline (§4.5.3) | `:447`, `:469`, from the `ETIMEDOUT` of `:293-297` |
+
+An implementation **MUST NOT** answer a timeout or a capacity refusal with
+`502`: the three are different facts about the tunnel, and collapsing them makes
+the one transient case indistinguishable from the one that means the name is
+broken.
+
+Note that **none of them reaches the page**: the WebSocket API surfaces a failed
+handshake as an untyped `error` event, so every refusal in this section is
+indistinguishable to the application. That is a property of the web platform,
+not of this design, and it is why the status is nonetheless normative — it is
+what a proxy-aware client, a test, and the implementation's own diagnostics read
+(AP-D8).
+
+#### 4.5.3 Limits
+
+A local proxy that resolves names and dials for its caller **MUST** bound the
+work one caller can make it hold. An implementation **MUST** state its limits;
+the reference set is `WS_LIMITS` (`src/ws-proxy.js:93`), and it is normative in
+two directions — the timeouts and counts below are the values this
+implementation ships, and they are also the **maximum** a deployment may
+configure, because the constructor refuses any limit that is not a positive safe
+integer at or below the built-in value (`:237-240`). A limit may be lowered for
+a test or a constrained host; it may not be raised.
+
+| Limit | Value | What it bounds |
+|---|---|---|
+| `headTimeout` | 10 s | reading one CONNECT head (§4.2) |
+| `resolveTimeout` | 15 s | one resolution |
+| `dialTimeout` | 20 s | one upstream dial, direct or through SOCKS |
+| `maxConnections` | 128 | live client sockets; beyond it a new connection is dropped unanswered (`:316`) |
+| `maxPending` | 32 | connections still in setup, and separately the resolutions and dials outstanding at once; beyond it the answer is `503` (`:279`) |
+
+Two properties of the pending count are normative, because a reimplementation
+that misses either has a bound that does not bind. A cancelled operation
+**MUST** keep its slot until the underlying work actually settles (`:305-306`):
+shared resolution machinery need not support cancellation, and releasing the
+slot at the timeout instead would let a client with a stalled name create
+unbounded background work by retrying. And a result that arrives after its
+operation was abandoned **MUST** be disposed of, not used — the reference
+`_operation` takes a `dispose` callback and the dial passes
+`socket => socket?.destroy()` (`:467`), so a late upstream is closed rather than
+left open.
+
+#### 4.5.4 Cancellation and route revocation
+
+Every connection **MUST** carry a cancellation scope that a resolution and a
+dial both observe. In the reference implementation it is a per-connection
+context holding an `AbortController` (`:318`), whose signal is passed into
+`readHead`, into `resolver.resolve` and into the dialler
+(`../../src/socks-dial.js` takes `{ signal }` and settles once), and which is
+aborted when the client socket closes (`:320-325`).
+
+The rule that matters most is about a change of privacy mode:
+
+> **A change of route revokes the sockets made under the old one.** When the
+> anonymizer's state changes — Fast to Private, Private to Fast, or the Tor
+> port appearing or going away — an implementation **MUST** abort every pending
+> resolution and dial and **MUST** destroy every established upstream and client
+> stream made under the previous route. It **MUST NOT** leave a connected socket
+> running on a route the user has just turned off.
+
+The reference implementation does this with a generation counter
+(`policyChanged()`, `src/ws-proxy.js:252-261`): the generation is incremented,
+every live context is aborted and both its streams destroyed, and any work that
+was already in flight fails its next `_current` check (`:269-272`) and is
+refused. A raw CONNECT splice is not in the engine's connection pool, so nothing
+else in the browser tears it down; if the tunnel does not, a `wss://` opened in
+Fast mode keeps sending over its direct socket after the user has switched to
+Private. The transition **MUST** be driven by the controller's own event rather
+than by polling — the reference wiring binds the anonymizer's and the delivery
+mode's `policy-changing` event to `policyChanged()` and their `change` event to
+`refreshPolicy()` (`bindWsProxyPolicy`, browser
+`src/hns/ws-proxy-policy.js:25-39`), so revocation happens synchronously, before
+the controller awaits its own persistence and proxy work — and a getter check
+(`refreshPolicy()`, `:263-267`) **SHOULD** be re-evaluated on accept and before
+each step as a defence in depth, not as the primary mechanism. `stop()` is the
+same revocation plus the listener (`:341-353`).
+
+Revocation is the one path that writes no status. It destroys the client stream
+along with the upstream, so the refusal that the abandoned work then attempts is
+skipped as a write to a destroyed client (§4.5.1) and the page sees a transport
+failure rather than a proxy response. That is the correct order — the socket
+must stop carrying bytes whether or not a courtesy response can still be
+delivered — and it is why the reason for a revocation has to be recorded in the
+implementation's own diagnostics (AP-D8) rather than inferred from a status.
 
 ### 4.6 The proxy auto-config script
 
@@ -477,21 +624,45 @@ decision is made per request by a **PAC script** in the Netscape/Mozilla format
 (`FindProxyForURL(url, host)`), which has no RFC. The generator is
 `src/ws-proxy-pac.js`.
 
-**The rule (`_isHns`, `src/ws-proxy-pac.js:44-57`).** Lowercase the host and
+**The rule (`_isHns`, `src/ws-proxy-pac.js:49-62`).** Lowercase the host and
 strip one trailing dot; `localhost`, an IPv4 literal, and anything containing
 `:` or beginning with `[` are not Handshake; a host whose final label is in the
 reserved list is not Handshake; a single remaining label **is** Handshake; `eth`
 and `onion` are not; an all-digit final label is; otherwise it is Handshake
 exactly when the final label is not an ICANN top-level domain.
 
-**The decision (`FindProxyForURL`, `:58-63`).** A URL whose scheme is `wss:` or
-`ws:` goes to `PROXY 127.0.0.1:<port>` when the host is Handshake and `DIRECT`
-otherwise. **Every other URL returns the base directive** — which is the
-anonymizer's own current directive (`DIRECT` in Fast mode; `SOCKS5 <host:port>`
-in Private mode — the Tor port while routed, the blackhole port while blocked —
-`rulesToPacDirective`). So page loads, search,
+**The decision (`FindProxyForURL`, `:63-68`).** A URL whose scheme is `wss:` or
+`ws:` and whose host is Handshake goes to `PROXY 127.0.0.1:<port>`. **Every
+other URL — including a `ws:`/`wss:` to a host that is not Handshake — returns
+the base directive**, which is the anonymizer's own current directive (`DIRECT`
+in Fast mode; `SOCKS5 <host:port>` in Private mode — the Tor port while routed,
+the blackhole port while blocked — `rulesToPacDirective`). So page loads, search,
 DNS-over-HTTPS and every protocol fetch keep the routing the privacy controller
 chose, and only ws/wss-to-Handshake is diverted.
+
+That fall-through is normative, and it is the one rule in this section with a
+privacy consequence rather than a routing one:
+
+> A WebSocket to a host this chapter does not claim **MUST** take the session's
+> base route, exactly as an `https://` to the same host would. An implementation
+> **MUST NOT** answer `DIRECT` for it while the base directive is a proxy: a
+> generator that does has written a PAC under which `https://example.com/` rides
+> Tor and `wss://example.com/socket` does not, which contradicts the mode the
+> user selected and discloses the address the mode exists to hide. *Pinned by:*
+> `tests/native-origin.test.js`, "a non-Handshake WebSocket follows the base
+> privacy route, never DIRECT".
+
+**Refusal rather than degradation.** The generator **MUST** refuse an input it
+cannot represent, and **MUST NOT** substitute a route. `rulesToPacDirective`
+accepts only a well-formed `socks5://host:port` — an IPv6 literal bracketed, a
+port in 1–65535 — and throws on anything else (`src/ws-proxy-pac.js:26-31`);
+`buildWsPac` throws on a port or a `baseDirective` outside the same grammar
+(`:35-36`). *Reason:* the failure mode of the alternative is silent. A malformed
+rule that becomes `DIRECT` produces a PAC that is valid, installs cleanly, and
+routes the traffic of a mode the user believes is on straight out of the
+machine. A thrown error is caught by the caller that is composing the proxy
+configuration, which can fail closed; a `DIRECT` it did not ask for cannot be
+detected anywhere downstream.
 
 Normative rules for an implementation:
 
@@ -531,17 +702,58 @@ Normative rules for an implementation:
   `:1322`). A capability that is off must have no surface at all, not a disabled
   one.
 
+**Reserved names, and the local-network question.** The reserved-name list is
+embedded in the generated script from the same file the classifier reads
+(`../../src/reserved-names.cjs`, `src/ws-proxy-pac.js:41-45`), and it does two
+separable things that **MUST NOT** be conflated:
+
+1. A host whose final label is reserved — `nas.local`, `printer.home`,
+   `box.lan`, `localhost` — is **never Handshake**, so it is never sent to a
+   Handshake resolver and never reaches the tunnel. That much is absolute.
+2. Its *route* is then the base directive, like any other non-Handshake host.
+   In Private mode that means the session's proxy, not `DIRECT`. The PAC has no
+   loopback branch and **MUST NOT** be given one as a way of implementing a
+   local-network policy, for two reasons. A bypass list is not read the way it
+   looks: the reference engine applies an implicit bypass for loopback
+   destinations, and the `<-loopback>` token *removes* that implicit bypass
+   rather than restoring it
+   ([Chromium `net/docs/proxy.md`](https://chromium.googlesource.com/chromium/src/+/HEAD/net/docs/proxy.md#overriding-the-implicit-bypass-rules)),
+   so a PAC written on the opposite reading is a policy that does nothing. And a
+   PAC answer is a hint about routing rather than a decision about permission:
+   in the reference implementation's integration testing on Electron 43.4.1 /
+   Chromium 150 the token was ignored under a PAC configuration and loopback
+   stayed direct whatever was configured. That is a measurement of one engine
+   version, and an implementation **MUST** repeat it on its own rather than
+   assume either behaviour.
+
+An implementation that wants a local-network policy for WebSockets **MUST**
+therefore state it as a policy and enforce it where requests can actually be
+**cancelled**, not in the PAC. The reference policy is a request-level gate
+(`localWsPolicy`, browser `src/hns/ws-proxy-policy.js:8-21`), and this chapter
+is normative about its *contract*, not its code: in Private mode a `ws:`/`wss:`
+whose host is a non-public IP literal or carries a local-network final label is
+cancelled, with one exception — the **exact endpoint** of a Local App the user
+has already granted and which is running, where that endpoint is the same origin
+as both the requesting document and its frame and carries no embedded
+credentials. A WebSocket to a remote host is not touched by the gate: it keeps
+the session's base route, with no `DIRECT` fallback anywhere in the path. The
+policy object belongs to the application embedding this chapter, because only
+that application knows which local services it is itself running; what this
+chapter requires is that the decision exists, that it fails closed, and that it
+is not inferred from a PAC return value.
+
 Two consequences an implementer should expect. The PAC decides on the
 **target** host, not on the initiating origin, so an ordinary `https://` page
 that opens `wss://<a handshake name>` is routed through the tunnel too (AP-4) —
 which is consistent with the web platform, where a WebSocket is not subject to
 the same-origin policy. And the PAC as written routes plaintext `ws:` to the
-tunnel as well as `wss:`. That is deliberate, and it is the reason fence 1
-exists: no secure page can produce a `ws://`, a non-secure one can, and the two
-ways to decline it are not equivalent. Sent DIRECT it would be handed to a
-system resolver as a name; sent here it arrives as `CONNECT <name>:80` and is
-refused on the port before anything is looked up. Keeping the name away from
-the resolver is the PAC's job; declining the connection is the tunnel's.
+tunnel as well as `wss:`, when the host is Handshake. That is deliberate, and it
+is the reason fence 1 exists: no secure page can produce a `ws://`, a non-secure
+one can, and the two ways to decline it are not equivalent. Left to the base
+route the name would be handed to whatever resolver that route uses; sent here
+it arrives as `CONNECT <name>:80` and is refused on the port before anything is
+looked up. Keeping the name away from the resolver is the PAC's job; declining
+the connection is the tunnel's.
 
 ### 4.7 The certificate gate
 
@@ -565,6 +777,18 @@ An implementation **MUST** fail closed at steps 3 and 4, and **MUST** record the
 outcome of the whole decision — resolution included — as one measurement, so
 that a pin check which fails *slowly* is visible. A DANE check that only times
 successes hides the interesting case.
+
+**This is a per-connection verdict, and it is the only thing that binds the
+socket.** The document's own trust state is evidence about the document's
+connection: the socket is a separate connection, resolved separately, dialled
+separately and verified separately, and it may reach a different address of a
+multi-homed name or reuse a cached certificate decision. An implementation
+**MUST NOT** present the document's result as proof of the socket's, or the
+socket's as proof of the document's; what the two share is the policy and the
+on-chain key material the policy consults, not an observation. Where a user
+interface shows one state for a page and its sockets, it is showing an
+aggregate, and §6's rule that no step may be promoted still applies to each
+connection on its own.
 
 The consequence for publishers is stated as a requirement in §4.8: **a realtime
 application on Handshake must publish a TLSA pin**, or its socket fails closed
@@ -831,9 +1055,13 @@ it does not authenticate the origin — that is still the DANE pin — and it do
 not weaken the name step, because the name was resolved by the implementation's
 own resolver before the dial rather than by the proxy. An implementation
 **MUST NOT** promote any step because a socket rode Tor, and **MUST NOT** demote
-one either. What the anonymized route does change is disclosed elsewhere: every
-such socket shares the session's single Tor circuit, because no SOCKS credential
-is sent (Chapter 8, TO-3).
+one either. What the anonymized route does change is disclosed elsewhere: no
+SOCKS credential is sent, so nothing in this path *requests* stream isolation
+(Chapter 8, TO-3), and which circuits Tor then uses is its own decision — an
+implementation **MUST NOT** state that such sockets share one circuit, or that
+they do not, without having observed it. And the TLS that runs through the
+splice still names the host in SNI, so the route sees the name whatever the
+circuit (§4.4 fence 4, AP-8).
 
 There is no **OPEN** state for this path, and that is the point: a `failed`
 certificate step, an absent pin, a non-public address, a port that is not 443,
@@ -852,20 +1080,42 @@ Everything in this section is about the machine serving the application. None
 of it is required for conformance; all of it is required for the thing to work,
 and each item cost a full diagnosis at least once.
 
-**HTTP/2 silently breaks the upgrade.** The `Upgrade` header is not legal in
-HTTP/2, so a WebSocket handshake that arrives over an h2 connection reaches the
-application server as a plain `GET /ws` and is answered `404` — with nothing
-anywhere saying "WebSocket". On nginx 1.24 and earlier, HTTP/2 is enabled
-**per listening socket, not per server block**: a single `listen 443 ssl http2`
-anywhere in the configuration turns on h2 (via ALPN) for *every* SNI on that
-socket, including virtual hosts that carefully wrote `listen 443 ssl`. The
-per-server `http2 off;` directive requires nginx ≥ 1.25.1. The reference
-deployment's fix was to strip `http2` from every `listen` directive on the box,
-which turns HTTP/2 off host-wide; HTTP/1.1 is universal, so the only loss is h2
-multiplexing. Diagnose it with two requests, not with logs:
-`curl --http1.1` returns `101` where the default returns `404`, and
-`openssl s_client -alpn h2,http/1.1` shows which protocol the socket actually
-negotiates for that SNI.
+**An HTTP/2 front end without extended CONNECT silently breaks the upgrade.**
+This is a statement about one deployment path, not a prohibition on HTTP/2. The
+`Upgrade` mechanism does not exist in HTTP/2 (RFC 9113 §8.5), so the RFC 6455
+handshake cannot be carried the way HTTP/1.1 carries it — but RFC 8441 defines
+the replacement, an extended `CONNECT` with `:protocol = websocket`, and a front
+end and an application server that both implement it carry WebSockets over h2
+perfectly well. The trap is a front end that negotiates h2 and does *not*
+implement RFC 8441 (`SETTINGS_ENABLE_CONNECT_PROTOCOL` unset, or a proxy module
+that does not pass it through): the handshake reaches the application server as
+a plain `GET /ws` and is answered `404`, with nothing anywhere saying
+"WebSocket".
+
+The reference deployment met this on **nginx 1.24**, where two facts combine.
+nginx's own proxying speaks HTTP/1.1 upstream and has no RFC 8441 support on the
+client side; and in 1.24 and earlier HTTP/2 is enabled **per listening socket,
+not per server block**, so a single `listen 443 ssl http2` anywhere in the
+configuration turns h2 on (via ALPN) for *every* SNI on that socket, including
+virtual hosts that carefully wrote `listen 443 ssl`. The per-server `http2 off;`
+directive requires nginx ≥ 1.25.1.
+
+So make the fix as narrow as the version allows, rather than turning HTTP/2 off
+because of a rule that does not exist:
+
+- **nginx ≥ 1.25.1:** `http2 off;` in the server block that terminates the
+  WebSocket name, and leave h2 on for the rest of the socket.
+- **nginx ≤ 1.24:** the per-socket behaviour gives no per-name switch, so either
+  move that name to its own listening socket without the `http2` parameter, or
+  strip `http2` from the `listen` directives that share the socket. The
+  reference deployment did the latter; HTTP/1.1 is universal, so the loss is h2
+  multiplexing for the other virtual hosts on that socket.
+- **Any front end:** if it implements RFC 8441 end to end, none of the above
+  applies. Check, rather than assume either way.
+
+Diagnose it with two requests, not with logs: `curl --http1.1` returns `101`
+where the default returns `404`, and `openssl s_client -alpn h2,http/1.1` shows
+which protocol the socket actually negotiates for that SNI.
 
 **Serve the application, not the gateway, at the native name.** A name that is
 also published through a content gateway usually has two upstreams on the same
@@ -897,14 +1147,25 @@ reference application served a 256 KiB canvas uncompressed on every load.
 ## 8. Security considerations
 
 **The tunnel is the sensitive component, and its whole boundary is §4.4.** It
-is unauthenticated by necessity (§4.3), so the five fences are not defence in
-depth — they are the defence. An implementation that relaxes any of them has
-built a local open proxy. The three that would be tempting to relax are the
-Handshake-only rule (which is what keeps it from proxying the whole internet
-for any local process), the SSRF guard (which is what keeps an
-attacker-registered name from pointing the browser at the user's own network),
-and the single port (which is what keeps every splice inside the reach of a DANE
-pin, and what keeps a plaintext `ws://` from being carried at all).
+authenticates nothing (§4.3) — not a credential, and not the identity of the
+process that connected — so the five fences are not defence in depth; they are
+the defence. An implementation that relaxes any of them has built a local open
+proxy. The three that would be tempting to relax are the Handshake-only rule
+(which is what keeps it from proxying the whole internet for any local process),
+the SSRF guard (which is what keeps an attacker-registered name from pointing
+the browser at the user's own network), and the single port (which is what keeps
+every splice inside the range this implementation's pin lookup covers, and what
+declines the commonest plaintext `ws://`).
+
+**Any local process is inside the loopback bind.** The bind is a device
+boundary: it keeps a LAN peer out, and it says nothing about *which* program on
+this device is asking. A process on the machine can therefore make this browser
+resolve a Handshake name with the user's own resolver and open a TCP connection
+to its public address on 443 — and, in Private mode, through the user's own Tor
+client. Whether that matters is a question about the host system, and an
+implementation **MUST NOT** dispose of it with an argument about what a local
+process could have done for itself; it is recorded as AP-2 and the fences are
+what bound it.
 
 **Every address in this chapter is attacker-chosen.** Anyone can register a
 Handshake name, publish any records under it, and serve any application at it.
@@ -922,20 +1183,37 @@ be used to attempt a connection to an arbitrary port of a public host, and a
 realtime application served on a non-default port is not reachable through it at
 all. That is the trade, taken deliberately: dialling whatever port the CONNECT
 named would give any page the reach to probe every permitted port of every
-address a Handshake name resolves to, and would carry a splice no DANE pin
-covers.
+address a Handshake name resolves to, and would carry a splice outside the range
+this implementation's pin lookup covers (§4.4 fence 1).
 
 **The anonymized route is a change of socket, not of trust.** In Private
 mode, the upstream is dialled through the device-local Tor (§4.4 fence 4),
 which means a local process on loopback can, in that mode, cause a connection
 to be made through the user's own Tor client to the public address of a
-Handshake name. It gains no reach it did not already have — the port, the
-Handshake-only rule and the SSRF guard all still apply, and the name is
-resolved before the dial rather than by the proxy — and it gains no credential,
-because none is sent (Chapter 8, TO-3: no stream isolation). What an
+Handshake name. The port, the Handshake-only rule and the SSRF guard all still
+apply to it, the name is resolved by this implementation before the dial rather
+than by the proxy, and no SOCKS credential is sent, so nothing asks Tor to
+isolate that stream from the session's others (Chapter 8, TO-3). What an
 implementation **MUST NOT** do is treat the Tor route as licence to relax
 anything else: an anonymized socket that skipped the SSRF guard, or that let the
 proxy resolve the name, would be worse than the refusal it replaced.
+
+**The anonymized route hides the address, not the name.** The SOCKS request
+carries an address rather than a name, so no lookup is made on our behalf by the
+proxy — but the TLS ClientHello that the user agent sends end to end through the
+splice carries the server name in SNI in the clear (RFC 8446 §4.2.9; RFC 6066
+§3), so the exit relay sees which Handshake name the socket is for. An interface
+**MUST NOT** present Private mode as hiding the name from the route, and an
+implementation that later deploys Encrypted ClientHello (RFC 9848) may revisit
+the claim then and not before. AP-8.
+
+**A route the user turned off must stop carrying bytes.** A spliced CONNECT is
+not in the engine's connection pool, so nothing else in the system revokes it: a
+mode switch that changed only future connections would leave the socket a page
+opened in Fast mode running direct from the user's own address while the
+interface says Private. The revocation of §4.5.4 is therefore a security
+requirement, not hygiene, and it has to be synchronous with the switch rather
+than with the persistence and proxy work that follows it.
 
 **Routing is by target, not by initiator.** Any page — including an ordinary
 `https://` one — that opens `wss://<handshake name>` is routed through the
@@ -972,31 +1250,46 @@ An implementation conforms to this chapter when:
 3. `Authorization` is forwarded on a page's fetch to its own origin, and cache
    intent is forwarded without the conditional validators (§3.4).
 4. A `ws://` from a secure Handshake page is never rewritten or rescued (§4.1),
-   and a `ws://` from anywhere else is declined by the tunnel's port rule rather
-   than sent DIRECT into a system resolver (§4.4, §4.6).
-5. The tunnel parses exactly one bounded CONNECT head, accepts only CONNECT,
+   and a `ws://` to a Handshake host from anywhere else is declined by the
+   tunnel's port rule rather than sent DIRECT into a system resolver (§4.4,
+   §4.6).
+5. The tunnel parses exactly one CONNECT head bounded in bytes and in time,
+   counts only header bytes against the byte bound, accepts only CONNECT,
    accepts only `<host>:<port>`, and never inspects a byte after the `200`
    (§4.2).
 6. All five fences hold — the listener binds loopback only; the port rule and
    the Handshake-only check both refuse *before* the name is resolved; the SSRF
    guard is applied to the resolved address before any dial; and while IP
-   Protection is on the upstream is dialled through the device-local Tor by
-   address, or refused when there is no Tor port — and each refusal is a
-   complete HTTP response followed by a graceful half-close (§4.4, §4.5).
-7. Proxy authentication is not claimed as a protection (§4.3).
-8. The PAC mirrors the single host classifier, carries no credential, is
-   composed into the one proxy authority, and is delivered as a data URL (§4.6).
-9. A `wss://` to a Handshake host is pinned to a `3 1 1` TLSA and fails closed
-   when the pin is absent or mismatched, while every non-Handshake host defers
-   to the engine's own verification (§4.7).
-10. The provider is exposed only to an installed application's own top frame,
+   Protection is on the upstream is dialled through the device-local Tor using
+   an address in the SOCKS request, or refused when there is no Tor port — and
+   each refusal is a complete HTTP response followed by a graceful half-close
+   (§4.4, §4.5).
+7. No claim beyond what each mechanism supports: proxy authentication is not
+   presented as a protection, the loopback bind is stated as a device boundary
+   and not as authentication of the requesting application, the port rule is
+   stated as a destination restriction and not as a TLS or pin guarantee, and
+   the address-form SOCKS request is not stated as hiding the name from the Tor
+   route (§4.3, §4.4, §8).
+8. The tunnel states its limits and does not exceed the built-in maxima,
+   refuses beyond them with `503`, answers a timeout with `504` and a failed
+   resolution or dial with `502`, and a change of privacy mode aborts pending
+   work and destroys established streams made on the old route (§4.5).
+9. The PAC mirrors the single host classifier, carries no credential, is
+   composed into the one proxy authority, is delivered as a data URL, sends a
+   non-Handshake WebSocket along the session's base route rather than DIRECT,
+   and throws rather than emitting a substituted route for an input it cannot
+   represent (§4.6).
+10. A `wss://` to a Handshake host is pinned to a `3 1 1` TLSA and fails closed
+    when the pin is absent or mismatched, while every non-Handshake host defers
+    to the engine's own verification (§4.7).
+11. The provider is exposed only to an installed application's own top frame,
     every operation re-derives the origin in the privileged process, and the
     origin is computed as the renderer computes it (§5.1).
-11. Every declared entry origin is proved to be owned by the application, and
+12. Every declared entry origin is proved to be owned by the application, and
     one that is not fails the whole manifest (§5.2).
-12. A token is minted only for the application's own origin, only for a granted
+13. A token is minted only for the application's own origin, only for a granted
     name, only under a rate limit, and never returns key material (§5.3).
-13. A locked key store is reported as locked, never as a user refusal (§5.3).
-14. The trust steps of §6 are exposed individually, no failure of them offers
+14. A locked key store is reported as locked, never as a user refusal (§5.3).
+15. The trust steps of §6 are exposed individually, no failure of them offers
     the user a way to proceed, and no step is scored differently because the
     socket was dialled through Tor (§6).

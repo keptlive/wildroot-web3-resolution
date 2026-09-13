@@ -73,6 +73,7 @@ export class OdohBridge {
     // be exactly the kind of claim this browser is supposed to stop making.
     // In-memory, capped, and nothing the page can read.
     this.recent = new Map()
+    this.querySequence = 0
     this.transport = transport || new OdohTransport({ targets, relays, timeout })
     // The certificate is normally MINTED BEFORE THE APP IS READY (index.js) so
     // its pin can go on Chromium's command line, and handed in here. Minting
@@ -131,12 +132,30 @@ export class OdohBridge {
     }
     if (!wire || !wire.length || wire.length > MAX_QUERY) return this._end(res, 400)
 
-    this.stats.queries++
-    const asked = qnameOf(wire)
+    let question
     try {
-      const { answer } = await this.transport.query(wire)
+      question = dnsEnvelope(wire)
+      if (question.flags & 0xf800) throw new Error('not a standard DNS query')
+    } catch {
+      return this._end(res, 400)
+    }
+    this.stats.queries++
+    const asked = question.name
+    const queryType = question.type
+    const sequence = ++this.querySequence
+    try {
+      const { answer, via, target } = await this.transport.query(wire)
+      // HPKE authenticates the transport bytes, not their DNS meaning. An
+      // empty, truncated or wrong-question response must not become evidence
+      // that this host was answered, nor leave an earlier success current.
+      const reply = dnsEnvelope(answer)
+      if (!(reply.flags & 0x8000) || (reply.flags & 0x7a00) ||
+          reply.id !== question.id || reply.questionKey !== question.questionKey ||
+          reply.type !== question.type || reply.klass !== question.klass) {
+        throw new Error('ODoH response does not answer this query')
+      }
       this.stats.oblivious++
-      if (asked) this._remember(asked)
+      if (asked) this._remember(asked, { queryType, sequence, via, target, rcode: reply.flags & 15 })
       res.writeHead(200, {
         'content-type': DNS_MEDIA,
         'content-length': answer.length,
@@ -147,40 +166,38 @@ export class OdohBridge {
       // SERVFAIL, not a quiet fallback: what happens next is Chromium's
       // secure-DNS mode to decide, and the user can see that setting.
       this.stats.failed++
+      if (asked) this._remember(asked, { queryType, sequence, rcode: 2 })
       const body = servfail(wire)
       res.writeHead(200, { 'content-type': DNS_MEDIA, 'content-length': body.length })
       res.end(body)
     }
   }
 
-  /** Record a name we answered obliviously (capped, FIFO). */
-  _remember (name) {
-    this.recent.set(name, Date.now())
-    if (this.recent.size > 512) {
-      this.recent.delete(this.recent.keys().next().value)
-    }
+  /** Bounded exact-name activity, not proof of a navigation or cache hit. */
+  _remember (name, { queryType = 1, sequence = ++this.querySequence, via = null, target = null, rcode = 0 } = {}) {
+    const host = String(name || '').toLowerCase().replace(/\.$/, '')
+    if (!host) return
+    const key = host + ':' + queryType
+    // An older request completing late cannot erase a newer failure/result.
+    if ((this.recent.get(key)?.sequence || 0) > sequence) return
+    this.recent.delete(key)
+    this.recent.set(key, { host, queryType, sequence, relay: via, target, rcode, at: Date.now() })
+    if (this.recent.size > 512) this.recent.delete(this.recent.keys().next().value)
   }
 
-  /**
-   * Did THIS name go through the oblivious path, recently? Sub-domains count
-   * against their parent lookups too, since that is what was resolved.
-   * @param {string} host
-   * @param {number} [withinMs]
-   */
-  servedRecently (host, withinMs = 10 * 60 * 1000) {
+  recentEvidence (host, withinMs = 10 * 60 * 1000) {
     const wanted = String(host || '').toLowerCase().replace(/\.$/, '')
-    if (!wanted) return false
-    const cutoff = Date.now() - withinMs
-    for (const [name, at] of this.recent) {
-      if (at < cutoff) continue
-      // EXACT, or the page's host is a SUBDOMAIN of something we resolved.
-      // The reverse used to match too, so one lookup for
-      // `victim-chosen.example.com` made this true for `example.com` and
-      // even for `com` -- vouching for pages never looked up here.
-      if (name === wanted || wanted.endsWith('.' + name)) return true
+    if (!wanted) return null
+    let latest = null
+    for (const row of this.recent.values()) {
+      if (row.host === wanted && (!latest || row.sequence > latest.sequence)) latest = row
     }
-    return false
+    if (!latest || latest.at < Date.now() - withinMs || ![0, 3].includes(latest.rcode)) return null
+    const { sequence, ...evidence } = latest
+    return { ...evidence, withinMs, evidence: 'recent-lookup' }
   }
+
+  servedRecently (host, withinMs) { return !!this.recentEvidence(host, withinMs) }
 
   _end (res, code) {
     res.writeHead(code)
@@ -227,6 +244,64 @@ export function qnameOf (packet) {
     return labels.length ? labels.join('.') : null
   } catch {
     return null
+  }
+}
+
+/** Validate the DNS envelope and question without imposing RR-type support
+ * on Chromium's resolver. This is structural/question binding, not DNSSEC or
+ * validation of the semantics inside each record's RDATA. */
+function dnsEnvelope (input) {
+  if (!(input instanceof Uint8Array) || input.byteLength < 12 || input.byteLength > 65535) throw new Error('invalid DNS packet size')
+  const wire = Buffer.isBuffer(input) ? input : Buffer.from(input)
+  if (wire.readUInt16BE(4) !== 1) throw new Error('expected one DNS question')
+  function nameAt (start) {
+    const labels = []
+    const seen = new Set()
+    let offset = start
+    let next = null
+    let length = 1
+    while (true) {
+      if (offset >= wire.length || seen.has(offset) || seen.size >= 128) throw new Error('invalid DNS name')
+      seen.add(offset)
+      const size = wire[offset]
+      if ((size & 0xc0) === 0xc0) {
+        if (offset + 2 > wire.length) throw new Error('truncated DNS pointer')
+        if (next === null) next = offset + 2
+        offset = wire.readUInt16BE(offset) & 0x3fff
+        continue
+      }
+      if (size > 63 || offset + 1 + size > wire.length) throw new Error('invalid DNS label')
+      offset++
+      if (!size) return { labels, next: next === null ? offset : next }
+      length += size + 1
+      if (length > 255) throw new Error('DNS name exceeds limit')
+      // DNS case folding is ASCII only. Comparing these bytes avoids ASCII
+      // decoding accidentally equating distinct high-bit or dotted labels.
+      const label = Buffer.from(wire.subarray(offset, offset + size))
+      for (let i = 0; i < label.length; i++) if (label[i] >= 65 && label[i] <= 90) label[i] += 32
+      labels.push(label)
+      offset += size
+    }
+  }
+  const question = nameAt(12)
+  if (question.next + 4 > wire.length) throw new Error('truncated DNS question')
+  let offset = question.next + 4
+  const records = wire.readUInt16BE(6) + wire.readUInt16BE(8) + wire.readUInt16BE(10)
+  for (let i = 0; i < records; i++) {
+    offset = nameAt(offset).next
+    if (offset + 10 > wire.length) throw new Error('truncated DNS record')
+    const size = wire.readUInt16BE(offset + 8)
+    offset += 10 + size
+    if (offset > wire.length) throw new Error('truncated DNS record data')
+  }
+  if (offset !== wire.length) throw new Error('unframed DNS data')
+  return {
+    id: wire.readUInt16BE(0),
+    flags: wire.readUInt16BE(2),
+    name: question.labels.map(label => label.toString('latin1')).join('.'),
+    questionKey: question.labels.map(label => label.toString('hex')).join('.'),
+    type: wire.readUInt16BE(question.next),
+    klass: wire.readUInt16BE(question.next + 2)
   }
 }
 

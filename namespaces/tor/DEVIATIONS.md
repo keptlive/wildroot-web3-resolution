@@ -13,8 +13,8 @@ provide — that an onion address never reaches a name resolver — holds, and i
 tested at all four entry points** (`namespaces/tor/tests/onion-leak-guard.test.js`).
 Everything below is about the *other* things: what is disclosed to the service
 once the tunnel is up, the granularity of the mode, an unmeasured cookie jar,
-and one exception to the leak rule that lives in the router's first law rather
-than in this namespace.
+the one transport the carrier scheme cannot express, and one exception to the
+leak rule that lives in the router's first law rather than in this namespace.
 
 Paths written `../../src/…` are shared modules of the top-level package; paths
 written `src/…` and `tests/…` are this chapter's, under `namespaces/tor/`.
@@ -28,7 +28,7 @@ written `src/…` and `tests/…` are this chapter's, under `namespaces/tor/`.
 **What.** Two of this handler's answers are `200` documents where a caller might
 expect a failure status. In Fast mode — IP Protection off — an `onion://`
 navigation gets a `200` interstitial explaining what to turn on, where, and what
-the limitation is (`src/onion-protocol.js:125-128`, `:228-238`). When an onion
+the limitation is (`src/onion-protocol.js:129-131`, `:228-238`). When an onion
 service redirects to a target outside Tor, the answer is a `200` page naming the
 destination and offering it as a link (`:167-172`).
 
@@ -69,7 +69,7 @@ choice.
 **What.** `https://<addr>.onion/` typed by a user, or followed as a top-level
 link, keeps its explicit scheme. It is not reclassified into the `tor`
 namespace, because the router's first law is that an explicit scheme selects the
-protocol and is never sniffed (`../../src/router.js:362-376`).
+protocol and is never sniffed (`../../src/router.js:287-290`).
 
 **The standard says.** RFC 7686 §2: software that does not implement the Tor
 protocol "should generate an error" for a `.onion` name and "should not perform
@@ -104,7 +104,7 @@ than a patch to apply; see §2.2 and TO-D2.
 ### TO-3. No SOCKS stream isolation: everything shares circuits
 
 **What.** One SOCKS proxy URL with no credentials is applied to the whole
-session (`src/anonymize.js:243-258`), and the five main-process paths that dial
+session (`src/anonymize.js:300-315`), and the five main-process paths that dial
 the same port for themselves — the Handshake resolver's authoritative hop, an
 A-record `hns://` site's DANE-pinned socket, the `wss://` tunnel's upstream, a
 `gemini://` TLS socket and a Nostr relay's WebSocket, all through
@@ -146,7 +146,7 @@ saying it is absent.
 ### TO-4. Whether the session cookie jar reaches the onion fetch is not established
 
 **What.** The handler forwards no `Cookie` header and passes no `Set-Cookie`
-back (`src/onion-protocol.js:182-190`, `:209-219`). Whether the injected
+back (`src/onion-protocol.js:200-214`, `:209-219`). Whether the injected
 session-bound fetch attaches session cookies of its own accord is **not
 determined** by this code, and no test in this package or the browser's asserts
 either way.
@@ -179,7 +179,7 @@ pin the choice. See TO-D3.
 ### TO-5. Onion services with client authorization cannot be reached
 
 **What.** The generated `torrc` configures no `ClientOnionAuthDir`
-(`src/tor.js:197-208`), and there is no interface for entering a
+(`src/tor.js:199-208`), and there is no interface for entering a
 client-authorization key.
 
 **The standard says.** rend-spec-v3 specifies client authorization for v3 onion
@@ -204,7 +204,7 @@ TO-D4.
 ### TO-6. IP Protection is all-or-nothing for the whole session
 
 **What.** There is one proxy state for the whole browser session
-(`src/anonymize.js:243-258`), and it is driven by Settings › Content delivery ›
+(`src/anonymize.js:300-315`), and it is driven by Settings › Content delivery ›
 Mode (SPEC §2). Reaching a single onion service means putting the whole browser
 in Private: every tab, every protocol handler and the search fan-out through
 Tor, and the Handshake, ICANN, Nostr and peer-to-peer policies that move with
@@ -268,6 +268,63 @@ replace the engine's error page with one built from the controller's note — th
 same words: the mode, nothing loads, the switch — using the same hook the
 Tor-ready reload of SPEC §7.4 already has on those tabs. Keep the blackhole; add
 the page.
+
+---
+
+### TO-8. `onion://` carries HTTP only, so an HTTPS onion service is unreachable
+
+**What.** The `onion://` carrier scheme has no way to express TLS (SPEC §5,
+R16): the handler always builds `http://<host>[:port]<path>`
+(`src/onion-protocol.js:140`), and `parseOnionUrl` has no notion of a transport
+(`:54-74`). A `Location` on `https:` pointing at any `.onion` host — the
+service's own included — is therefore classified `unsupported-transport`
+(`:95`) and answered **501**, naming the HTTPS address and saying the redirect
+was not followed because following it would remove TLS (`:161-168`). Nothing is
+sent to that address. There is no way, from inside this browser, to reach an
+onion service that will only serve HTTPS.
+
+**The standard says.** RFC 7686 §2 requires that the name be handed to Tor
+rather than resolved, and says nothing about the transport spoken inside the
+tunnel; rend-spec-v3's rendezvous protocol likewise authenticates the *service*
+and says nothing about the application protocol carried over it. Neither
+requires TLS and neither forbids it, so the HTTP-only choice is not a
+departure from either. It is a departure from **RFC 9110 §15.4**, whose
+redirect semantics a user agent is expected to follow for 301/302/303/307/308:
+this handler refuses one class of `Location` rather than following it, and
+answers **RFC 9110 §15.6.2 `501 (Not Implemented)`** — *"the 501 status code
+indicates that the server does not support the functionality required to
+fulfill the request"* — which is the accurate code, because the functionality
+that is missing is this browser's.
+
+**Why.** Re-encoding `https://<addr>.onion/x` as `onion://<addr>.onion/x` would
+be a silent downgrade with two edges. The service asked for a different
+**security context** — its own certificate, its own HSTS state, its own idea of
+what a secure origin is — and Tor's structural authentication of the endpoint
+is not a substitute the browser is entitled to choose on the service's behalf.
+And the rewrite is **lossy**: URL normalisation drops an explicit `:443`, so the
+"same" address would be fetched on port 80 over cleartext. Following it would
+also mean serving bytes the service published under TLS inside an origin that
+cannot express TLS (SPEC §9.4). Refusing is the only one of the three options
+(follow, rewrite, refuse) that neither lies to the user nor to the service.
+
+**Consequence.** A real and stated limitation, not a fixed defect: **an onion
+service that serves only HTTPS cannot be reached in this browser.** A service
+that redirects HTTP to HTTPS — an increasingly ordinary configuration on the
+clearnet, and one some onion operators mirror — is reachable only as far as the
+redirect, and the user gets a 501 page explaining the transport, not the page
+they asked for. How large that population is has **not been measured**: most
+onion services serve plain HTTP inside the tunnel precisely because the onion
+address already authenticates them, but we have no survey and are not going to
+claim one. The refusal at least names the address, so the user can open it in a
+client that does support it.
+
+**Status: OPEN.** The refusal is right for as long as the carrier is HTTP-only —
+the alternative is a silent downgrade, which is worse than a failure — but the
+carrier being HTTP-only is the thing to fix. The engineering item is §3,
+**TO-D6**. Until it lands, no document or interface may describe `onion://` as
+scheme-agnostic, and the redirect classifier **must** keep the host test ahead
+of the transport test (`src/onion-protocol.js:91`, `:95`) so that a clearnet
+`https://` target is still refused for being clearnet.
 
 ---
 
@@ -390,6 +447,20 @@ learn about the hop. It has no security consequence we can see (the origin is
 identical by construction), and we are noting it because "the browser cannot see
 the redirect" is the sort of thing that turns out to matter later.
 
+### 2.8. Whether a privacy gate this chapter does not own belongs in this listener
+
+Electron allows one `webRequest.onBeforeRequest` per session, so the leak guard,
+the Wildroot API gate and the WebSocket policy are one function
+(SPEC §3.1). The composition is forced, and the fail-closed rule (R18) makes it
+safe in the direction that matters. What we are less comfortable with is the
+other direction: a fault in a policy **this chapter does not specify** — the
+WebSocket policy is Chapter 11's — now cancels requests inside the module whose
+job is the onion leak rule, and a reader auditing "does an onion subresource
+ever escape?" has to read code that has nothing to do with onions to be sure.
+The alternative is worse (a second listener silently replaces the first, which
+is exactly how this file's first comment says the leak was nearly reopened), so
+we keep it. We would rather Electron let us compose properly.
+
 ---
 
 ## 3. Open design items
@@ -483,6 +554,27 @@ uncertain this should be built: the moment the setting exists, it is the thing a
 bad tutorial tells people to point at somebody else's server. Being talked out
 of it is a good outcome.
 
+### TO-D6. Let the onion carrier express its transport
+
+`onion://` means HTTP inside Tor and cannot say anything else, so an HTTPS
+redirect is refused and an HTTPS-only onion service is unreachable (TO-8). The
+refusal is the right answer to the wrong shape.
+
+**Recommendation.** Decide the carrier question before adding any code. The
+options we can see are: a **second scheme** (`onions://`), which is honest and
+ugly and doubles every scheme registration, every classifier row and every
+trust-state case; a **default-port convention** (`onion://host:443/` means TLS),
+which is invisible to a reader and collides with a service that really does
+serve HTTP on 443; or **negotiating inside the handler** — attempt TLS over the
+SOCKS socket the way Chapter 9's Gemini path builds its own (`socksDialer`,
+`../../src/socks-dial.js`), and record what was actually negotiated in the trust
+state rather than in the URL. The third is the only one that does not put a
+transport in an address, and it is also the one that raises the real question:
+what a certificate *means* on a host name that is already a public key, and
+which trust step (SPEC §8) an onion page reached over TLS should get. Measure
+first how many onion services refuse plain HTTP; if the answer is "almost none",
+the honest fix is to leave TO-8 open and say so, not to build this.
+
 ---
 
 ## 4. What this chapter leaves out
@@ -512,21 +604,27 @@ Three things are deliberately absent from `src/` and `tests/`:
 
 3. **The session wiring.** Which Electron sessions the proxy is applied to, how
    `net.fetch` is bound, how the anonymize controller composes with the
-   WebSocket PAC, and how the `DeliveryMode` controller is wired to the
+   WebSocket PAC, which `websocketPolicy` is injected into the one
+   `onBeforeRequest` listener (the policy is Chapter 11's, `../apps/`; this
+   chapter specifies only the dispatch and the fail-closed rule, SPEC §3.1),
+   and how the `DeliveryMode` controller is wired to the
    settings page, the Privacy menu and the stored configuration (the controller
    itself, `../../src/delivery-mode.js`, is in this package; the `failClosed`
    flag the browser passes is set there) all live in the browser's
    `src/index.js` and `src/protocols/index.js`. `AnonymizeController` takes duck-typed sessions
-   (`{ setProxy, closeAllConnections }`) and the onion handler takes an injected
-   `fetchImpl`, so both are fully exercised here without Electron — but the
-   *wiring* is the browser's, and SPEC §7.5 specifies its policy rather than its
-   code.
+   (`{ setProxy, closeAllConnections }`), `installSubresourceGuard` takes a
+   duck-typed session and injected policies, and the onion handler takes an
+   injected `fetchImpl`, so all three are fully exercised here without
+   Electron — but the *wiring* is the browser's, and SPEC §7.5 specifies its
+   policy rather than its code.
 
 One thing is included that is arguably out of scope and is flagged rather than
 trimmed: **`src/tor.js` contains the whole Tor client lifecycle** — spawning,
 the pid-file orphan reap, the 30-second supervision probe and the recovery
 respawn. Resolution depends only on the availability states and the SOCKS
-endpoint (SPEC §7). It is kept whole because every source file in this
+endpoint (SPEC §7) — though the line between the two is thinner than it looks:
+revoking a route the moment its process ends (SPEC §7.7) is lifecycle code that
+decides what `socksUrl()` reports, which is resolution. It is kept whole because every source file in this
 repository is byte-identical to its counterpart in the Wildroot tree, so a fix
 in one is provably the same fix in the other, and a trimmed copy of a
 security-relevant module is a worse problem than an over-broad one.

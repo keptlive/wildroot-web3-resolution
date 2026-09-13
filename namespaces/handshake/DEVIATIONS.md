@@ -19,11 +19,25 @@ of this chapter, and its tests in `../../tests/`.
 
 **What.** A successful resolution is cached for 60 seconds regardless of the
 records' TTLs. Only positive results are cached — every failure kind
-(`unreachable`, `dnssec-fail`, `unregistered`) is re-asked. `../../src/resolver.js`.
+(`unreachable`, `dnssec-fail`, `unregistered`) is re-asked.
+`../../src/resolver.js:232` (`cacheTtl`).
+
+Invalidation is explicit and it is generational. `clearCache()` and
+`forget(host)` each increment an epoch (`../../src/resolver.js:241`, `:265`;
+`../../src/doh.js:77`, `:86`), and a resolution that finishes while the epoch
+has moved under it is discarded and re-run, three attempts before it reports
+that the name changed during resolution (`../../src/resolver.js:293`,
+`../../src/doh.js:319`) — so a publish landing mid-lookup cannot repopulate the
+cache it just cleared. On the DoH route the same event marks a name — and
+everything under it after `forget()`, everything at all after `clearCache()` —
+for HTTP revalidation for five minutes, remembering at most 512 names
+(`../../src/doh.js:91` `_fresh`, read at `:204`).
 
 **The standard says.** RFC 2181 §5.2: the TTL is the operator's statement of
 how long an RRset may be reused, and every record in an RRset carries the same
-one.
+one. RFC 9111 §5.2.1.4 defines the `no-cache` **request** directive the
+revalidation uses; it is a directive to the client's own HTTP store, and
+carries no DNS meaning.
 
 **Why.** The cache exists to stop a page's own subresources re-resolving the
 name a dozen times, not to be a recursive resolver. A publish flow that moves a
@@ -32,7 +46,12 @@ short TTL is usually protecting.
 
 **Consequence.** A record with a TTL below 60 s is honoured late. A record with
 a very long TTL is re-fetched more often than the operator asked. Neither is a
-security property; both are impolite to the authoritative server.
+security property; both are impolite to the authoritative server. The epoch
+adds one visible failure of its own: three invalidations arriving during one
+lookup return an error asking for a retry rather than any answer. Nothing in
+the invalidation reaches the upstream recursive resolver, which serves its own
+cache under its own TTL — an implementation cannot promise a publish is visible,
+only that this client is not the one holding the stale copy.
 
 **Status.** OPEN. Honour the minimum TTL of the RRsets a resolution rests on,
 clamped to a floor and a ceiling, and keep the rule that failures are never
@@ -84,7 +103,8 @@ resolution algorithm ever issues a query for type 65. `../../src/dns-query.js`.
 
 **The standard says.** RFC 9460 defines the SVCB/HTTPS RR and expects a client
 to query it before connecting; RFC 9848 requires the client to take its
-ECHConfigList from that record.
+ECHConfigList from that record. RFC 8446 §4.2.9, on RFC 6066 §3, is what is
+sent instead: a `server_name` extension in the clear, before any key is agreed.
 
 **Why.** Two independent reasons.
 
@@ -99,8 +119,13 @@ ECHConfigList from that record.
 **Consequence.** `hns://` connections send the server name in the clear in the
 TLS ClientHello. An observer learns which Handshake site is being visited even
 though the DNS lookup may have been oblivious — so the ODoH work is partly
-undone by the transport. Any SvcParam an operator publishes (`alpn`, `port`,
-`ipv4hint`) is ignored.
+undone by the transport. **This holds on the anonymized route too**: the
+Private-mode site connection of SPEC §8.1 puts an address, not a name, in the
+SOCKS CONNECT request, and then sends the name in `server_name` on the socket
+that request opened (`../../src/dane-connect.js:38`). The Tor exit sees it. An
+implementation **MUST NOT** describe dialling by address as hiding the name;
+what it removes is the disclosure to the proxy. Any SvcParam an operator
+publishes (`alpn`, `port`, `ipv4hint`) is ignored.
 
 **Status.** OPEN, and blocked on something that is not ours: Node's TLS
 bindings. Until they expose ECH, the honest position is this entry rather than
@@ -188,36 +213,45 @@ a host was ever pinned; that is HS-12, and it is open.
 
 ---
 
-### HS-9. A CNAME target's own RRset is not validated under the target's owner
+### HS-9. On the address path, a CNAME target's own RRset is not validated under the target's owner
 
-**What.** The `CNAME` RRset itself **is** validated: on the address path a
-`CNAME` in a signed zone is not followed until the RRset validates to the
-on-chain DS anchor, with the RFC 4035 §5.3.4 wildcard proof where the answer was
-wildcard-expanded (SPEC §6.5f). What is not done is the rest of RFC 4035
-§5.3.1's chain: the **target's** RRset is not validated under the target's own
-owner name. In practice the target of a Handshake `CNAME` is an ICANN host,
-whose address comes back through the ICANN-host lookup seam (SPEC §6.11) and is
-therefore ICANN's word, not the Handshake zone's. `../../src/resolver.js`.
+**What.** The `CNAME` RRset itself **is** validated on both paths that read
+one. On the **address** path a `CNAME` in a signed zone is not followed until
+the RRset validates to the on-chain DS anchor, with the RFC 4035 §5.3.4
+wildcard proof where the answer was wildcard-expanded (SPEC §6.5f) — and there
+the chain stops: the **target's** RRset is not validated under the target's own
+owner name. In practice that target is an ICANN host, whose address comes back
+through the ICANN-host lookup seam (SPEC §6.11) and is therefore ICANN's word,
+not the Handshake zone's. `../../src/resolver.js` (the CNAME branch of
+`_fromZone`).
+
+The **pointer** path does chase the chain: `_validatedTxtAnswer`
+(`../../src/resolver.js:849`) validates the `CNAME` RRset at each owner as type
+5, re-queries the target inside the same zone when the reply did not already
+carry it (`:878`), and requires a validated `TXT` RRset or a validated denial
+at the owner where the chain ends. So what this entry records is now the
+address path alone. What the pointer path refuses instead of chasing is HS-17.
 
 **The standard says.** RFC 4035 §5.3.1 describes validating each RRset in a
 CNAME chain under its own owner name.
 
-**Consequence.** Two things, of different sizes. A `CNAME` to an ICANN host
-works and the resolution is reported as unvalidated from that point on
-(`dnssecValidated` stays false and the trust panel names the source of the
-address) — which is the truth and cannot be anything else, because the target's
-zone is not anchored to the Handshake chain at all. A `CNAME` *within* a signed
-Handshake zone, pointing at another name in the same zone or a delegated one, is
-not chased and validated the way §5.3.1 describes; its RRset is validated, its
-target's is not.
+**Consequence.** A `CNAME` to an ICANN host works and the resolution is
+reported as unvalidated from that point on (`dnssecValidated` stays false and
+the trust panel names the source of the address) — which is the truth and
+cannot be anything else, because the target's zone is not anchored to the
+Handshake chain at all. A `CNAME` on the address path *within* a signed
+Handshake zone, pointing at another name in the same zone, is not chased and
+validated the way §5.3.1 describes; its RRset is validated, its target's is
+not — even though the pointer path, in the same resolution, would have.
 
 It also decides which half of RFC 7671 §7.2 the DANE base-domain rule rests on
 (SPEC §8): because the expansion is not *secure* in the RFC's sense, the pin is
 correctly looked up at the original name.
 
-**Status.** OPEN, and narrow: what remains is chasing the target
-inside the zone and validating each RRset under its own owner. Keep the
-ICANN-target case reported as unvalidated.
+**Status.** OPEN, and narrower than it was: what remains is chasing the address
+target inside the zone and validating each RRset under its own owner, which the
+pointer path already shows the shape of. Keep the ICANN-target case reported as
+unvalidated.
 
 ---
 
@@ -422,6 +456,128 @@ chain-proven.
 
 ---
 
+### HS-17. A pointer alias out of the zone is refused, not resolved in the target's own zone
+
+**What.** On a signed zone the `TXT` path follows a `CNAME` only while the
+target stays inside the zone the walk is already anchored in. A target whose
+owner is neither the zone apex nor a name under it is refused —
+`{ kind: 'dnssec-unsupported', reason: 'Cross-zone TXT aliases require a
+separate authenticated lookup' }` (`../../src/resolver.js:874`) — and so is a
+target the zone *delegates*, detected by a referral at the re-query
+(`../../src/resolver.js:880`). The same shape at the underscore owner is
+refused a level earlier: a signed zone that delegates `_dnslink.<host>` answers
+the DNSLink query with a referral, which carries neither records nor a denial,
+so the proven-absence rule of SPEC §6.5e rule 5 fails it `dnssec-fail`
+(`../../src/resolver.js:886`).
+
+**The standard says.** RFC 1034 §3.6.2 describes the behaviour as fact rather
+than with a conformance verb (the document predates RFC 2119): a CNAME is
+followed by restarting the query at the canonical name, wherever that name
+lives. RFC 4035 §5.3.1 requires each RRset in such a chain to be validated
+under its own owner name, which for a name in another zone means authenticating
+that zone's keys — its own DS chain, from its own anchor — before anything it
+says is believed.
+
+**Why.** "Its own anchor" is the whole difficulty. A Handshake zone's keys
+authenticate that zone; they say nothing about a name in a sibling zone, in a
+child the parent delegated, or under another top-level name whose DS lives in a
+different chain record. Following the alias correctly means re-entering the
+algorithm at SPEC §6.1 for the target — a second chain lookup, a second
+delegation descent, a second DNSKEY fetch — inside a resolution that already
+has no total query budget (HS-D1). Following it *incorrectly*, by validating
+the target's records against the keys of the zone that pointed at them, is
+worth nothing at all: it accepts whatever the zone that wrote the alias wants
+to say about a name it does not control. Refusing is the fail-closed choice
+between building the second walk and pretending it happened.
+
+**Consequence.** A name whose pointer is published as an alias into another
+zone does not resolve: the refusal ends the resolution, and the address records
+are never reached. Ordinary publications are unaffected — an alias is not how
+either the `ipfs=` convention or DNSLink is normally written — but a zone doing
+something reasonable (one `_dnslink` owner aliased to a shared one in a zone
+the operator also runs) is refused rather than resolved. The kind also
+under-describes the reason: `dnssec-unsupported` is otherwise "signed with an
+algorithm we do not implement", and an interface that renders the kind without
+the reason string tells the user something false about why.
+
+**Status.** OPEN. The fix is to re-enter the resolution at the target name
+rather than to widen the trust, and to bound it: resolve the target as its own
+question from its own anchor, cap the total at one such excursion per pointer
+lookup, and fold the queries into the budget HS-D1 recommends. Until that
+exists, a distinct kind — the failure is neither an unsupported algorithm nor a
+bad signature — would at least stop the panel misreporting it.
+
+---
+
+### HS-18. The pointer alias chain is bounded at eight owners, and one alias per owner
+
+**What.** `_validatedTxtAnswer` walks at most **eight** owner names in one
+chain (`../../src/resolver.js:854`), refuses an owner it has already visited
+(`:855`, *TXT CNAME loop*), and refuses an owner carrying more than one `CNAME`
+(`:869`, *Ambiguous TXT CNAME target*). A ninth owner is *TXT CNAME chain is
+too deep*. Each refusal is a DNSSEC failure, so the resolution fails closed
+rather than continuing to the address.
+
+**The standard says.** RFC 2181 §10.1 is exact about the per-owner rules and
+this implementation follows them: "There may be only one such canonical name
+for any one alias", and for any label exactly one of — one CNAME (with its
+DNSSEC records), or one or more non-CNAME records, or nothing, or no such name.
+Refusing two aliases at one owner, and refusing a `TXT` beside a `CNAME`, is
+conformance rather than deviation. RFC 1034 §3.6.2 asks that loops be
+"signalled as an error", which is what happens. What has no standard behind it
+is the **number**: no RFC fixes a chain length, and resolvers differ.
+
+**Why.** A chain the client must follow is work a zone chooses for it, and an
+unbounded one is a cheap way to make a client do arbitrary work — the same
+argument the NSEC3 iteration cap rests on (SPEC §6.7). Eight is well past any
+legitimate publication: the case this path exists for is one alias, to one
+shared owner.
+
+**Consequence.** A signed zone that aliases a pointer through nine or more
+owners fails rather than resolving. We know of no such zone, and the failure is
+reported as what it is.
+
+**Status.** DELIBERATE. A bound is required and the exact number is
+conventional; if it ever needs raising it should be raised against a real zone,
+not pre-emptively.
+
+---
+
+### HS-19. Content paths are compared byte for byte; no URI normalisation
+
+**What.** `mergePointers` treats an absent path and a bare `/` as the same root,
+and compares every other path **exactly** — no percent-decoding, no case
+folding, no `.`/`..` resolution, no trailing-slash equivalence
+(`../../src/pointers.js:328`). Two pointers that differ only in path spelling
+are a `pointer-conflict`, not an agreement.
+
+**The standard says.** RFC 3986 §6.2.1 permits exactly this: simple
+character-for-character comparison is the baseline, and any normalisation in
+§6.2.2 (case, percent-encoding, path segments) is something an implementation
+*may* apply, with the RFC noting each step trades false negatives for the risk
+of false positives. DNSLink itself publishes no equality rule for the path at
+all, which is why this is written down rather than assumed.
+
+**Why.** A comparison that declared two spellings equal would then have to
+choose one of them to fetch, and in a content-addressed path the spelling
+selects the DAG link: `%2F` is a character in a link name, not a separator, and
+a decode changes which link is meant. Choosing wrongly serves *different
+content* under an agreement the publisher never made — the failure the whole
+conflict rule exists to prevent. A false conflict is visible and fixable by the
+publisher; a false agreement is neither.
+
+**Consequence.** A publisher who writes `/docs` in one record and `/docs/` (or
+a percent-encoded equivalent) in the other gets a refusal naming both paths,
+where a normalising client would have loaded the site. That is the intended
+direction of the error, and the message is actionable because it prints each
+pointer with its path.
+
+**Status.** DELIBERATE. Normalisation here is not a convenience but a choice
+about which bytes to fetch, and it belongs to whoever publishes the records, not
+to the resolver comparing them.
+
+---
+
 
 
 ## 2. Things we are not sure about
@@ -560,6 +716,30 @@ read is right, and not confident how long "the ecosystem reads DNSLink" stays
 true if the ecosystem's own defaults keep shrinking. If it stops being true the
 read costs one query per resolution and should be re-argued, not quietly kept.
 
+### 2.8. A pathless `ipfs=` beside a path-bearing `dnslink=`
+
+The path is part of what a pointer names, so it is part of the comparison that
+decides whether two records agree (SPEC §10.1, HS-19). The awkward case is the
+one publication where the two record formats are not equally expressive:
+`ipfs=<cid>` at the name has **no path in its grammar**, while
+`dnslink=/ipfs/<cid>/docs` does. Today that pair is a `pointer-conflict`, and
+the alternative reading — the record at the name says nothing about a path, so
+it does not contradict one — is not obviously wrong.
+
+We chose the conflict for one reason: the other reading requires taking the path
+from the record that has one, which is a precedence rule, and a precedence rule
+between two records is exactly what SPEC §10.1 refuses everywhere else. Whoever
+controls the DNSLink record would decide the path while the record at the name
+sat there saying something different. The cost is real and falls on a publisher
+doing the recommended thing: writing both records for interoperation, with a
+path, now needs the path in neither — which in practice means publishing the
+DNSLink record alone.
+
+What would settle it is a grammar for a path at the name, so both records can
+say the same thing and the comparison stays a comparison. We have not defined
+one, and inventing a private extension to a convention other clients read is
+not obviously better than this refusal.
+
 ---
 
 ## 3. Open design items
@@ -577,7 +757,11 @@ DNSLink query (SPEC §6.5d) is one more per zone on every name, including a plai
 address-record name that carries no pointer at all, which is the price of being
 able to detect a disagreement rather than only a missing record; on the DoH
 route it is asked in parallel and costs no round trip, on the
-authoritative-DNS route it costs one.
+authoritative-DNS route it costs one. A signed zone can add more: each `CNAME`
+at either pointer owner costs another `TXT` query when the reply did not
+already carry the target's records, up to the chain bound of HS-18, and the
+second authenticated walk HS-17 recommends would add a whole resolution to the
+same unbudgeted total.
 
 **Recommendation.** Thread a counter through the resolution context — one
 object, incremented at the single place a query is issued — cap it at roughly

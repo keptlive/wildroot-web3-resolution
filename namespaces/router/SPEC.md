@@ -110,9 +110,9 @@ when that owner cannot answer?" and hands off.
 ## 2. Terminology
 
 - **Namespace** — a distinct address space with its own root of trust. Several
-  schemes may share one: `ipfs`, `ipns`, `ipld` and `pubsub` are all the IPFS
-  namespace. The boundary this part protects is the *namespace* boundary, not
-  the scheme boundary.
+  schemes may share one: `ipfs` and `ipns` are both the IPFS namespace. The
+  boundary this part protects is the *namespace* boundary, not the scheme
+  boundary.
 - **Scheme** — a URI scheme name as defined by
   [RFC 3986 §3.1](https://www.rfc-editor.org/rfc/rfc3986#section-3.1):
   `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`, compared case-insensitively.
@@ -159,10 +159,39 @@ L1 is enforced in two places that must agree:
 
 1. **At the runtime layer.** Every scheme is bound to the dispatcher, which
    reads the scheme from the URL and nothing else
-   ([`src/router.js:504-533`](../../src/router.js)).
+   ([`src/router.js:509-539`](../../src/router.js)).
 2. **In the classifier.** The first thing `classify()` does with a non-empty
    input is test for an explicit scheme and return the input untouched
-   ([`src/router.js:288-300`](../../src/router.js)).
+   ([`src/router.js:285-303`](../../src/router.js)).
+
+**Which input L1 governs, and where the navigation rewrite sits.** L1 is a rule
+about *this stage's* input. Navigation happens in three stages, and an
+implementation **MUST** say which one it is describing when it claims L1:
+
+1. **Adaptation** (the embedder's). A host application decides what a click, a
+   typed string or a restored tab *means* before any of it reaches the
+   classifier: a document goes to its viewer, a magnet link goes to consent, and
+   an `http(s)://` host that belongs to Handshake, ENS or Tor is rewritten into
+   that namespace's scheme (§6.4). This stage is deliberate compatibility
+   behaviour, it is where the product decisions live, and it is specified by the
+   embedder — for the reference implementation, in the Wildroot tree's
+   `docs/BROWSER-ROUTING-CONTRACT.md`.
+2. **Classification** (§6), on whatever stage 1 produced. Here an explicit
+   scheme is authoritative and is never re-classified, and an unknown scheme is
+   not guessed into a namespace.
+3. **Dispatch** (§5), which reads the scheme and nothing else, and confines the
+   failure (L2).
+
+So classifying `https://vitalik.eth/` alone yields the web namespace, and the
+same string through stage 1 first becomes `ens://vitalik.eth/` and *then*
+classifies as ENS. The two answers are about different inputs and neither is the
+classifier re-deciding a scheme. Stage 1 **MUST NOT** be implemented inside the
+classifier, where it would be exactly the re-classification L1 forbids; the
+reference implementation keeps it in `src/hns-host.js` and marks the boundary
+where the classifier begins ([`src/router.js:285-286`](../../src/router.js)).
+A stage-1 rewrite is a **MUST** of §6.4 rather than a licence to sniff: it is
+driven by the same host rule, at every entry point, and it moves a URL between
+namespaces only for the hosts §6.2 already assigns elsewhere. See RT-14.
 
 An explicit decision also carries `known`, which is whether the registry has a
 row for the scheme. A caller that navigates **SHOULD** require it rather than
@@ -193,7 +222,7 @@ L2 is enforced structurally in two ways:
 
 - **The classifier returns one namespace and one reason.** There is no list of
   candidates, no ordering to fall through, and no second guess
-  ([`src/router.js:277-411`](../../src/router.js)).
+  ([`src/router.js:277-416`](../../src/router.js)).
 - **The dispatcher has no path that calls a second handler.** All four of its
   outcomes (§5) stay inside the scheme that was named.
 
@@ -235,7 +264,7 @@ native layer that authenticates the canonical object — and the **trust verdict
 it can at best reach**. The router does not perform verification; it *names*
 it, so that no scheme can be wired in without one. Registration of a scheme
 with no row **MUST** be refused
-([`src/router.js:475`](../../src/router.js)).
+([`src/router.js:480`](../../src/router.js)).
 
 The verification story is not prose. It is the sentence the trust model (§10)
 is held to: a row that over-claims becomes a padlock that over-claims, and the
@@ -274,7 +303,7 @@ A `partial` row **MUST NOT** report the trustless lock state (§10.4).
 
 ### 4.2 The table
 
-32 rows, 18 namespaces. Reproduced from
+30 rows, 18 namespaces. Reproduced from
 [`src/router.js:105-175`](../../src/router.js). The **Trust** column is the
 verdict the row claims (§4.1). The **IANA** column is the scheme's status in
 the [IANA URI Schemes
@@ -286,8 +315,6 @@ not registered at all.
 | `hns` | `hns` | live | trustless | SPV chain proof + DANE (TLSA `3 1 1`) or content CID | — |
 | `ipfs` | `ipfs` | live | trustless | CID | Provisional |
 | `ipns` | `ipfs` | live | trustless | IPNS record + CID | Provisional |
-| `ipld` | `ipfs` | live | trustless | CID | — |
-| `pubsub` | `ipfs` | live | trusted | **libp2p publisher signature** — a topic is not a content address | — |
 | `ar` | `arweave` | partial | trusted | immutable txid; the signed header and a body under 8 MiB checked per fetch, **the rest gateway-trusted** | Provisional |
 | `ens` | `ens` | partial | trusted | contenthash via a public Ethereum RPC — RPC-trusted, not chain-proven; lock **TRUSTED, never green** | Provisional |
 | `web3` | `web3` | partial | trusted | ERC-4804 EVM read | Provisional |
@@ -375,7 +402,7 @@ The privilege classes this implementation uses:
 
 | Class | `standard` | `secure` | Service workers | `stream` | Schemes |
 |---|---|---|---|---|---|
-| p2p | yes | yes | **yes** | yes | `https+raw`, `hyper`, `gemini`, `ipfs`, `ipns`, `ipld`, `pubsub`, `bittorrent`, `bt`, `ssb`, `web3`, `media` |
+| p2p | yes | yes | **yes** | yes | `https+raw`, `hyper`, `gemini`, `ipfs`, `ipns`, `bittorrent`, `bt`, `ssb`, `web3`, `media` |
 | chrome | yes | yes | no | no | `wildroot`, `agregore`, `browser`, `search`, `editor`, `paste`, `bluesky`, `mastodon` |
 | low | **no** | **no** | no | no | `magnet`, `did`, `nostr`, `at`, `activitypub` |
 | low + `stream` | **no** | **no** | no | yes | `ar`, `ens` |
@@ -417,7 +444,7 @@ one. `media` and `docview` are so marked.
 
 `dispatch(request)` reads the scheme from the URL **and nothing else**. There
 is no content sniffing, ever. It has exactly four outcomes, and none of them
-crosses a namespace ([`src/router.js:504-533`](../../src/router.js)):
+crosses a namespace ([`src/router.js:509-539`](../../src/router.js)):
 
 | Outcome | Response | Namespace marker |
 |---|---|---|
@@ -468,7 +495,7 @@ guessed" is not.
 ### 6.1 The order
 
 The decision is made **once**, in this fixed order; the first match wins and is
-final ([`src/router.js:277-411`](../../src/router.js)):
+final ([`src/router.js:277-416`](../../src/router.js)):
 
 1. **Empty input** (after trimming) → the search terminal with an empty query.
    `reason: empty`.
@@ -544,7 +571,7 @@ Five notes on the order, each of which is load-bearing:
   for a decode that is *designed* to fail, because the alternative is the
   bare-label rule transmitting the secret to a resolver as a name. Routed to
   the Nostr namespace it reaches the handler's "that is a PRIVATE KEY" refusal
-  instead ([`src/router.js:323-328`](../../src/router.js), and
+  instead ([`src/router.js:326-331`](../../src/router.js), and
   [Chapter 6 — Nostr](../nostr/SPEC.md) §5.3).
   The identifier must be the **whole** input: an identifier carrying a path or
   a trailing slash is not matched and falls through to the host rules
@@ -590,7 +617,7 @@ Whitespace anywhere in the input **MUST** exclude it from this rule. A host
 classifier that returns "undecided" for both a single label *and* a string with
 spaces in it will otherwise turn every multi-word search into a name lookup.
 The exclusion has to be deliberate, and it is
-([`src/router.js:406`](../../src/router.js)).
+([`src/router.js:411`](../../src/router.js)).
 
 ### 6.4 The `http→hns` rewrite
 
@@ -616,6 +643,14 @@ as a URL host: `http://hnshosting/` has already settled the question of
 navigation intent, so it is a Handshake host
 ([`src/hns-host.js:59-77`](../../src/hns-host.js)).
 
+**This rewrite runs before classification, not inside it.** It is stage 1 of
+§3.1's three, so L1 is not in tension with it: the classifier is handed
+`hns://nathan.woodburn/` and treats *that* explicit scheme as final. An
+implementation **MUST** keep the rewrite out of `classify()` and **MUST**
+document where it runs, because a reader who is told only that "an explicit
+scheme is authoritative" will otherwise read this section as its contradiction
+(RT-14).
+
 ### 6.5 Pasted content addresses
 
 A pasted CID is the most natural thing anybody does with one, and it is
@@ -624,7 +659,7 @@ self-describing, so it is recognised without a scheme. Two rules apply:
 - **A CIDv0 is written as its CIDv1 base32 form.** `Qm…` is case-sensitive
   base58 and a standard scheme's host is lowercased by the URL parser, so the
   v0 spelling cannot survive as a host. The v1 form names the same bytes
-  ([`src/router.js:414-421`](../../src/router.js)).
+  ([`src/router.js:419-426`](../../src/router.js)).
 - **An IPNS key is deliberately not recognised here.** `Qm…` is both a legacy
   IPNS key and a CIDv0, and guessing between them is exactly the sniffing this
   part exists to prevent. An IPNS name **MUST** be named explicitly
@@ -717,7 +752,7 @@ the classifier:
 > A classifier that builds a URL from user input applies the numeric-TLD marker
 > **before** the IDNA pass, because the IDNA pass is performed by the URL
 > constructor and the URL constructor throws on the unmarked form
-> ([`src/router.js:430-440`](../../src/router.js)).
+> ([`src/router.js:434-445`](../../src/router.js)).
 
 The classification rule itself — an all-numeric final label is Handshake,
 because ICANN has no numeric top-level domains (§6.1 step 7.6) — stands
@@ -804,7 +839,7 @@ lock that cannot explain itself is decoration.
 The Handshake step list is specified in the spine's [SPEC §4](../../SPEC.md)
 and is not restated here. This section specifies the **cross-namespace**
 model — what every *other* scheme reports
-([`src/trust-path.js:256-447`](../../src/trust-path.js)).
+([`src/trust-path.js:261-431`](../../src/trust-path.js)).
 
 ### 10.2 The per-scheme step lists
 
@@ -825,18 +860,17 @@ when what it cannot do is verify the thing the URL names, and it would put a
 |---|---|---|
 | `https` | Domain name `unverified` (how it was looked up, §10.3) · Connection `unverified` — "a CA vouched for it" | TRUSTED |
 | `http` | Domain name `unverified` · Connection `none` — plaintext | OPEN |
-| `ipfs`, `ipns`, `ipld` | Content `verified` — CID, or a signed IPNS record whose content is CID-verified | TRUSTLESS |
-| `pubsub` | Content `none` — a topic is **not a content address**; a message carries only its publishing peer's libp2p signature, and anyone may publish to a topic | TRUSTED |
+| `ipfs`, `ipns` | Content `verified` — CID, or a signed IPNS record whose content is CID-verified | TRUSTLESS |
 | `bt`, `bittorrent` | Content `verified` — infohash, or BEP-46 key-addressed. Proves who published, not that this is the newest version | TRUSTLESS |
 | `ssb` | Content `verified` — feed key signature. Proves who wrote it, not that the feed is complete | TRUSTLESS |
 | `hyper` (bare key) | Content `verified` — every block checked against the key in the address | TRUSTLESS |
 | `hyper` (dotted host) | Name records `unverified` — a DNSLink name read from a public DoH resolver, no DNSSEC, no chain proof · Content `verified` once resolved | TRUSTED |
 | `magnet` | Address `none` — a pointer to a torrent; nothing loads until it is added | — |
-| `ar` | Content `unverified` — the transaction id names immutable content, but the bytes came from a gateway and were **not** checked against the transaction | TRUSTED |
-| `ens` | Name records `unverified` — public Ethereum RPC, no light client · Content `verified` once resolved | TRUSTED, **never green** |
+| `ar` | Content `unverified` — the transaction id names immutable content, and the bytes came from a gateway. A top-level transaction under 8 MiB is checked against the transaction's signed data root per fetch (`X-Arweave-Verified`); everything else is gateway-trusted, and this step is written before any fetch | TRUSTED |
+| `ens` | Name records `unverified` — public Ethereum RPC, no light client · Content `unverified` unless a handler recorded a byte check **for this exact request** (*Evidence*, below) | TRUSTED, **never green** |
 | `gemini` | Connection `unverified` — TLS with the certificate neither checked against an authority nor remembered from a previous visit. **Not TOFU**: nothing is pinned, so nothing can be compared | TRUSTED |
 | `nostr` | Authorship `verified` — id recomputed and the BIP-340 signature checked here · Completeness `unverified` — relays can withhold, and nothing signs "these are all the events" | TRUSTED |
-| `did` | Identifier `unverified` — the document was fetched and checked to be about the identifier asked for; for `did:plc` the operation log that would prove it is not audited, and `did:web` rests on WebPKI | TRUSTED |
+| `did` | Identifier `unverified`, and the step names the **method**: `did:plc` and `did:web` retrieve a document over HTTPS and check its id (the PLC operation log is not audited; the domain and WebPKI stay trusted), `did:key`/`did:jwk`/`did:pkh` derive one locally with no lookup at all, and an unrecognised method reports that the method is not established. In every arm the panel says it holds no recorded result for **this page** | TRUSTED |
 | `onion` | Connection `unverified` — the onion key authenticates the *service* at the Tor layer; the page is plain HTTP inside the tunnel | TRUSTED |
 | `wildroot`, `agregore`, `browser`, `about`, `editor`, `paste`, `media`, `docview` | Page `verified` — built in, never touched the network | TRUSTLESS |
 | `bluesky`, `mastodon` | Page `verified` — the **app** is built into this browser · Content `unverified` — what it shows came from the network's own servers over WebPKI HTTPS | TRUSTED |
@@ -845,7 +879,7 @@ when what it cannot do is verify the thing the URL names, and it would put a
 | anything else | Address `none` — "this browser has no verification path for this scheme" | — |
 | an input with no scheme that will not parse | Address `failed` | FAILED |
 
-Five rules this table encodes are worth stating normatively:
+Six rules this table encodes are worth stating normatively:
 
 - **A namespace with no verification path gets a step saying so.** An empty
   step list aggregates to "nothing is known", which a naive interface renders
@@ -854,13 +888,18 @@ Five rules this table encodes are worth stating normatively:
   dispatched.
 - **A step's state describes what was proven, not what the address looks like.**
   An Arweave transaction id is immutable and still yields an `unverified`
-  Content step, because the bytes were never checked against it; a `pubsub`
-  topic looks like a content address and is not one. An implementation **MUST
-  NOT** infer verification from the *shape* of an identifier.
+  Content step, because whether *these* bytes were checked against it depends on
+  the fetch and is not known when the step is written; a `magnet` address
+  carries an infohash and still yields `none`, because nothing has been fetched
+  to check against it. An implementation **MUST NOT** infer verification from
+  the *shape* of an identifier.
 - **A pointer and its content are separate steps.** `ens`, `hyper` over
   DNSLink, and the Handshake path all have the same shape: the mapping is
-  somebody's word, the bytes it names verify. Reporting one step hides which
-  half is weak.
+  somebody's word, and the bytes it names are a second question with its own
+  answer. Reporting one step hides which half is weak.
+- **A step is written at resolution time and says only what is known then.** A
+  scheme names *which* checks are possible, never that they completed. See
+  *Evidence*, below.
 - **Privilege is not trust (§4.4).** `onion://` is a standard, secure,
   persistent origin *and* is never green. An implementation **MUST** derive the
   verdict from the steps, never from the scheme's registration.
@@ -871,38 +910,74 @@ Five rules this table encodes are worth stating normatively:
   present somebody else's servers as this browser's own bytes, so the verdict
   is TRUSTED and the second step names whose servers answered.
 
+**Evidence.** These steps are built from a URL, before anything is fetched. A
+step **MUST NOT** report `verified` on the strength of the scheme, the shape of
+an identifier or a configuration; only a result recorded by the component that
+did the work, **for this exact request**, licenses that word.
+
+An implementation **MAY** pass such a result in, and the reference one does:
+`schemeSteps(url, dns, bridge, evidence)` takes an optional record from the main
+process, and the `ens` Content step reports `verified` only when that record is
+present, names this same URL, succeeded, resolved to a protocol whose bytes can
+be checked (`ipfs`, `ipns`, `arweave`) and says the byte check completed
+([`src/trust-path.js:442-455`](../../src/trust-path.js)). With no record — the
+ordinary case — the step is `unverified` and says so: *an ENS name may point at
+IPFS, IPNS or Arweave, and the scheme alone does not establish that this page's
+bytes were verified*. An implementation **MUST NOT** synthesise such a record
+from response headers a page or a gateway could set.
+
+The same rule governs the ICANN name step below, where the evidence is transport
+activity rather than a byte check, and it is why `none` steps stay in the
+aggregate (§10.4): "we have no record" is a weakening, not an exemption.
+
 ### 10.3 The ICANN name step
 
 The step for an ordinary web address says **how the name was looked up**, and
 must not let anyone assume it was oblivious
-([`src/trust-path.js:449-511`](../../src/trust-path.js)).
+([`src/trust-path.js:459-503`](../../src/trust-path.js)).
 
-It describes **the transport plan the engine was given**, not the static
-configuration — a configuration can name resolvers the engine has stopped
-using, and a panel reading it makes claims the network does not support. The
-plan is decided once and recorded; the sibling ICANN chapter specifies it
-([`../icann/src/dns-policy.js`](../icann/src/dns-policy.js)). The step this
-part requires is one of five:
+It describes **what was configured and what was observed**, and keeps the two
+apart. A configuration names resolvers the engine may or may not have used; a
+cached answer needs no lookup at all; and neither the browser nor the operating
+system reports, per navigation, which endpoint served a given name. So the step
+is `unverified` in every arm, and the sentence it carries says which of those
+situations it is in. The plan is decided once and recorded; the sibling ICANN
+chapter specifies it
+([`../icann/src/dns-policy.js`](../icann/src/dns-policy.js)). The step this part
+requires is one of five:
 
 | Condition | Step |
 |---|---|
-| An oblivious bridge answered **this name** | `unverified` — "Oblivious DoH — relay X → target Y"; neither party alone can link the user to the lookup, and the **answer** is still their word |
-| The bridge is the only resolver the engine has and did **not** answer this name, mode `secure` | `unverified` — "Oblivious bridge only — this name was not answered by it"; unencrypted DNS is refused, so the answer may have come from the engine's cache |
-| The same, mode `automatic` | `unverified` — "Resolver not determined"; in automatic mode the engine falls back to unencrypted system DNS, so this lookup may have gone out in the clear |
-| Mode `secure` with **no** server configured | `failed` — "Secure DNS with no server — lookups refused". The name was not looked up at all; unencrypted DNS was refused rather than used |
-| Encrypted DNS configured, or no resolver / DNS off | `unverified` — names the resolver and says **NOT oblivious**, or "System DNS, unencrypted" when there is none |
+| The oblivious bridge has a **recent successful lookup of this exact host**, with a relay and a target | `unverified` — "Recent Oblivious DoH lookup — relay X → target Y". Stated as *recent activity*, not as proof that this page used that answer: the relay handled ciphertext, the target saw the relay, and the answer is still the resolver's word |
+| A bridge is configured but has no such record, mode `secure` | `unverified` — "Oblivious bridge configured — no recent lookup evidence". The page may have reused a cached answer; secure mode refuses unencrypted fallback, which is policy, not an observation |
+| The same, mode `automatic` | `unverified` — "Resolver not determined — no recent oblivious lookup evidence". Automatic mode permits system fallback; that it *occurred* is not shown |
+| Mode `secure` with **no** server configured | `unverified` — "Secure DNS configured to refuse new lookups". This is the configured policy, not an observed failure: cached answers may still exist, so the page in front of the user may have loaded |
+| Encrypted DNS configured, or no resolver / DNS off | `unverified` — "Secure DNS configured: X — NOT oblivious", naming the configured list rather than an observed endpoint, or "DNS lookup path not observed" when there is no list |
 
-An implementation **MUST NOT** describe a lookup as oblivious unless it was.
-"The bridge is configured" and "the bridge answered this name" are different
-claims and only the second one licenses the word. An implementation **MUST**
-report a fail-closed DNS policy as a `failed` step rather than an unverified
-one: nothing was resolved, and a lock over an unresolved name must not close.
+An implementation **MUST NOT** describe a lookup as oblivious unless it has a
+record of that host being answered obliviously. "The bridge is configured", "the
+bridge answered something recently" and "the bridge answered this name" are
+three different claims and only the third licenses the word — and even then the
+honest form is *recent activity*, because nothing ties a lookup to a particular
+navigation or rules out a cache hit.
+
+An implementation **MUST NOT** report a configured policy as a `failed` step
+either. `failed` means a check ran and did not pass; "secure DNS with no
+resolver configured" is a setting, and a page that loaded from cache under it
+has not failed anything. The honest step is `unverified` naming the policy. An
+implementation that *does* observe a refused lookup **MAY** report that as
+`failed`, because then something was observed.
 
 ### 10.4 Aggregating to a lock
 
 The rule is **the weakest link**, and it produces **five** verdicts
-([`src/trust-path.js:513-536`](../../src/trust-path.js)):
+([`src/trust-path.js:513-541`](../../src/trust-path.js)):
 
+- a step explicitly marked `applicable: false` is dropped first, and **nothing
+  else is**. A step that is merely absent, unknown or `none` still counts. An
+  implementation **MUST NOT** use the flag to lift a protection that was
+  expected and is missing: the flag says "this check does not apply to this
+  kind of page", never "we could not run it";
 - no steps at all → **unknown**;
 - any step `failed` → **failed**;
 - otherwise a step labelled `Connection` in state `none` → **open**;
@@ -930,9 +1005,13 @@ An indicator that renders the first two identically is lying by omission.
 
 The lock is **open** on exactly two conditions: the aggregate is `open`, or it
 is `failed`. It is deliberately *not* "any unverified step" — an ordinary
-`https://` page has one and is a closed lock. So plaintext `http://` is open,
-an unresolvable name under a fail-closed DNS policy is open, and `onion://` —
-whose Connection step is `unverified`, not `none` — is closed and never green.
+`https://` page has one and is a closed lock. So plaintext `http://` is open —
+its Connection step is `none` — and `onion://`, whose Connection step is
+`unverified` rather than `none`, is closed and never green. A DNS policy that is
+configured to refuse new lookups is **not** by itself an open lock: it is a
+setting, the page in front of the user may have loaded from cache, and the step
+that describes it is `unverified` (§10.3). A lookup *observed* to fail is a
+`failed` step and does open the lock.
 
 A `failed` step **MUST NOT** aggregate to a closed lock. Where a presentation
 layer can paint `partial` in the same colour as `verified`, that is a bug in
@@ -1017,7 +1096,8 @@ registration time and by test rather than in review.
 
 An implementation conforms to this part if:
 
-1. an explicit scheme is never re-classified (§3.1);
+1. an explicit scheme is never re-classified by the classifier, and any
+   adaptation stage in front of it is named as such (§3.1);
 2. no failure produces a lookup in a second namespace (§3.2), every routed
    failure carries the namespace it stayed in (§5), and a named scheme keeps
    its namespace even when its URL will not parse (§5);
@@ -1037,11 +1117,13 @@ An implementation conforms to this part if:
    implementation adopts the experimental numeric-TLD form at all — its marker
    is applied before that conversion (§8.2);
 9. every namespace reports steps in the vocabulary of §10.1, no dispatched
-   scheme returns an empty step list, every registry row's `trust` claim is the
-   verdict the model actually produces for that scheme (§4.1), no `partial` row
-   reports the trustless state, and the lock follows the weakest link and opens
-   on the rule of §10.4 — with a plaintext connection aggregating to `open` in
-   the model itself.
+   scheme returns an empty step list, no step reports `verified` without a
+   recorded result for that request (§10.2, *Evidence*), no step describes a
+   configuration as an observation (§10.3), every registry row's `trust` claim
+   is the verdict the model actually produces for that scheme (§4.1), no
+   `partial` row reports the trustless state, and the lock follows the weakest
+   link and opens on the rule of §10.4 — with a plaintext connection
+   aggregating to `open` in the model itself.
 
 The normative test corpus is in [`tests/`](tests/): the classification order and
 its worked input table (`classification-order.test.js`), the registry and

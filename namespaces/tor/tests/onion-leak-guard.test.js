@@ -16,7 +16,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { decide } from '../src/subresource-guard.js'
+import { decide, installSubresourceGuard } from '../src/subresource-guard.js'
 import { classify, classifyHost, NAMESPACES } from '../../../src/router.js'
 import { rewriteToHns, isHnsHost } from '../../../src/hns-host.js'
 import createOnionHandler from '../src/onion-protocol.js'
@@ -108,6 +108,85 @@ test('a malformed address is refused locally whether protection is on or off', a
     }
   }
   assert.equal(fetched, 0, 'no circuit is spent on an address that cannot exist')
+})
+
+// --- one listener, three gates ---------------------------------------------
+// Electron allows exactly ONE webRequest.onBeforeRequest per session, so the
+// leak guard, the Wildroot API gate and the WebSocket policy all live in this
+// listener. What is pinned here is the DISPATCH — who sees which requests —
+// and the fail-closed rule. The WebSocket policy itself is Chapter 11's.
+
+/** A duck-typed Electron session that captures the single listener. */
+function fakeSession () {
+  const captured = {}
+  return {
+    captured,
+    webRequest: {
+      onBeforeRequest (filter, listener) {
+        captured.filter = filter
+        captured.listener = listener
+      }
+    },
+    ask (details) {
+      return new Promise((resolve) => captured.listener(details, resolve))
+    }
+  }
+}
+
+test('the one listener covers ws:// and wss:// as well as http(s) and wildroot://', () => {
+  const s = fakeSession()
+  installSubresourceGuard(s)
+  assert.deepEqual(s.captured.filter.urls,
+    ['http://*/*', 'https://*/*', 'wildroot://*/*', 'ws://*/*', 'wss://*/*'])
+})
+
+test('a WebSocket is answered by the WebSocket policy alone', async () => {
+  const s = fakeSession()
+  const seen = []
+  let blockerCalls = 0
+  installSubresourceGuard(s, {
+    next: () => { blockerCalls++; return {} },
+    websocketPolicy: (details) => { seen.push(details.url); return { cancel: true } }
+  })
+  assert.deepEqual(await s.ask({ url: 'wss://relay.example/', resourceType: 'webSocket' }), { cancel: true })
+  assert.deepEqual(await s.ask({ url: 'ws://relay.example/', resourceType: 'webSocket' }), { cancel: true })
+  assert.deepEqual(seen, ['wss://relay.example/', 'ws://relay.example/'])
+  assert.equal(blockerCalls, 0, 'a WebSocket never enters the ad blocker matcher')
+})
+
+test('a WebSocket policy that throws fails CLOSED', async () => {
+  // The asymmetry with the ad blocker below is the point: a blocker fault can
+  // only miss an advertisement, while a privacy policy that cannot decide has
+  // not decided that the request is safe.
+  const s = fakeSession()
+  installSubresourceGuard(s, {
+    websocketPolicy: () => { throw new Error('policy exploded') }
+  })
+  assert.deepEqual(await s.ask({ url: 'wss://relay.example/', resourceType: 'webSocket' }), { cancel: true })
+})
+
+test('with no WebSocket policy injected the request proceeds untouched', async () => {
+  const s = fakeSession()
+  installSubresourceGuard(s)
+  assert.deepEqual(await s.ask({ url: 'wss://relay.example/', resourceType: 'webSocket' }), {})
+})
+
+test('http(s) still reaches the leak guard first and the blocker second', async () => {
+  const s = fakeSession()
+  const blocked = []
+  installSubresourceGuard(s, { next: (d) => { blocked.push(d.url); return {} } })
+  // The guard speaks: an onion subresource is cancelled and the blocker never
+  // sees it, so no filter list can downgrade a security decision.
+  assert.deepEqual(await s.ask({ url: `http://${V3}/pixel.gif`, resourceType: 'image' }), { cancel: true })
+  assert.deepEqual(blocked, [])
+  assert.deepEqual(await s.ask({ url: 'https://example.com/a.png', resourceType: 'image' }), {})
+  assert.deepEqual(blocked, ['https://example.com/a.png'])
+})
+
+test('a blocker fault fails OPEN, and only there', async () => {
+  const s = fakeSession()
+  installSubresourceGuard(s, { next: () => { throw new Error('matcher exploded') } })
+  assert.deepEqual(await s.ask({ url: 'https://example.com/a.png', resourceType: 'image' }), {})
 })
 
 // --- the edge of the chain -------------------------------------------------

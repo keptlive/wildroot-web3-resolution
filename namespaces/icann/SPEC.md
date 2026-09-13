@@ -77,10 +77,12 @@ modes, and the interface makes claims about it. §5 specifies the mechanism and
 
 The honest summary of this whole chapter: **an ICANN resolution in this browser
 is ordinary DNS with the transport improved and the trust story stated.**
-Nothing about it is verified on the user's computer. §6.3 says so as a
-normative requirement on the interface, because the temptation to let an
-oblivious lookup read as a stronger guarantee than it is is exactly the
-temptation this project exists to resist.
+Nothing about it is verified on the user's computer, and **the browser cannot
+observe which resolver answered any particular navigation** — the engine
+resolves, and keeps its own cache. §6.2 and §6.3 say both as normative
+requirements on the interface, because the temptation to let an oblivious
+lookup, or a setting that asks for one, read as a stronger guarantee than it
+is is exactly the temptation this project exists to resist.
 
 ### 1.1 Scope
 
@@ -440,6 +442,45 @@ Normative requirements on such a bridge:
 - The certificate **MUST NOT** be minted for a bridge that is not going to
   run. §9.3.
 
+**Binding a reply to its question.** RFC 9230's encryption authenticates the
+*bytes* that passed between this process and the target: HPKE says that
+whoever holds the target's public key sealed this response in this query's
+context, and says nothing whatever about what the plaintext means as DNS. An
+empty body, a truncated message and a perfectly well-formed answer to a
+*different* question all decrypt equally well. So:
+
+> **An ODoH reply MUST be bound to the question it answers before it is
+> treated as an answer**, and a reply that is not so bound **MUST** be handled
+> as a failure rather than as evidence that the name was answered.
+
+The bridge parses the DNS envelope of the query on the way in and of the reply
+on the way back (`dnsEnvelope()`, `../../src/odoh-bridge.js:253-306`;
+`_handle()`, `:135-156`) and requires, of both unless a bullet says otherwise:
+
+- **exactly one question** (RFC 1035 §4.1.2), and a **fully framed** packet —
+  every record's name, type, class, TTL and RDLENGTH accounted for, ending
+  exactly at the end of the message, with **no trailing bytes**;
+- **a name that can be read at all**: RFC 1035 §4.1.4 compression pointers are
+  followed, but an offset already visited is a **loop** and is refused, and a
+  name over the **255-octet** limit is refused. A parser that can be made to
+  spin or to read past the buffer is a denial of service inside the component
+  the whole of §5 depends on;
+- of a query, **a standard query**: the QR bit clear and the opcode `QUERY`
+  (RFC 1035 §4.1.1; the test is `flags & 0xf800`), so a response, or an opcode
+  the bridge does not carry, is refused at the door rather than forwarded;
+- of a reply, **QR set**, **TC clear** and the reserved header bits clear (RFC
+  1035 §4.1.1) — a truncated answer is not an answer;
+- of a reply, **the query's id**, and the query's **question name, type and
+  class**. The name is compared as case-folded ASCII label **bytes**, because
+  DNS case-insensitivity is ASCII-only (RFC 4343): comparing decoded text
+  would let a decoding step make two distinct names equal.
+
+A query the bridge cannot parse this way is refused with 400 and never
+forwarded. A reply that fails the binding is SERVFAIL to the engine, exactly
+as a transport failure is, **and is recorded as a failed exchange for that
+name** so that an earlier success cannot stay current for a host whose most
+recent lookup did not succeed (§6.2).
+
 The ODoH exchange itself is the one specified in the spine's §9.2 and
 implemented in `../../src/odoh.js`: RFC 9230 message format, RFC 9180 HPKE
 (X25519-HKDF-SHA256 / HKDF-SHA256 / AES-128-GCM), RFC 5869 HKDF for the §6.3
@@ -478,9 +519,9 @@ Two of those need stating in prose.
 
 Consequences:
 
-- If the bridge **fails to start**, the pool remains and lookups are encrypted
-  but not oblivious. The implementation logs exactly that, and the interface
-  reports it (§6.2).
+- If the bridge **fails to start**, the pool remains: the engine is configured
+  for encrypted, not oblivious, DNS. The implementation logs exactly that, and
+  the interface names the configuration as configuration (§6.2 form 5).
 - If the bridge **starts and then a lookup fails** — every relay down, the
   target unreachable — the bridge answers SERVFAIL and the engine applies its
   mode. In `automatic` — the Fast-mode default — that means **unencrypted
@@ -493,16 +534,23 @@ Consequences:
   user asked us not to.
 
 > **`secure` with no server to point at fails closed.** The engine is
-> configured for secure mode with an **empty** server list, so nothing
-> resolves, rather than left on its default, which resolves in the clear.
+> configured for secure mode with an **empty** server list — asking it to
+> refuse new lookups — rather than left on its default, which resolves in the
+> clear.
 
 A setting that says "never plaintext" must not silently mean nothing. A
 profile that asks for `secure` with an empty `dns.servers`, or whose bridge
-failed to start with `dns.servers` unset, therefore breaks loudly — every
-ordinary web address fails, the implementation logs why, and the interface
-reports the refusal as a *failed* step rather than as system DNS (§6.2). An
+failed to start with `dns.servers` unset, is therefore configured exactly so —
+the implementation logs it, and the interface reports **the configuration**:
+secure DNS configured to refuse new lookups, rather than system DNS (§6.2). An
 implementation **MUST NOT** treat that configuration as a no-op. Private mode
 with no bridge is this case by construction (§5.7).
+
+What the engine then *does* is the engine's, and is not observed from here.
+`failClosed` is a fact about the arguments `app.configureHostResolver` was
+given, not a measurement of a lookup that was turned away: a page may still
+load from the engine's cache. §6.2 form 3 is written for what is known, and an
+implementation **MUST NOT** report a refusal it did not watch happen.
 
 Nothing is configured in two other cases, and neither is a contradiction:
 `mode: 'off'`, which asks for exactly that, and `automatic` with no resolver to
@@ -564,10 +612,11 @@ privateDns(dns)  →  { ...dns, mode: 'secure', servers: [] }
 - **No bridge: fail closed.** With the bridge not running — no relays
   configured, `odoh.enabled` or `odoh.icann` false, a start failure — the plan
   is `secure` with an **empty** list (`configure: true`, `failClosed: true`),
-  the engine is configured exactly so, nothing resolves, and the Domain name
-  step is form 3 of §6.2: *refused*, state `failed`, never *"system DNS"*.
-  Ordinary web addresses fail until the bridge is up or the mode is Fast; the
-  log says which.
+  and the engine is configured exactly so. The Domain name step is form 3 of
+  §6.2: *secure DNS configured to refuse new lookups*, state `unverified`,
+  never *"system DNS"* and never a refusal reported as observed. New lookups
+  have nowhere to go until the bridge is up or the mode is Fast; the log says
+  which.
 - **Fast is the configured plan, untouched.** `planDnsTransport({ privateMode:
   false })` is identical to the call without the argument, including
   `mode: 'off'` configuring nothing.
@@ -606,9 +655,9 @@ change a verdict: an ICANN page is TRUSTED in both modes (§6.3).
 
 `tests/dns-policy.test.js` pins the plan: *"privateDns: secure, and no pool,
 whatever the configured block said"*, *"Private with the bridge up: oblivious
-only, nothing plaintext, never a pool server"*, *"Private with NO bridge fails
-closed: configured secure with an empty list, and the panel says refused"*, and
-*"Fast is the configured plan, untouched"*.
+only, nothing plaintext, never a pool server"*, *"Private with NO bridge
+configures secure with an empty list, and the panel names the configuration"*,
+and *"Fast is the configured plan, untouched"*.
 
 ---
 
@@ -618,11 +667,11 @@ closed: configured secure with an empty list, and the panel says refused"*, and
 
 An ICANN page produces exactly two steps, in the four-state vocabulary of the
 spine's §4 (`icannNameStep()` and `schemeSteps()`,
-`../../src/trust-path.js:256-511`):
+`../../src/trust-path.js:261-503`):
 
 | Step | State | What it says |
 |---|---|---|
-| **Domain name** | `unverified`, or `failed` when the lookup was refused | how the address was looked up, and by whom |
+| **Domain name** | `unverified`, always | what the engine was configured to do, and what the oblivious bridge has a record of answering |
 | **Connection** | `unverified` for `https:`, `none` for `http:` | a certificate authority vouched, or nothing did |
 
 **No step on this path is ever `verified`, and an implementation MUST NOT make
@@ -630,66 +679,125 @@ one so.** Nothing here is checked on the user's computer: not the address, not
 the binding of the name to it, and not the certificate — a CA is believed, and
 so is every other CA the platform trusts.
 
+**No step on this path is ever `failed` either.** `failed` is a report of an
+event: something was attempted and did not succeed. Nothing on this path
+attempts anything we can watch — the engine resolves, out of its own cache
+when it has one — so there is no failure here to report. A configuration that
+refuses new lookups is a configuration, and §6.2 form 3 says so in those
+words.
+
 ### 6.2 What the Domain name step may say
 
-The step is computed from two inputs and nothing else: **the recorded plan**
-(§5.4) and whether the live bridge answered *this host*. It **MUST NOT** be
-computed from the static configuration, which the bridge may have replaced.
-Five mutually exclusive forms, in the order they are tested:
+Two facts are available to this step and no others: **the recorded plan**
+(§5.4) — what the engine was told — and **the bridge's own record** of the
+exact hosts it has answered, with the route that answered each. The step
+**MUST** be computed from those two and **MUST NOT** be computed from the
+static configuration, which the bridge may have replaced.
 
-1. **Oblivious** — *"Oblivious DoH — relay `<relay>` → target `<target>`"*, when
-   the bridge answered this name. The relay and the target **MUST** both be
-   named. It **MUST** still say the answer is the resolver's word.
-2. **Oblivious bridge configured, this name not answered by it** — the bridge
-   is the only resolver the engine was given and has no record of this host, so
-   the honest statement is that we cannot tell how it was resolved. The wording
-   depends on the mode, because the possibilities do:
-   - `automatic`: *"Resolver not determined — the oblivious bridge did not
-     answer this name"*, and the detail says the engine falls back to
-     unencrypted system DNS when the bridge fails, so **this lookup may have
-     gone out in the clear**;
-   - `secure`: *"Oblivious bridge only — this name was not answered by it"*,
-     and the detail says unencrypted DNS is refused, so the answer most likely
-     came from the engine's cache. It **MUST NOT** suggest plaintext, which
-     that mode does not permit. This is the Private-mode wording (§5.7).
-3. **Refused** — *"Secure DNS with no server — lookups refused"*, state
-   `failed`, when the plan failed closed (§5.4). Reporting this as system DNS
-   would describe the exact thing that did not happen. Private mode with no
-   bridge lands here (§5.7).
-4. **Plaintext** — *"System DNS, unencrypted"*, with the consequence in plain
-   words: your router, your ISP and anyone on the path saw the name. This is
-   also what is said when the caller has no plan to describe.
-5. **Encrypted, not oblivious** — *"Encrypted DNS to `<resolver>` (+n more) —
-   NOT oblivious"*. The phrase "NOT oblivious" is load-bearing and is pinned by
-   a test in the Wildroot tree that scans every scheme's steps: any step whose
-   text contains "oblivious" must also disclaim it unless it is form 1. The
-   detail text states the mode's fallback behaviour explicitly.
+A third fact is **not** available and its absence governs everything below:
 
-The governing rule:
+> **Which resolver answered a given navigation is not observable from here.**
+> The engine resolves ICANN names, keeps its own cache, and reports neither.
+> An implementation **MUST NOT** state, as a property of *this page*, which
+> transport carried its lookup — including that the lookup happened at all.
 
-> **Obliviousness is claimed for a name the bridge actually answered, never
-> because the feature is switched on.**
+So the step describes the *configuration* in the language of configuration, and
+the *bridge record* in the language of recorded activity, and never lets either
+become a claim about this navigation. Five mutually exclusive forms, in the
+order they are tested:
 
-`icannBridgeState()` (`src/dns-policy.js`) returns a claim only when the bridge
-is running **and** `servedRecently(host)` is true, and returns `null` rather
-than throwing for any object that misbehaves. In `automatic` mode the engine may
-resolve any given name by other means at any moment; an interface that reported
-the setting rather than the event would be making exactly the class of claim
-this project exists to stop making.
+1. **Recent oblivious activity** — *"Recent Oblivious DoH lookup — relay
+   `<relay>` → target `<target>`"*, when the bridge holds exact-host evidence
+   for this host (below). The relay and the target **MUST** both be named, and
+   **MUST** be the pair that answered rather than the first configured pair.
+   The detail **MUST** say that this is evidence of recent lookup activity and
+   **not proof that this page used that answer**, and **MUST** still say the
+   answer is the resolver's word. The step re-checks what it was handed — that
+   the evidence is of kind `recent-lookup`, that its host **is this host**, and
+   that both endpoints are named (`../../src/trust-path.js:462`) — and falls
+   through to form 2 if any of that fails. A panel does not take its caller's
+   word for what its caller's evidence is about.
+2. **Oblivious bridge configured, no evidence for this host** — the bridge is
+   the only resolver the engine was given and has no record of this host. What
+   answered instead — the engine's cache, or, in `automatic`, the fallback the
+   mode permits — is not visible, and the step says so: *"no recent successful
+   bridge lookup recorded for `<host>` … this panel cannot establish the
+   lookup path"*. The mode is named for what it *permits*, never for what it
+   did:
+   - `automatic`: *"Resolver not determined — no recent oblivious lookup
+     evidence"*, and the detail says automatic DNS permits system fallback
+     **and that this does not show that fallback occurred**;
+   - `secure`: *"Oblivious bridge configured — no recent lookup evidence"*, and
+     the detail says secure DNS is configured to refuse unencrypted fallback.
+     It **MUST NOT** suggest plaintext, which that configuration does not
+     permit. This is the Private-mode wording (§5.7).
+3. **Configured to refuse new lookups** — *"Secure DNS configured to refuse new
+   lookups"*, state `unverified`, when the plan failed closed (§5.4). It
+   **MUST** say that this is the configured policy and **not an observed
+   lookup failure**, and that cached answers may still exist. Reporting it as
+   system DNS would describe the opposite of what was asked for; reporting it
+   as a `failed` step would report an event nobody watched. Private mode with
+   no bridge lands here (§5.7).
+4. **Nothing configured** — *"DNS lookup path not observed"*, when the mode is
+   `off` or there is no resolver list. The engine keeps its own default; what
+   that default did for this page — the operating system's resolver, whatever
+   encryption it may have, or the cache — is not observed here, and the step
+   says that rather than asserting a plaintext lookup. This is also what is
+   said when the caller has no plan to describe.
+5. **A configured resolver list, not oblivious** — *"Secure DNS configured:
+   `<resolver>` (+n more) — NOT oblivious"*. The detail **MUST** say that this
+   names the **configured** list and not an endpoint observed serving this
+   page. The phrase "NOT oblivious" is load-bearing and is pinned by a test in
+   the Wildroot tree that scans every scheme's steps: any step whose text
+   contains "oblivious" must also disclaim it unless it is form 1. The detail
+   states what the mode permits on failure.
 
-`servedRecently` matches an exact name or a *sub*domain of a name the bridge
-answered, within a ten-minute window. The direction matters: matching the other
-way round would let one lookup for `victim-chosen.example.com` vouch for
-`example.com`, and even for `com`. We are not confident the ten minutes or the
-subdomain rule are right — `../../DEVIATIONS.md` §2 on that window.
+The governing rule, and the one sentence of this chapter most worth copying:
+
+> **Obliviousness is claimed for the exact name the bridge answered, with the
+> route that answered it, never because the feature is switched on and never
+> for a name nobody looked up.**
+
+`icannBridgeState()` (`src/dns-policy.js:133-139`) requires a host, returns the
+bridge's `recentEvidence(host)` and nothing else, and returns `null` rather
+than throwing for any object that misbehaves. `recentEvidence()`
+(`../../src/odoh-bridge.js:188-198`) returns `{host, queryType, relay, target,
+rcode, at, withinMs, evidence: 'recent-lookup'}` or `null`, under four rules an
+implementation **SHOULD** copy:
+
+- **Exact host only.** A lookup for `example.com` does not vouch for
+  `a.example.com`, and one for `a.example.com` does not vouch for
+  `example.com` or for `com`. Matching either way lets one lookup speak for
+  names nobody asked about — in the second direction, for a name an attacker
+  chooses.
+- **Only an answer or a denial counts.** `rcode` **MUST** be NOERROR (0) or
+  NXDOMAIN (3). A SERVFAIL exchange resolved nothing, so it is not evidence
+  that anything was resolved — and, because a failure is recorded too, it
+  *removes* an earlier success for that host rather than leaving it current.
+- **The route recorded is the route that answered.** The relay and target come
+  back from the exchange, not from the head of the configured lists. Form 1
+  is shown only when both are present.
+- **Order is by sequence, not by clock.** Entries are keyed by host and query
+  type and carry a monotonic sequence number, so a slow older query completing
+  late cannot overwrite a newer result.
+
+Within a ten-minute window. That window is a guess, and what the record means
+is narrower than what a reader may want it to mean:
+`../../DEVIATIONS.md` IC-18 and §2.5.
 
 ### 6.3 Aggregating to a lock
 
 An `https:` ICANN page is **TRUSTED**, never **TRUSTLESS**, in the scheme of
 the spine's §4.1. An implementation **MUST NOT** let an oblivious lookup
 upgrade the verdict: obliviousness is a privacy property and the lock is an
-integrity claim. A refused lookup (form 3) is a `failed` step, and the page
-aggregates to `failed`.
+integrity claim.
+
+Nor may a *configuration* lower it. Every form of §6.2 is `unverified`, so a
+fail-closed plan (form 3) aggregates to the same `partial` verdict as any
+other ICANN page. A page that loaded — from the engine's cache, or because the
+configuration is not what we think it is — must not be shown a broken lock on
+the strength of a setting. `summarize()` reaches a `failed` verdict only from a
+`failed` step, and this path produces none (§6.1).
 
 An `http:` ICANN page is **OPEN**, and that is a verdict of the aggregation
 itself, not of a renderer. `summarize()` tests for a `Connection` step in state
@@ -707,6 +815,36 @@ as "the scheme is http": an `hns://` name that resolves to an address with no
 TLSA pin and is loaded over plain HTTP reaches the same verdict by the same
 test, and a Tor onion service, whose page is plain HTTP *inside* an
 authenticated tunnel, deliberately reports `unverified` and does not.
+
+### 6.4 The route view answers a different question, and for an ICANN name it cannot
+
+Beside the lock there is a second view, over the same page: not *what was
+verified* but **who saw this request**. Its vocabulary is a route per hop —
+`local`, `oblivious`, `tor`, `direct`, `refused`, and `unknown`
+(`../../src/route-path.js:28`).
+
+For an ICANN name the name-lookup hop is **`unknown`, in every branch**
+(`icannNameHop()`, `../../src/route-path.js:234-248`), and an implementation
+**MUST NOT** report any other value for it. Both of the alternatives are
+measurements nobody made: `direct` asserts that a named party was shown this
+computer's address together with this name, and `oblivious` asserts that no
+single party saw both. §6.2's third fact — the engine resolves, and does not
+say how — makes each of those unavailable.
+
+Two consequences an implementation **MUST** carry through:
+
+- Even with exact-host evidence the hop stays `unknown` and is labelled as
+  **recent activity** — *"Recent ODoH activity — relay `<relay>` → target
+  `<target>`"*, with the detail saying in as many words that this records a
+  lookup and **not the DNS route or cache used by this page**. Form 1 of §6.2
+  is the strongest statement available, and it is a statement about the
+  bridge, not about this navigation.
+- The summary **MUST** lead with the gap. `summarizeRoute()`
+  (`../../src/route-path.js:255-274`) tests for an `unknown` hop **before** it
+  counts the `direct` ones and says *"Some route details were not recorded;
+  this view cannot establish every party that saw this page request."* A count
+  of the hops that are known, printed first, reads as a complete accounting of
+  a request that was not completely accounted for.
 
 ---
 
@@ -840,10 +978,12 @@ every ICANN lookup into the clear, and — because the bridge replaces the pool
 rather than joining it (§5.4) — needs only to reach the relays to do it.
 
 This is not hidden: `secure` mode exists, it refuses plaintext even when that
-means resolving nothing at all, it is documented in the settings page in the
-user's own words, and the interface reports the path each page actually took.
-But the default is fail-open and an implementation copying this design should
-copy that sentence too.
+means resolving nothing at all, and it is documented in the settings page in
+the user's own words. What the interface can add is narrower than it looks —
+the plan the engine was given, and the exact hosts the bridge has a record of
+answering, neither of which is the path this page's lookup took (§6.2). But
+the default is fail-open and an implementation copying this design should copy
+that sentence too.
 
 ### 9.3 The any-host trust anchor
 
@@ -864,9 +1004,11 @@ which would fail every lookup instead.
 
 ### 9.4 Privacy
 
-- **Without the bridge**, the configured resolver sees the user's address and
-  every name they visit, together. That is stated in the Domain name step in
-  those words.
+- **Without the bridge**, a resolver that answers directly sees the user's
+  address and the name together. The Domain name step says that about direct
+  DoH as a property of the transport, and names the configured list as
+  configuration — not as the endpoint observed serving this page (§6.2 form
+  5).
 - **With the bridge**, no single party sees both — subject to the same
   caveat the spine's §9.2 makes and this chapter inherits: **two ODoH relays
   exist worldwide and one is run by a target operator**, so RFC 9230's
@@ -878,11 +1020,14 @@ which would fail every lookup instead.
   user should get to make, which is why it is a configuration key. It is
   editable only in the configuration file (IC-15).
 - **The bootstrap lookups leak which privacy infrastructure is in use** (§5.6).
-- **In Private mode** (§5.7) the bridge is the only resolver the engine has and
-  every page fetch rides Tor, so the network sees a connection to the relay and
-  a connection to Tor and no name; the bridge's own connections to the relay
-  and the target ride the same proxied fetch. The exception is the bootstrap
-  name lookups, which are made by the runtime directly in both modes (IC-9).
+- **In Private mode** (§5.7) the bridge is the only resolver the engine is
+  given and every page fetch rides Tor, so on the engine's side of the
+  configuration the network has a connection to the relay and a connection to
+  Tor and no name; the bridge's own connections to the relay and the target
+  ride the same proxied fetch. What the engine does with a name it has already
+  cached is not part of that, and is not observed here (§6.2). The exception is
+  the bootstrap name lookups, which are made by the runtime directly in both
+  modes (IC-9).
 - **Without ECH** (spine D-3) the server name is in the ClientHello regardless,
   so an oblivious DNS lookup does not by itself hide which site was visited
   from an on-path observer.

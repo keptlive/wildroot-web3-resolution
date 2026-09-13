@@ -134,6 +134,15 @@ export class AnonymizeController extends EventEmitter {
     this.status = { mode: MODES.OFF, rules: null, note: NOTE_OFF, percent: 0, phase: '' }
     this._switchSeq = 0 // guards against a slow bootstrap landing after a later switch
     this._bootstrapListener = null // live-progress subscription on the TorNode
+    this._transitioning = false
+    if (this.tor && typeof this.tor.on === 'function') {
+      this.tor.on('route-unavailable', () => {
+        if (!this.isOn()) return
+        this._switchSeq++
+        this._unsubscribeBootstrap()
+        this._cannotRoute(NOTE_FAILED, NOTE_BLOCKED_FAILED).catch(err => console.error('IP protection: failed to apply blocked route:', err.message))
+      })
+    }
   }
 
   /** Stop relaying bootstrap ticks (switched away, or settled). */
@@ -146,6 +155,10 @@ export class AnonymizeController extends EventEmitter {
 
   async setMode (mode) {
     const seq = ++this._switchSeq
+    // Raw sockets must stop before the first await, including the interval
+    // where a Tor process is starting but the session proxy is not ready yet.
+    this._transitioning = mode === MODES.TOR
+    this.emit('policy-changing', { mode })
     // Any in-flight connecting cycle is superseded by this switch.
     this._unsubscribeBootstrap()
 
@@ -167,6 +180,7 @@ export class AnonymizeController extends EventEmitter {
       // With a bundled TorNode, ensure it is started and route through it.
       if (this.tor) {
         const state = await this.tor.start()
+        if (seq !== this._switchSeq) return this.status
         if (state === 'unavailable') {
           return this._cannotRoute(NOTE_UNAVAILABLE, NOTE_BLOCKED_UNAVAILABLE)
         }
@@ -175,7 +189,9 @@ export class AnonymizeController extends EventEmitter {
         // leak window while "connecting…" is showing.
         const torSocks = this.tor.socksUrl()
         await this._applyRules(torSocks)
+        if (seq !== this._switchSeq) return this.status
         this.mode = MODES.TOR
+        this._transitioning = false
         if (this.tor.isReady()) {
           this.status = { mode: MODES.TOR, rules: torSocks, note: NOTE_ON, percent: 100, phase: '' }
         } else {
@@ -192,6 +208,7 @@ export class AnonymizeController extends EventEmitter {
 
       // No bundled TorNode: fall back to an external tor the user runs.
       const torAvailable = await detectTor()
+      if (seq !== this._switchSeq) return this.status
       const torSocks = torAvailable ? `socks5://${EXTERNAL_HOST}:${EXTERNAL_PORT}` : null
       const resolved = resolveProxy(MODES.TOR, { torAvailable, torSocks })
       if (resolved.mode === MODES.OFF) {
@@ -199,7 +216,9 @@ export class AnonymizeController extends EventEmitter {
       }
       // Entering TOR routes before announcing.
       await this._applyRules(resolved.rules)
+      if (seq !== this._switchSeq) return this.status
       this.mode = resolved.mode
+      this._transitioning = false
       this.status = resolved
       this.emit('change', this.status)
       return this.status
@@ -262,6 +281,9 @@ export class AnonymizeController extends EventEmitter {
    * every gate that reads it keeps refusing.
    */
   async _cannotRoute (noteDirect, noteBlocked) {
+    this._transitioning = false
+    this.mode = this.failClosed ? MODES.BLOCKED : MODES.OFF
+    this.emit('policy-changing', { mode: this.mode })
     if (this.failClosed) {
       this.mode = MODES.BLOCKED
       await this._applyRules(BLACKHOLE_RULES)
@@ -303,6 +325,11 @@ export class AnonymizeController extends EventEmitter {
   /** Is protection in force — routed through Tor, or blocked because it cannot be? Gates read this. */
   isOn () { return this.mode !== MODES.OFF }
 
+  /** Raw sockets must wait while a requested Tor route is being installed.
+   * isOn() retains its session gate semantics: onion loads are admitted only
+   * after that session actually has a proxy, never during this interval. */
+  isSwitchingToTor () { return this._transitioning }
+
   /**
    * The Tor SOCKS URL, only while traffic is actually routed through it. The
    * raw-socket paths that dial through Tor themselves (the chain resolver's
@@ -310,7 +337,7 @@ export class AnonymizeController extends EventEmitter {
    * BLOCKED it is null, so each of them refuses rather than dialling the
    * blackhole and reporting a network fault.
    */
-  torSocks () { return this.mode === MODES.TOR ? (this.status && this.status.rules) || null : null }
+  torSocks () { return !this._transitioning && this.mode === MODES.TOR ? (this.status && this.status.rules) || null : null }
 }
 
 /**

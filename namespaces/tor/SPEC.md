@@ -175,7 +175,7 @@ before the ENS suffix check, before the reserved-name list, before the
 IP-literal check, and before the ICANN root list is consulted at all:
 
 ```js
-// ../../src/router.js:310-313
+// ../../src/classify-host.cjs:116-119
 // .onion FIRST and unconditionally: a v3 onion goes to Tor and MUST NEVER be
 // sent to DNS/ODoH (L1). Even a malformed .onion stays in the Tor namespace
 // (it fails as a Tor address, not as a DNS miss) — never leaked to a resolver.
@@ -183,13 +183,13 @@ if (isOnionHost(host)) return NAMESPACES.TOR
 ```
 
 `isOnionHost` is a suffix test and nothing more (`/\.onion$/i`,
-`../../src/router.js:216`). That is deliberate: R2 requires that the guard be
+`../../src/classify-host.cjs:58-60`). That is deliberate: R2 requires that the guard be
 *weaker* than a validity check, not stronger.
 
 `onion` is also a row in the one reserved-name list
 (`../../src/reserved-names.cjs:31`, RFC 6761/6762/7686/8375), which the
 classifier consults immediately **after** the `.onion` test
-(`../../src/router.js:322`). Both orderings are load-bearing: the reserved-name
+(`../../src/classify-host.cjs:128`). Both orderings are load-bearing: the reserved-name
 row would otherwise send an onion host to the web namespace as though it were
 `nas.local`, and its absence would make `.onion` a Handshake name for any code
 path that reaches the list without the suffix test.
@@ -201,9 +201,9 @@ of them. In this implementation there are four, and a miss at any one is a leak:
 
 | Entry point | Mechanism | Result for `<addr>.onion` |
 |---|---|---|
-| **Typed input** | `classify()` — `../../src/router.js:416` | `onion://<addr>.onion` |
+| **Typed input** | `classify()` — `../../src/router.js:364` | `onion://<addr>.onion` |
 | **Link click / main-frame navigation** on `http(s)://<addr>.onion/` | `rewriteToHns()` via `reservedNamespaceScheme()` — `../../src/hns-host.js:50`, `:85` | rewritten to `onion://…` before the load |
-| **Subresource** (`<img>`, `<script>`, `fetch`) on an onion host | `decide()` — `src/subresource-guard.js:35-53` | **cancelled**: zero network, zero DNS |
+| **Subresource** (`<img>`, `<script>`, `fetch`) on an onion host | `decide()` — `src/subresource-guard.js:35-54` | **cancelled**: zero network, zero DNS |
 | **Handshake classification** | `isReservedHost()` — `../../src/reserved-names.cjs:36`, re-exported at `../../src/hns-host.js:30` | never a Handshake name |
 
 `tests/onion-leak-guard.test.js` drives one address through all four.
@@ -215,6 +215,38 @@ pointed at an onion host leaks silently on every page view. In this
 implementation the network-layer guard runs before the ad blocker for the same
 reason — a filter list must never be able to downgrade a security decision
 (`src/subresource-guard.js:22-24`).
+
+**One listener, three gates.** Electron allows exactly one
+`webRequest.onBeforeRequest` per session, so everything that must decide before
+a request is issued lives in this single listener
+(`installSubresourceGuard`, `src/subresource-guard.js:74-110`) or it does not
+exist at all. It registers for five URL patterns and dispatches them to three
+separate authorities, which do not see each other's traffic:
+
+| Requests | Authority | Enters the ad blocker? |
+|---|---|---|
+| `ws://`, `wss://` | the injected `websocketPolicy(details)`, first, before anything else (`:82-86`). Chapter 11 §4 specifies it | no |
+| `wildroot://` | the Wildroot API gate, answered by the asking WebContents' id rather than by any header (`:87-95`) | no |
+| `http://`, `https://` | `decide()` — this chapter's leak guard — then the blocker as `next` (`:96-108`) | yes, and only what the guard passed |
+
+> **R18.** A privacy gate composed into a shared listener **MUST** fail closed
+> on its own fault. A `websocketPolicy` that throws yields `{cancel: true}`
+> (`src/subresource-guard.js:83-85`): a policy that cannot decide has not
+> decided that the request is safe.
+
+The asymmetry with the ad blocker is deliberate and is the rule stated twice: a
+blocker fault fails **open** (`:100-108`), because the guard has already had its
+say and an allow can only miss an advertisement, while a privacy-policy fault
+fails **closed**, because an allow there is a request that leaves the machine.
+What the WebSocket policy itself decides is Chapter 11's (`../apps/SPEC.md`
+§4), not this chapter's; what is specified here is that it is consulted first,
+that it is the only reader of `ws:`/`wss:` in the listener, and that its failure
+cancels.
+
+*(`tests/onion-leak-guard.test.js`, "the one listener covers ws:// and wss:// as
+well as http(s) and wildroot://", "a WebSocket is answered by the WebSocket
+policy alone", "a WebSocket policy that throws fails CLOSED", and "a blocker
+fault fails OPEN, and only there".)*
 
 ### 3.2 An explicit scheme still wins
 
@@ -259,7 +291,7 @@ last two are the only ones that can catch a corrupted address.
 
 ### 4.2 What this implementation checks
 
-All four (`isValidV3Onion`, `../../src/router.js:232-252`). The shape is one
+All four (`isValidV3Onion`, `../../src/router.js:240-262`). The shape is one
 regular expression; the label is then decoded five bits at a time into the 35
 bytes, the version byte is compared against `3`, and the first two bytes of
 `SHA3-256(".onion checksum" ‖ PUBKEY ‖ VERSION)` are compared against the
@@ -284,10 +316,10 @@ the length check, which is correct: they are removed from Tor and unreachable.
 
 Both halves are implemented. The classifier reports validity as a fact about a
 decision it has already taken on the suffix alone (`classify()` returns
-`validV3: isValidV3Onion(host)`, `../../src/router.js:416`), and the handler
+`validV3: isValidV3Onion(host)`, `../../src/router.js:364`), and the handler
 consumes it: an address whose version byte or checksum does not match is refused
 `400` with a page saying so, **before any circuit is asked for**
-(`src/onion-protocol.js:119-124`). Nothing was sent, the refusal carries
+(`src/onion-protocol.js:123-127`). Nothing was sent, the refusal carries
 `X-Resolution-Namespace: tor`, and no other namespace is tried.
 
 This is a **usability** property, not a security one — §9.2 explains why — and
@@ -313,7 +345,17 @@ mode among several, so the namespace needs to be visible in the URL itself.
 > protocol: nothing outside the browser speaks it, and the request that leaves
 > the machine is an ordinary `http://` request to the onion host (§6.4).
 
-Parsing (`parseOnionUrl`, `src/onion-protocol.js:54-79`) uses the WHATWG URL
+> **R16.** `onion://` means **HTTP inside Tor**, and nothing else. The scheme
+> has no way to express TLS: there is no `onion+tls`, no flag, and an
+> `onion://` URL's port is the HTTP port. An implementation **MUST NOT** encode
+> an `https:` target as `onion://` — doing so silently downgrades the transport
+> while the address bar goes on showing the same origin — and a transition that
+> would remove TLS **MUST** be refused rather than performed (§6.5, R17). The
+> consequence is stated rather than hidden: an onion service that serves only
+> HTTPS is unreachable in this browser
+> ([`../../DEVIATIONS.md`](../../DEVIATIONS.md) TO-8).
+
+Parsing (`parseOnionUrl`, `src/onion-protocol.js:54-74`) uses the WHATWG URL
 parser, which is the right tool because `onion:` is registered as a standard
 scheme. It returns three fields:
 
@@ -352,7 +394,7 @@ Per §3. By the time the handler is entered, the input is an `onion://` URL.
 
 ### 6.2 Step 1 — the address
 
-The handler re-checks the `.onion` suffix (`src/onion-protocol.js:111`) and then
+The handler re-checks the `.onion` suffix (`src/onion-protocol.js:115`) and then
 the full v3 encoding (`:119`, §4.3). A host that is not `.onion` is `400 "Not an
 onion address"`; a `.onion` host that is not a valid v3 address is `400 "Not a
 valid onion address"`, naming the checksum as the reason. Neither touches the
@@ -361,7 +403,7 @@ network.
 ### 6.3 Step 2 — the gate
 
 ```js
-// src/onion-protocol.js:38-44
+// src/onion-protocol.js:38-45
 export function decideOnionRoute ({ ipProtectionOn } = {}) {
   return ipProtectionOn ? { action: 'route' } : { action: 'interstitial' }
 }
@@ -392,7 +434,7 @@ never fires for it, which is why the "reload when the circuit comes up" rule in
 ### 6.4 Step 3 — the proxied request
 
 ```js
-// src/onion-protocol.js:136
+// src/onion-protocol.js:140
 let target = `http://${host}${port ? ':' + port : ''}${path}`
 ```
 
@@ -403,12 +445,17 @@ proxy — i.e. the Tor SOCKS5 endpoint, with **proxy-side name resolution**. The
 mechanism by which R1 is satisfied at the transport layer, and it is why the
 target URL may safely be a plain `http://` URL: there is no DNS step to leak.
 
+`http://` is also the *only* URL this step builds. The scheme is a carrier for
+HTTP inside Tor (R16); the handler never constructs an `https:` target and
+never turns one into an `onion://` URL, which is what the redirect refusal of
+§6.5 (R17) protects at the one place a service could otherwise ask for it.
+
 > **R6.** The proxy MUST perform the name resolution. A client that resolves the
 > host itself and connects to an address has defeated the whole design, whatever
 > proxy it then uses.
 
 Two request headers are **pinned**, not forwarded
-(`src/onion-protocol.js:209-219`): `User-Agent` is `hns.one-browser`, and
+(`src/onion-protocol.js:228-241`): `User-Agent` is `hns.one-browser`, and
 `Accept-Language` is `en-US,en;q=0.5` — the value Tor Browser sends, because
 matching the largest existing crowd is what a fingerprint-resistant value is
 for. Five headers are forwarded when the request carries them: `content-type`,
@@ -423,13 +470,14 @@ are not forwarded by this handler.
 
 The request is issued with `redirect: 'manual'`. A `3xx` carrying a `Location`
 is classified by `classifyOnionRedirect(location, base)`
-(`src/onion-protocol.js:86-98`), which resolves the header against the URL just
-fetched and returns exactly one of four kinds:
+(`src/onion-protocol.js:86-101`), which resolves the header against the URL just
+fetched and returns exactly one of five kinds:
 
 | Kind | When | What the handler does |
 |---|---|---|
-| `same-service` | same host **and** same port | follows it internally, up to `MAX_REDIRECTS = 5` hops; beyond that, `502 "Too many redirects"` |
-| `other-onion` | a different `.onion` host, or the same host on a different port | returns the upstream `3xx` with `Location: onion://<host>[:port]<path>` — a **real navigation**, so the address bar and the origin change as they should |
+| `same-service` | same host **and** same port, on `http:` | follows it internally, up to `MAX_REDIRECTS = 5` hops; beyond that, `502 "Too many redirects"` |
+| `other-onion` | a different `.onion` host on `http:`, or the same host on a different port | returns the upstream `3xx` with `Location: onion://<host>[:port]<path>` — a **real navigation**, so the address bar and the origin change as they should |
+| `unsupported-transport` | an `https:` target on **any** `.onion` host, the service's own included | **does not fetch it.** Answers `501` naming the HTTPS address and saying the redirect was not followed because doing so would remove TLS (`src/onion-protocol.js:161-168`) |
 | `off-tor` | any non-`.onion` target, and any target that is not `http:`/`https:` | **does not fetch it.** Returns a `200` page naming the destination and offering it as a link the user may take deliberately |
 | `invalid` | the `Location` will not parse | treated as off-Tor: not fetched, and the raw header is shown |
 
@@ -438,10 +486,41 @@ fetched and returns exactly one of four kinds:
 > service MUST be reached by a navigation the browser performs; a target
 > outside Tor MUST NOT be fetched at all.
 
-Refusing the third case *silently* would be worse than following it, which is
-why the answer is a page rather than an error: the user should learn that the
-service they asked for sent them somewhere else, and should be the one who
-decides to go.
+> **R17.** A redirect that would change the transport MUST NOT be performed.
+> Where an implementation's onion carrier is HTTP-only (R16), a `Location` on
+> `https:` — even to the same onion service, on the same port — MUST be refused
+> and MUST NOT be re-encoded as `onion://`.
+
+The order in which `classifyOnionRedirect` applies those tests is itself
+load-bearing: `https://example.com/` is **off-Tor**, not unsupported-transport,
+because the host test comes first (`:91`) — a clearnet target is refused for
+being clearnet, which is the more important thing to tell the user, and the
+transport question never arises.
+
+**Why HTTPS on the onion service is a refusal and not a rewrite.** The onion
+address authenticates the *service* structurally (§9.1), so a reader may ask
+what TLS would add and whether dropping it costs anything. It costs two things.
+The service asked for a **different security context** — its certificate, its
+HSTS state, its own view of what is a secure origin — and it is not this
+browser's place to decide that the Tor layer is a good enough substitute for
+the one the service chose. And the rewrite would be **lossy in a way nobody
+sees**: `https://<addr>.onion:443/x` normalises to a URL with no port, so
+`onion://<addr>.onion/x` is a request to port 80. A refusal that names the
+address is the honest answer; silently fetching a different port over a
+different transport is not.
+
+Refusing the `off-tor` case *silently* would be worse than following it, which
+is why the answer there is a page rather than an error: the user should learn
+that the service they asked for sent them somewhere else, and should be the one
+who decides to go. The `unsupported-transport` case is a `501` rather than a
+`200` page because it is not a destination the user can choose to take *here*
+at all: RFC 9110 §15.6.2 is the status for a request method or capability the
+server-side of this exchange does not support, and the capability that is
+missing is this browser's, which the page says in as many words.
+
+*(`tests/onion-protocol.test.js`, "classifyOnionRedirect sorts a Location into
+exactly one kind" and "a redirect to HTTPS on the same service is refused 501,
+not re-encoded as onion://".)*
 
 A followed hop after a `301`, `302` or `303` is re-issued as a `GET` with no
 body (RFC 9110 §15.4.4); a `307` or `308` keeps the method and body (§15.4.8,
@@ -461,7 +540,7 @@ chosen by the far end, so it is a variable rather than a literal, and Chromium
 `NOTREACHED`s on a code it does not define.
 
 Response headers are copied through a fixed allow-list
-(`src/onion-protocol.js:182-190`), in two groups:
+(`src/onion-protocol.js:200-214`), in two groups:
 
 - **what the page needs to render the bytes correctly** — `content-type`,
   `content-length`, `etag`, `cache-control`, `content-disposition`,
@@ -534,7 +613,7 @@ Both usable sources are on `127.0.0.1`. There is no third source, and adding one
 that was not would contradict §1.
 
 The generated `torrc` is client-only, loopback-only, and has **no `ControlPort`**
-(`src/tor.js:197-208`): readiness is read from tor's own `Bootstrapped 100%` log
+(`src/tor.js:199-208`): readiness is read from tor's own `Bootstrapped 100%` log
 line, so there is no local control socket to authenticate, to have a password
 or cookie stolen from, or to leak. It publishes no hidden service. The SOCKS
 port is chosen per session rather than fixed at 9050, so the bundled client
@@ -568,7 +647,7 @@ changes routing (`tests/tor-policy.test.js`).
 > announces the mode; turning it **off** closes the gate before it re-routes the
 > session.
 
-`isOn()` (`src/anonymize.js:268`) is the gate the onion handler reads. Every
+`isOn()` (`src/anonymize.js:326`) is the gate the onion handler reads. Every
 transition into `off` — the user's switch to Fast, an unknown mode, and,
 without `failClosed`, an unavailable Tor client or a bootstrap that never
 completes — sets `this.mode = MODES.OFF` *before* `await this._applyRules(null)`,
@@ -591,6 +670,33 @@ The asymmetry is the point, and it is the whole reason to state it as a rule: a
 window of a single microtask on the way out is enough to hand a `.onion` host to
 a system resolver, and it is invisible when it happens.
 
+**The interval between the two, and who has to know about it.** Turning
+protection on is not instantaneous: `setMode('tor')` starts or adopts a Tor
+client and applies the session proxy, and there are `await`s in between
+(`src/anonymize.js:156-233`). Two different questions are asked across that
+interval and they have two different answers.
+
+> **R19.** `isOn()` means *the session's requests are covered*, and it becomes
+> true only after the proxy has been applied — the onion gate (§6.3) MUST NOT be
+> opened before then. A **raw socket** opened outside the session is not covered
+> by the session proxy at all, so it MUST NOT dial directly from the moment the
+> user asks for Tor. These are separate questions and an implementation MUST
+> answer them separately.
+
+`isSwitchingToTor()` (`src/anonymize.js:331`) is the second question. It is set
+**before the first `await`** in `setMode()` (`:160`) and cleared when the proxy
+is installed (`:194`, `:221`) or the attempt fails (`:284`), and `torSocks()`
+returns `null` while it is true (`:340`). So each of the five raw-socket paths
+of §7.5 refuses in words during the interval rather than dialling directly,
+while `isOn()` keeps the meaning the onion gate depends on and stays false until
+the session really is proxied. A `policy-changing` event carries the requested
+mode to anything that needs to hear about the interval as it begins.
+
+Every `await` in `setMode()` is followed by a sequence check against
+`_switchSeq` (`:183`, `:192`, `:211`, `:219`), so a slow bootstrap cannot land
+after a later switch and route a session the user has since sent back to Fast.
+`tests/tor-policy.test.js` pins the interval and the stale-switch case.
+
 ### 7.4 When the circuit arrives, and when it fails
 
 When the circuit comes up, tabs that were stuck must load themselves — a user
@@ -608,6 +714,10 @@ so no onion request is admitted onto a direct session. Without `failClosed` the
 controller closes the gate, applies a direct connection, and says *"IP
 protection could not reach the Tor network — staying on a direct connection"*;
 the next onion navigation gets the interstitial rather than a direct attempt.
+
+A client that bootstrapped and then **died** is the same rule applied later:
+the route is revoked at the moment the process ends, and the controller enters
+BLOCKED from there exactly as it would from a failed bootstrap (§7.7).
 
 > **R13.** An implementation MUST NOT respond to a Tor failure by attempting the
 > onion address over any non-Tor path.
@@ -643,7 +753,9 @@ SOCKS5 to **the port this controller chose** (`torSocks()`, the
 
 **What they read, and what BLOCKED does to them.** Each path asks the
 controller for the port through `torSocks()`, which returns the SOCKS URL only
-while the mode is `tor`. While BLOCKED (§7.6) it returns `null`, and each path
+while the mode is `tor` **and** no switch into Tor is still installing the proxy
+(§7.3). While BLOCKED (§7.6), while switching, and once a route has been revoked
+(§7.7) it returns `null`, and each path
 refuses **in words** — the Handshake handler with `privateRefusal('site')`, the
 Nostr handler with `privateRefusal('relay')` (`../../src/delivery-mode.js`),
 the tunnel and Gemini with their own refusals — rather than dialling the
@@ -679,8 +791,9 @@ simplicity is in [`../../DEVIATIONS.md`](../../DEVIATIONS.md) TO-6.
 ### 7.6 Fail closed: the BLOCKED state
 
 The controller has three states, `MODES`: `off`, `tor` and `blocked`. The third
-exists for one promise — Private mode's *"if a private lookup fails, the page
-fails rather than falling back"* — applied to the proxy itself.
+exists for one promise — Private mode's *"a fresh lookup fails rather than
+falling back"* (`../../src/delivery-mode.js`, `DISCLOSURE.private`) — applied to
+the proxy itself.
 
 > **R15.** When protection is in force and a device-local Tor cannot be had, an
 > implementation MUST NOT route the session directly. It MUST route it somewhere
@@ -727,6 +840,68 @@ one — or the gate's logic: the gate is a mode check and not a readiness check
 (§7.2), so it says *route*, the request dies at the blackhole, and the answer is
 the handler's failure page of §6.7, which echoes the proxy error (TO-7).
 
+### 7.7 A route that stops existing is revoked
+
+A Tor client can die under the browser. Until something says so, `socksUrl()`
+goes on naming a port nothing is listening on, and the five raw-socket paths of
+§7.5 go on dialling it — each one a connection that was supposed to be a Tor
+circuit and is now a connection refused, in a mode whose whole promise is that
+a failure does not become a fallback.
+
+> **R20.** Availability is not a slow-changing fact. When the route a client
+> offered stops existing, the implementation **MUST** revoke it synchronously
+> with the event that ended it — not on the next probe, not on the next
+> request. A route that has been revoked **MUST NOT** be reported as available
+> by anything a caller reads.
+
+`_routeUnavailable(reason)` (`src/tor.js:320-328`) is the one revocation path.
+It clears `_ready` and `_available`, flushes every `whenReady()` waiter with
+`false` so nothing is left hanging, and emits **`route-unavailable`** — but only
+where a route had actually been offered, because startup is still free to try
+its external fallback (§7.1) and a client that never offered anything has
+nothing to take back. It is called from five places: the child's `error` and
+`exit` handlers (`src/tor.js:227-238`), the bootstrap deadline (`:265-267`),
+`stopChild()` (`:377`) and `stop()` (`:384`).
+
+Two details make it sound rather than merely present:
+
+- **The handlers are bound to their own child.** Each is registered against the
+  specific process object and returns early if `this.child` is no longer it
+  (`:226`, `:229`, `:235`), so a superseded process dying after a recovery
+  respawn cannot revoke the route the *new* one is providing. The same guard
+  covers the `Bootstrapped 100%` line, which is ignored for a superseded or
+  stopped child and otherwise sets `_available` alongside `_ready` (`:243-248`)
+  — readiness never outruns availability.
+- **Revocation reaches the supervisor, rather than switching it off.** The
+  30-second probe runs whether or not a route is currently offered: an
+  unavailable node counts as having already reached the three-failure threshold,
+  so the next tick respawns it (`:339-345`). An implementation whose supervisor
+  skips its work while the client is unavailable has built a state the client
+  cannot leave — revocation would make the failure permanent instead of
+  recoverable.
+
+**What the controller does with it.** `AnonymizeController` subscribes at
+construction (`src/anonymize.js:138-145`). While protection is on, a
+`route-unavailable` supersedes any in-flight switch, stops the bootstrap
+relay, and re-runs `_cannotRoute()` — so with `failClosed` the sessions go to
+the blackhole and the state becomes BLOCKED (§7.6), exactly as a bootstrap that
+never completes does, with `isOn()` still true and `torSocks()` returning
+`null`.
+While protection is off it does nothing: a node the user is not routing through
+cannot change the session.
+
+*(`tests/tor-circuit.test.js`, "a tor that exits revokes the route it had
+offered, once" and "a tor that never offered a route emits nothing when it
+stops"; `tests/tor-policy.test.js`, "route-unavailable revokes the route
+immediately: failClosed blackholes it".)*
+
+What this does **not** establish is that every way a Tor client can stop being
+useful produces one of those five events. A tor that is alive, bootstrapped and
+answering its SOCKS port while its circuits are failing looks available here,
+and is caught — if at all — by the supervisor's probe and by the request
+failing. Revocation closes the window between a process ending and anybody
+noticing; it is not a health check.
+
 ---
 
 ## 8. Trust state
@@ -744,7 +919,7 @@ Mapping onto the trust states of [`../../SPEC.md`](../../SPEC.md):
 > be decided by the scheme, and MUST NOT be influenced by anything the service
 > sends.
 
-The step an interface is given (`../../src/trust-path.js:397-406`) says, in the
+The step an interface is given (`../../src/trust-path.js:412-421`) says, in the
 words the user is owed:
 
 > **Connection — unverified — Tor onion service (HTTP inside Tor).** Reached
@@ -839,11 +1014,21 @@ and is the single most important behaviour in this chapter.
 - **A bootstrap that fails**: ends BLOCKED (§7.6) — nothing loads, and the note
   says why — never in a direct onion attempt (R13). Without `failClosed`, it
   ends direct + off + honest.
+- **A Tor client that dies mid-session**: the route is revoked as the process
+  ends (§7.7), so no raw-socket path keeps a SOCKS URL that no longer answers,
+  and the state goes to BLOCKED rather than staying nominally on.
+- **The interval while protection is being turned on**: raw sockets are
+  withheld from the moment the user asks (§7.3, R19); the onion gate opens only
+  once the session proxy is applied.
 - **An explicit non-onion scheme on an onion host** typed by the user: not
   protected for a top-level load (§3.2, TO-2).
 - **A redirect off Tor**: the destination is named to the user and is never
   fetched (§6.5), so a tracking URL an onion service redirects to is not
   requested at all.
+- **A redirect to HTTPS on the onion service itself**: refused `501`, not
+  followed and not re-encoded as `onion://` (§6.5, R17). Nothing is sent to the
+  HTTPS address, and the page says why. The cost is a real one: such a service
+  is unreachable here (TO-8).
 - **The 502 page** echoes the underlying transport error, which can name the
   proxy. It is a local page; nothing is sent.
 
@@ -857,10 +1042,14 @@ is the same bargain every origin gets and is stated here so it is not a
 surprise. Service workers are disabled.
 
 The redirect rules of §6.5 exist to keep that origin honest. Content served
-under `onion://<host>` is content `<host>` itself served: a redirect to another
-onion service becomes a navigation, so the origin changes with the content, and
-a redirect off Tor is not fetched at all. Nothing another origin wrote is
-handed to the page inside this one's storage.
+under `onion://<host>` is content `<host>` itself served **over the transport
+this origin stands for**: a redirect to another onion service becomes a
+navigation, so the origin changes with the content; a redirect off Tor is not
+fetched at all; and a redirect to HTTPS is refused rather than folded back into
+this origin (R17), because bytes the service chose to serve under TLS are not
+bytes this origin may claim. Nothing another origin wrote, and nothing served
+under a security context this origin cannot express, is handed to the page
+inside this one's storage.
 
 ### 9.5 The rule that carries the most weight
 

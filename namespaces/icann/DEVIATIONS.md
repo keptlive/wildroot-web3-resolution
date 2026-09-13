@@ -138,7 +138,9 @@ validating resolver of our own for ICANN names would be a second DNS stack for
 a namespace we deliberately do not own.
 
 **Consequence.** An ICANN address is the resolver's word. The Domain name step
-says exactly that, and never reads `verified`.
+never reads `verified`, and where it can name a resolver at all — the oblivious
+form of SPEC §6.2 — it says in those words that the answer is still that
+resolver's word.
 
 **Status: DELIBERATE.** It is a real gap and it is the ordinary web's gap; we do
 not think a browser should quietly close it in a way no other browser does.
@@ -181,9 +183,12 @@ who can answer for them.
 **What.** In Fast mode — the configured plan — the default `dns.mode` is
 `automatic`: encrypted DNS to the configured resolvers, falling back to
 unencrypted system DNS when none answer. The plan reports this as
-`plaintextFallback: true` and the interface says it in words. In Private mode
+`plaintextFallback: true`, and the interface says what that configuration
+*permits* — "Automatic DNS permits system fallback; this does not show that
+fallback occurred" (`../../src/trust-path.js:480`) — because whether any given
+lookup took the fallback is not observable from here (IC-17). In Private mode
 the block is replaced by `privateDns()` before it is read (SPEC §5.7), so the
-fallback does not exist there: `secure`, the bridge alone, or nothing.
+fallback is not configured there: `secure`, the bridge alone, or nothing.
 
 **The standard says.** RFC 8484 defines the DoH transport but not a fallback
 policy; RFC 8310 §8.2, on the analogous DoT case, distinguishes an opportunistic
@@ -223,23 +228,26 @@ configuration would expect — `dns.servers` names four resolvers and, with the
 default `odoh.icann`, none of them is used.
 
 **Why.** A mixed list is simpler to get wrong than to get right: the engine
-would fall from an oblivious template to a plain one silently, and the
-interface's per-name claim (SPEC §6.2) would become the only thing that could
-tell the two apart.
+would fall from an oblivious template to a plain one silently, and nothing
+here would see it happen. The interface's per-name claim (SPEC §6.2) is
+narrower than that job needs — it reports the hosts the bridge answered, which
+is evidence that the oblivious path was used *for a lookup of that host*, not
+evidence about which template served any particular navigation (IC-17).
 
 **Consequence.** Turning obliviousness on changes the floor beneath a failed
-lookup from *encrypted* to *plaintext* in Fast mode's `automatic`, and to a
-total ICANN outage in `secure` mode — configured, or forced by Private. The
-second is the honest trade; the first is a downgrade the user did not ask for
-by asking for more privacy.
+lookup from the configured *encrypted* pool to *plaintext* in Fast mode's
+`automatic`, and to no floor at all in `secure` mode — configured, or forced by
+Private. The second is the honest trade; the first is a downgrade the user did
+not ask for by asking for more privacy.
 
 **Status: OPEN.** We think leading the pool with the bridge is strictly better
 on privacy and would take it — but only with a measurement first. What is
 missing is not the code (`servers = [bridge.template, ...servers]`) but the
 evidence: we have not measured what the engine does with a mixed template list,
 how it chooses between entries, or how long it remembers a failing one. Until
-that is measured, prepending would make the per-name claim carry weight we have
-not tested it for. IC-D1.
+that is measured, prepending would put a silent downgrade where nothing can
+see it, since the panel cannot say which template answered (IC-17). IC-D1, and
+the measurement it needs is IC-D5.
 
 ---
 
@@ -464,9 +472,12 @@ that can be wrong.
 
 The Fast / Private switch (SPEC §5.7) is in the settings page and the Privacy
 menu, and it does not expose these two keys either. With `odoh.icann: false`
-Private mode resolves **no** ICANN name at all — the plan fails closed with no
-bridge — and nothing on the switch says so; only the Domain name step does,
-after the fact.
+Private mode leaves the engine with no resolver for ICANN names at all — the
+plan fails closed with no bridge — and nothing on the switch says so. The
+Domain name step names that configuration after the fact ("Secure DNS
+configured to refuse new lookups"), which is the wrong moment and, being a
+statement about the configuration rather than about the page, the wrong
+sentence to learn it from.
 
 **Status: OPEN.** Add a checkbox for `odoh.icann` in the same DNS privacy
 block, with the cost stated in the hint text — including that Private mode
@@ -508,6 +519,134 @@ once and visibly; or keep the default and record on each resolution which
 transport the lookup used, so the trust step can say "in the clear" when it
 was. Either is better than a default whose safety depends on a caller reading
 a comment.
+
+---
+
+### IC-17. The browser cannot observe which resolver answered a navigation, so the panel describes configuration
+*RFC 8310 §8.2, `app.configureHostResolver` · `../../src/trust-path.js:459-503`, `../../src/route-path.js:234-248`*
+
+**What.** For an ICANN name the engine resolves, from its own cache when it
+has an entry, and reports neither the transport it used nor whether it made a
+query at all. `app.configureHostResolver` is a one-way call: a mode and a list
+of templates go in, and nothing comes back — no event, no readback, no
+per-navigation record. So every branch of the Domain name step but one
+(`icannNameStep()`) describes the **plan the engine was given** and says the
+lookup path was not observed, and the route view's ICANN name hop is
+`unknown` in every branch (`icannNameHop()`; SPEC §6.4).
+
+**The standard says.** RFC 8310 §8.2, on the analogous DoT case, distinguishes
+an opportunistic profile from a strict one and is explicit that the
+opportunistic profile gives no protection against an active attacker: a client
+that wants the guarantee **MUST** choose the strict profile. That is a choice
+made by *policy*, in advance — which is exactly what `dns.mode` is. Neither
+that document, nor RFC 8484, nor RFC 9230 defines any way for a client to
+establish **after** the fact which profile carried a particular name; each
+assumes the client is the one making the query and therefore already knows.
+Here it is not: the engine makes the query, and does not say.
+
+**Why.** We configure the engine's resolver; we do not implement it (SPEC
+§1.1). Reimplementing ICANN resolution to gain observability would mean a
+second DNS stack for a namespace we deliberately do not own, and would
+duplicate the engine's cache with our own.
+
+**Consequence.** The interface's ceiling is lower than a reader expects. It
+can say what was asked for and what the bridge has a record of answering; it
+cannot say "this page's address came from there". Every sentence in the panel
+and the route view is written to that ceiling, which is why a fail-closed plan
+is `unverified` rather than `failed` (SPEC §6.1) and why the route summary
+leads with what was not recorded (SPEC §6.4). A user reading "Secure DNS
+configured" learns a true thing about the browser and nothing about this page.
+
+**Status: OPEN**, and the open part is evidence rather than design. We
+recommend capturing the engine's own DNS record in the shipping build — a
+`netLog` capture over a scripted navigation, per mode and per failure kind —
+and, where that shows a fact the panel could carry per navigation, threading
+it through as the resolution events are threaded through on the Handshake
+path. Until then the wording stays at the ceiling above. IC-D5, and §2.4 is
+the same measurement seen from the failure side.
+
+---
+
+### IC-18. `recentEvidence` is activity, not provenance, and its window is a guess
+*RFC 1035 §3.2.1, RFC 8499 · `../../src/odoh-bridge.js:176-200`, `src/dns-policy.js:131-139`*
+
+**What.** The bridge keeps a bounded, in-memory map of the exact hostnames it
+has answered: host and query type as the key, and `{host, queryType, relay,
+target, rcode, at}` as the value, capped at 512 entries and ordered by a
+monotonic sequence number so a slow older query cannot overwrite a newer
+result. `recentEvidence(host)` returns the newest entry for that **exact**
+host if it is under ten minutes old and its rcode is NOERROR or NXDOMAIN, and
+that — labelled `evidence: 'recent-lookup'` — is the only positive claim the
+Domain name step can make (SPEC §6.2 form 1).
+
+**The standard says.** RFC 1035 §3.2.1 defines a record's TTL as "the time
+interval that the resource record may be cached before the source of the
+information should again be consulted", and RFC 8499 defines a cached answer
+as one served without a new query. The lifetime of an answer is therefore the
+answer's own, published per record; a fixed ten-minute window is unrelated to
+it in both directions.
+
+**Why.** It is the strongest true statement available. The engine will not say
+what answered a navigation (IC-17), so the bridge's own log of what *it*
+answered is the only per-name fact in the system. Ten minutes was chosen to
+outlive a page load and little else.
+
+**Consequence.** Three gaps, all of which the wording has to carry and does:
+
+1. **A lookup is not this navigation.** The bridge may have answered
+   `example.com` for a subresource, a prefetch, or a page loaded minutes ago,
+   while this navigation used a cached address. The step says "evidence of
+   recent lookup activity, not proof that this page used that answer"
+   (`../../src/trust-path.js:465-469`).
+2. **Ten minutes is neither a TTL nor a session.** A one-minute record can be
+   re-resolved by some other path inside the window, and a day-long record can
+   fall out of it while still being the address in use.
+3. **The record is writable by anything that can reach the bridge**, which is
+   why the endpoint path is a per-launch secret and `Origin`/`Sec-Fetch-Site`
+   are refused (SPEC §5.3): a page that could make the bridge resolve a name
+   of its choosing would be writing the interface's evidence.
+
+What it is *not* is a claim about a parent or a child name: one lookup for
+`example.com` says nothing about `a.example.com`, in either direction.
+
+**Status: DELIBERATE** as to the shape — the exact-host rule, the rcode rule
+and the sequence ordering we would all choose again — and **OPEN** as to the
+window, which is a guess we would rather replace with the answer's own TTL.
+§2.5.
+
+---
+
+### IC-19. The route view's ICANN name hop has no route
+*Our own design · `../../src/route-path.js:28`, `:234-248`, `:255-274`*
+
+**What.** The route view answers "who saw this request", hop by hop, with one
+of `local`, `oblivious`, `tor`, `direct`, `refused` — and, for this hop only,
+`unknown`. The ICANN name-lookup hop is `unknown` in **every** branch,
+including the branch where the bridge holds exact-host evidence, and
+`summarizeRoute()` leads with "Some route details were not recorded; this view
+cannot establish every party that saw this page request."
+
+**The standard says.** Nothing; this is a deviation from our own stated design,
+which is that this view names, for each hop, who was shown this computer's
+address and what they were shown.
+
+**Why.** `direct` and `oblivious` are both measurements. `direct` asserts that
+a named party saw this address together with this name; `oblivious` asserts
+that no single party saw both. Neither is available for a lookup performed by
+the engine (IC-17), and a route view that guessed would be making the precise
+claim this browser exists to stop making — in the one view a user opens
+*because* they want to know who saw them.
+
+**Consequence.** The ICANN row is the only row in the view that never resolves
+to a route, and an `https://example.com` page therefore always carries the
+"not recorded" summary, however much is known about its other hops. That is
+honest and it is also an admission, on the majority of pages, that the most
+common navigation in the browser is the one this view can say least about.
+
+**Status: OPEN**, blocked on the same evidence as IC-17. If a `netLog` capture
+establishes a per-navigation fact — that a query left through the bridge's
+template for this host, say — this hop can carry `oblivious` for that case and
+keep `unknown` for the rest. IC-D5.
 
 ---
 
@@ -556,22 +695,25 @@ The bridge's failure policy was chosen on the assumption that it does. If it
 does not, a relay outage in Fast mode's `automatic` is a hard failure rather
 than a silent downgrade — which would be *better* for privacy and worse for
 availability, and either way we should know which one we shipped. In Private
-mode the question does not arise: `secure` refuses every fallback, so a SERVFAIL
-from the bridge is a failed lookup whichever way the engine reads it. The same
-measurement answers what threshold IC-1's staleness check should use only by
-analogy; that one is a separate guess.
+mode we expect the question not to arise, because `secure` is documented to
+refuse every fallback and a SERVFAIL from the bridge should then be a failed
+lookup whichever way the engine reads it — but that is the same unmeasured
+documentation, and the engine's cache sits in front of all of it (IC-17). The
+same measurement answers what threshold IC-1's staleness check should use only
+by analogy; that one is a separate guess. IC-D5 is the measurement.
 
-### 2.5. The ten-minute window and the subdomain rule
+### 2.5. The ten-minute window
 
-`servedRecently()` vouches for a name the bridge answered within ten minutes,
-and for any subdomain of such a name. Both are guesses. Ten minutes can outlive
-the answer's own TTL, so a page can be reported as obliviously resolved when
-this navigation's address came from somewhere else. The subdomain rule is the
-right *direction* — the reverse would let one attacker-chosen lookup vouch for
-its parent, and even for `com` — but "we resolved `example.com`, therefore
-`a.b.example.com` was oblivious too" is not strictly true either. The
-alternative, threading the actual resolution event through to the interface, is
-not available to us: the engine does the resolving.
+`recentEvidence()` reports a lookup the bridge answered within ten minutes, for
+that exact host. Ten minutes is a guess, and it is a guess about the wrong
+quantity: what governs how long an answer stays in use is the record's own TTL
+(IC-18), which the bridge does not read — it forwards bytes it does not
+interpret beyond the envelope. So the window can outlive the answer, and it can
+also expire while the answer is still the one in use. Reading the TTL out of
+the reply would make the window the answer's own, at the cost of parsing RDATA
+the bridge has no other reason to touch, and would still be a statement about
+the bridge's answer rather than about this page's address. We do not know
+whether that trade is worth making.
 
 ### 2.6. Whether the snapshot cadence is adequate
 
@@ -609,9 +751,9 @@ configuration file most people will never open. There is a coherent opposite
 position: the operating system owns DNS, a browser that overrides it fragments
 the user's threat model across applications, and a corporate or household
 resolver that exists for a reason is silently bypassed. We think the plaintext
-default is bad enough to justify overriding it, and we say which resolver
-answered. We would not call the question settled — and IC-11's missing DDR is
-the standard's own answer to it, which we have not taken.
+default is bad enough to justify overriding it, and we say which resolver the
+engine was pointed at. We would not call the question settled — and IC-11's
+missing DDR is the standard's own answer to it, which we have not taken.
 
 ### 2.10. Whether the engine really cannot issue a numeric-TLD http request
 
@@ -622,6 +764,20 @@ our own tests. We have not instrumented the engine's navigation path to confirm
 that no code path anywhere constructs such a request by another route — through
 a redirect target, say, or a subresource URL assembled relative to a base. If
 one does, IC-14 becomes a real gap rather than an unreachable one.
+
+### 2.11. Whether recent bridge activity is worth reporting at all
+
+IC-18's record is the only positive per-name fact in the system, and it is one
+step removed from the question the user is asking. There is a coherent position
+that a panel should say nothing rather than say something true about a
+neighbouring event: "the bridge recently answered a lookup for this host" will
+be read as "this page was resolved obliviously" by most people who see it, no
+matter how the sentence is worded, and a caveat everybody skips is not a
+caveat. The position we shipped is the opposite one — suppressing the single
+real observation leaves the user with nothing but settings, which are further
+from the truth still — but it is a judgement about how a sentence is read, and
+we would rather it were challenged by somebody who tests interfaces on people
+than settled by us.
 
 ---
 
@@ -672,6 +828,24 @@ into the browser tree, with its imports pointed at `src/ui/icann-tlds.cjs` and
 staleness assertion at the same time — `Version` is a `YYYYMMDDNN` integer, so
 "this snapshot is more than N days old" is a one-line offline check, and §2.6
 is the open question of what N should be.
+
+### IC-D5. Capture what the engine actually does with a name
+
+Four claims in this chapter stop at "configured" because nothing measures the
+engine: which resolver answered a navigation (IC-17), whether the route hop can
+ever be better than `unknown` (IC-19), what `automatic` does on a SERVFAIL as
+against a transport failure (§2.4), and how a mixed template list is used
+(IC-D1). They are one measurement.
+
+**Recommendation.** In the shipping browser build, drive a scripted navigation
+per mode (`off`, `automatic`, `secure`, Private) and per failure kind (relay
+down, target down, bridge-returned SERVFAIL, cold cache, warm cache) with the
+engine's own network log capturing, and record for each: whether a query was
+made at all, which template carried it, and what happened after a failure.
+Publish the table here. Then decide, with evidence: whether any per-navigation
+fact can be carried into the Domain name step and the route hop, whether the
+bridge should lead the pool rather than replace it, and which of §2.4's two
+behaviours we shipped.
 
 ---
 

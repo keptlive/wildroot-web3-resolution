@@ -66,8 +66,8 @@ export function policyFor (mode) {
  */
 export const DISCLOSURE = Object.freeze({
   heading: 'Mode',
-  fast: 'Fast — everything loads the quickest way it can. Sites, name servers and relays see this device\'s address. Encrypted DNS is used when it works, and falls back to your network\'s DNS when it does not.',
-  private: 'Private — every connection goes through the Tor client on this device, and nothing is looked up in the clear: if a private lookup fails, the page fails rather than falling back. Pages load more slowly; some sites block Tor; peer-to-peer content (hyper, SSB, BitTorrent) is refused, with the reason shown. Handshake names keep their chain proof either way.',
+  fast: 'Fast — everything loads the quickest way it can. Sites, name servers and relays see this device\'s address. With the default DNS setting, encrypted DNS is used when it works, and falls back to your network\'s DNS when it does not. Your DNS setting can require encryption or use the network resolver directly.',
+  private: 'Private — Internet page connections use the Tor client on this device. Registered Local Apps connect on this device. Private DNS is configured without a plaintext fallback: a fresh lookup fails rather than falling back, while a cached answer may still work. Pages load more slowly; some sites block Tor; peer-to-peer content (hyper, SSB, BitTorrent) is refused, with the reason shown. Handshake names keep their chain proof either way.',
   neither: 'Neither mode changes what the lock says. The lock reports what was verified on this computer and what was taken on someone\'s word; the mode only decides the route.'
 })
 
@@ -113,9 +113,11 @@ export class DeliveryMode extends EventEmitter {
     const next = normalizeDeliveryMode(mode)
     if (next === 'private') {
       this.mode = next
+      this.emit('policy-changing', { mode: next, policy: this.policy })
       if (this.persist) await this.persist(next)
       return this.apply()
     }
+    this.emit('policy-changing', { mode: next, policy: policyFor(next) })
     if (this.anonymizer && typeof this.anonymizer.setMode === 'function') {
       await this.anonymizer.setMode('off')
     }
@@ -179,7 +181,7 @@ export function privateRefusal (kind, { host = '', reason = '', label = '' } = {
         detail: `${host ? 'This name serves' : label ? `${label} serves` : 'It serves'} its content over a ` +
           'peer-to-peer network, whose peers learn the address of whoever asks; that path cannot be ' +
           `routed through the private connection, so nothing was asked${why}. ` +
-          (host ? 'A name that also publishes a stated origin for its content loads from that origin in Private mode. ' : '') +
+          (host ? 'A stated origin does not enable this protocol in Private mode. ' : '') +
           SWITCH_HINT
       }
   }

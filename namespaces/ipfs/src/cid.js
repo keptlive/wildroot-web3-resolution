@@ -17,9 +17,9 @@
  * (https://ipld.io/specs/codecs/dag-pb/spec/) and the UnixFS `Data` message
  * (https://github.com/ipfs/specs/blob/main/UNIXFS.md). Both encoders are
  * written out here — they are a few dozen bytes of protobuf — rather than
- * taken from `@ipld/dag-pb` / `ipfs-unixfs`, which are only in the tree as
- * transitive dependencies of the deprecated ipfsd-ctl stack (src/hns/ipfs.js)
- * and would vanish with it. `multiformats` (a direct dependency) does the
+ * taken from `@ipld/dag-pb` / `ipfs-unixfs`, which are not dependencies of
+ * this browser (they left with the ipfsd-ctl stack in 2.78.39). `multiformats`
+ * (a direct dependency) does the
  * CID, sha2-256 and varint work. tests/hns/files-cid.test.js runs the real
  * kubo binary over the same fixtures and asserts equality, so "exactly" is a
  * proven property, not a claim.
@@ -154,18 +154,32 @@ function pbNode (links, data) {
  * @property {number} filesize file bytes under it (a leaf: its length)
  */
 
+/**
+ * @callback BlockSink  hears every block as it is built — its CID and its
+ *   exact bytes — so an archive (src/publish/archive.js) is written in the
+ *   same pass that hashes, and never from a second encoder. Awaited: a slow
+ *   disk applies back-pressure to the hashing, not the other way round.
+ * @param {CID} cid
+ * @param {Uint8Array} bytes
+ * @returns {Promise<void>|void}
+ */
+
 /** A raw leaf: the chunk is the block. @returns {Promise<Node>} */
-async function leaf (chunk) {
+async function leaf (chunk, emit = null) {
   const digest = await sha256.digest(chunk)
-  return { cid: CID.createV1(raw.code, digest), tsize: chunk.length, filesize: chunk.length }
+  const cid = CID.createV1(raw.code, digest)
+  if (emit) await emit(cid, chunk)
+  return { cid, tsize: chunk.length, filesize: chunk.length }
 }
 
 /** An internal file node over `children`. @returns {Promise<Node>} */
-async function fileNode (children) {
+async function fileNode (children, emit = null) {
   const bytes = pbNode(children.map((c) => ({ cid: c.cid, name: '', tsize: c.tsize })), unixfsFile(children.map((c) => c.filesize)))
   const digest = await sha256.digest(bytes)
+  const cid = CID.createV1(DAG_PB, digest)
+  if (emit) await emit(cid, bytes)
   return {
-    cid: CID.createV1(DAG_PB, digest),
+    cid,
     tsize: bytes.length + children.reduce((a, c) => a + c.tsize, 0),
     filesize: children.reduce((a, c) => a + c.filesize, 0)
   }
@@ -182,8 +196,9 @@ async function fileNode (children) {
  * single-child level at the top is the root itself, never wrapped).
  */
 class BalancedBuilder {
-  constructor (maxLinks) {
+  constructor (maxLinks, emit = null) {
     this.maxLinks = maxLinks
+    this.emit = emit
     /** @type {Node[][]} */
     this.levels = []
   }
@@ -193,7 +208,7 @@ class BalancedBuilder {
     level.push(node)
     if (level.length === this.maxLinks) {
       this.levels[depth] = []
-      await this.push(await fileNode(level), depth + 1)
+      await this.push(await fileNode(level, this.emit), depth + 1)
     }
   }
 
@@ -209,7 +224,7 @@ class BalancedBuilder {
       // A lone node with nothing above it IS the root: a one-chunk file is
       // its raw leaf, a file of exactly maxLinks chunks is that one node.
       if (!above && level.length === 1) return level[0]
-      carry = await fileNode(level)
+      carry = await fileNode(level, this.emit)
     }
     return carry
   }
@@ -263,20 +278,24 @@ async function * rechunk (chunks, size) {
  * `--chunker=size-N --max-links=M` on small fixtures; production callers
  * never pass them.
  *
+ * `onBlock` hears every block (leaves and internal nodes, each exactly
+ * once, children before their parent) with its bytes — the archive writer's
+ * hook (src/publish/archive.js); without it nothing but CIDs is kept.
+ *
  * @param {import('node:stream').Readable|ReadableStream|AsyncIterable<Uint8Array>|Uint8Array|string} body
- * @param {{ chunkSize?: number, maxLinks?: number }} [opts]
+ * @param {{ chunkSize?: number, maxLinks?: number, onBlock?: BlockSink|null }} [opts]
  * @returns {Promise<FileCidResult>}
  */
-export async function fileCid (body, { chunkSize = CHUNK_SIZE, maxLinks = MAX_LINKS } = {}) {
+export async function fileCid (body, { chunkSize = CHUNK_SIZE, maxLinks = MAX_LINKS, onBlock = null } = {}) {
   if (!(Number.isInteger(chunkSize) && chunkSize > 0) || !(Number.isInteger(maxLinks) && maxLinks > 1)) {
     throw new SourceError('BAD_PATH', 'CID options must be positive integers')
   }
-  const builder = new BalancedBuilder(maxLinks)
+  const builder = new BalancedBuilder(maxLinks, onBlock)
   let size = 0
   let chunks = 0
   for await (const chunk of rechunk(bytesOf(body), chunkSize)) {
     size += chunk.length
-    await builder.push(await leaf(chunk))
+    await builder.push(await leaf(chunk, onBlock))
     // sha256.digest is synchronous under the await (node's createHash): over
     // an in-memory buffer nothing else yields, and a GiB of hashing starved
     // the main process — no input, no paint, no IPC — for seconds while the
@@ -286,7 +305,7 @@ export async function fileCid (body, { chunkSize = CHUNK_SIZE, maxLinks = MAX_LI
   }
   // go-unixfs: "No data, return just an empty node" — with raw leaves that
   // is a raw block of zero bytes, not a UnixFS file node.
-  const root = (await builder.finish()) || (await leaf(Buffer.alloc(0)))
+  const root = (await builder.finish()) || (await leaf(Buffer.alloc(0), onBlock))
   return { cid: root.cid.toString(), size, tsize: root.tsize }
 }
 
@@ -301,6 +320,17 @@ export async function fileCid (body, { chunkSize = CHUNK_SIZE, maxLinks = MAX_LI
  * @returns {Promise<{ cid: string, tsize: number }>}
  */
 export async function directoryCid (entries) {
+  const { cid, tsize } = await directoryNode(entries)
+  return { cid, tsize }
+}
+
+/**
+ * The directory node itself — `directoryCid` plus the block's bytes, for
+ * the archive writer. Same refusals.
+ * @param {DirectoryEntry[]} entries
+ * @returns {Promise<{ cid: string, tsize: number, bytes: Buffer }>}
+ */
+export async function directoryNode (entries) {
   const links = []
   const seen = new Set()
   for (const { name, cid, tsize } of entries) {
@@ -317,7 +347,7 @@ export async function directoryCid (entries) {
     throw new SourceError('NOT_SUPPORTED', `This folder has too many entries to hash as one block (${links.length})`)
   }
   const digest = await sha256.digest(bytes)
-  return { cid: CID.createV1(DAG_PB, digest).toString(), tsize: bytes.length + links.reduce((a, l) => a + l.tsize, 0) }
+  return { cid: CID.createV1(DAG_PB, digest).toString(), tsize: bytes.length + links.reduce((a, l) => a + l.tsize, 0), bytes }
 }
 
 /** True for a string `fileCid`/`directoryCid` could have produced. */

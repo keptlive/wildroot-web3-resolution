@@ -37,6 +37,7 @@ import { randomBytes } from 'node:crypto'
 import os from 'node:os'
 import { parseByteRange } from './byte-range.js'
 import path from 'node:path'
+import { makeBlockPresence, PRESENCE_TTL_MS } from './block-presence.js'
 
 /** The names our own storage serves: `<label>.pinthis` (pinthis `DECISIONS.md` D2). */
 export const ORIGINS = Object.freeze([
@@ -118,18 +119,22 @@ function rangeStart (range) {
 export function makeOriginWarmer ({
   node, fetchImpl = (...a) => globalThis.fetch(...a), log = () => {},
   tmpDir = os.tmpdir(), maxBytes = MAX_WARM_BYTES, origins = ORIGINS,
-  enabled = true
+  enabled = true, now = Date.now, presenceTtlMs = PRESENCE_TTL_MS
 }) {
-  const present = new Set()
-  /** Slices already imported this session, by `${cid}|${file}|${slice start}`: a repeated range is free. */
-  const slices = new Set()
+  // Whole archives on the node, and slices already imported this session by
+  // `${cid}|${file}|${slice start}` (a repeated range is free) — both
+  // re-confirmed once a GC could have run (src/hns/block-presence.js).
+  const presence = makeBlockPresence({ now, ttlMs: presenceTtlMs })
   const inflight = new Map()
   /** Background work (finishing a window, reading ahead), so a test — or a shutdown — can wait for it. */
   const background = new Set()
 
   async function warm (url, cid, window = null) {
     const gateway = url
-    if (!window && present.has(cid)) return { state: 'present' }
+    if (!window && presence.has(cid)) {
+      const known = presence.stale(cid) ? await node() : null
+      if (!known || await presence.revalidate(cid, known, log)) return { state: 'present' }
+    }
     const ipfs = await node()
     if (!ipfs) return { state: 'no-node' }
     if (!window) {
@@ -138,7 +143,7 @@ export function makeOriginWarmer ({
       let local = false
       try { local = await ipfs.hasLocally(cid) } catch (err) { log(`warm: could not ask the node about ${cid} — ${err && err.message}; warming anyway`) }
       if (local) {
-        present.add(cid)
+        presence.remember(cid)
         return { state: 'present' }
       }
     }
@@ -177,8 +182,8 @@ export function makeOriginWarmer ({
       await pipeline(Readable.fromWeb(res.body), createWriteStream(file))
       const roots = await ipfs.importCar(file)
       if (!roots.includes(cid)) throw new Error(`the archive's root is ${roots.join(', ')}, not ${cid}`)
-      if (!window) present.add(cid)
-      else for (const k of window.marks || []) slices.add(k)
+      if (!window) presence.remember(cid)
+      else for (const k of window.marks || []) presence.rememberSlice(cid, k)
       log(`warm: ${cid}${window ? ` bytes ${window.from}-${window.to}` : ''} imported from ${gateway}`)
       return window ? { state: 'windowed', from: window.from, to: window.to } : { state: 'warmed', size }
     } catch (err) {
@@ -230,19 +235,25 @@ export function makeOriginWarmer ({
       const w = { from: Math.floor(start / WINDOW_BYTES) * WINDOW_BYTES, to: Math.floor(start / WINDOW_BYTES) * WINDOW_BYTES + WINDOW_BYTES - 1 }
       const nearEnd = start >= w.to - WINDOW_BYTES / 4
       let out = { state: 'present' }
-      if (!present.has(cid) && !slices.has(sliceKey(s.from))) {
+      // A GC may have taken what this session imported: re-confirm before a
+      // remembered slice is treated as free.
+      if (presence.stale(cid)) {
+        const known = await node()
+        if (known) await presence.revalidate(cid, known, log)
+      }
+      if (!presence.has(cid) && !presence.hasSlice(sliceKey(s.from))) {
         out = await once(sliceKey(s.from), () => warm(url(s.from, s.to), cid, { ...s, marks: [sliceKey(s.from)] }))
         // The rest of this window, after the slice, so play continues without a wait.
         if (out.state === 'windowed' && s.to < w.to) {
           later(() => once(`${cid}|${file}|${w.from}|rest`, async () => {
             const from = s.to + 1
-            if (marksBetween(from, w.to).every((k) => slices.has(k))) return
+            if (marksBetween(from, w.to).every((k) => presence.hasSlice(k))) return
             await warm(url(from, w.to), cid, { from, to: w.to, marks: marksBetween(from, w.to) })
           }))
         }
       }
       // Reading near the end of a window: have the next one on the way.
-      if (nearEnd && !present.has(cid) && !slices.has(sliceKey(w.to + 1))) later(() => sliceWarm(w.to + 1))
+      if (nearEnd && !presence.has(cid) && !presence.hasSlice(sliceKey(w.to + 1))) later(() => sliceWarm(w.to + 1))
       return out
     }
     if (range && file) return sliceWarm(rangeStart(range))

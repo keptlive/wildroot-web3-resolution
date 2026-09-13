@@ -89,6 +89,10 @@ export function classifyOnionRedirect (location, base) {
   const from = new URL(base)
   if (target.protocol !== 'http:' && target.protocol !== 'https:') return { kind: 'off-tor', url: target.href }
   if (!isOnionHost(target.hostname)) return { kind: 'off-tor', url: target.href }
+  // onion:// currently represents HTTP inside Tor. Encoding an HTTPS target
+  // as onion:// would lose TLS (and an explicit :443 after URL normalization).
+  // Refuse that transition until this scheme can preserve its transport.
+  if (target.protocol === 'https:') return { kind: 'unsupported-transport', url: target.href }
   const same = target.hostname.toLowerCase() === from.hostname.toLowerCase() && target.port === from.port
   const onionUrl = `onion://${target.hostname.toLowerCase()}${target.port ? ':' + target.port : ''}${target.pathname}${target.search}`
   return same
@@ -154,6 +158,14 @@ export default function createOnionHandler ({ fetchImpl, ipProtectionOn } = {}) 
         const location = res.headers.get('location')
         if (!(res.status >= 300 && res.status < 400) || !location) break
         const redirect = classifyOnionRedirect(location, target)
+        if (redirect.kind === 'unsupported-transport') {
+          return htmlResponse(501, 'HTTPS onion redirect is not supported',
+            '<p>This service requested HTTPS at ' +
+            `<code>${escapeHtml(redirect.url)}</code>.</p>` +
+            '<p>This browser’s onion scheme currently carries HTTP inside Tor. ' +
+            'The redirect was not followed because doing so would remove TLS. ' +
+            'Open the HTTPS address in a Tor browser that supports it.</p>')
+        }
         if (redirect.kind === 'same-service' && hop < MAX_REDIRECTS) {
           target = redirect.url
           // RFC 9110 §15.4: a 301/302/303 answer to a request with a body is

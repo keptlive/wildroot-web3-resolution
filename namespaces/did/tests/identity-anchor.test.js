@@ -163,12 +163,74 @@ test('the binding names the exact account: another DID does not verify', () => {
   }
 })
 
-test('the DID is lowercased before signing, so the preimage is canonical', () => {
-  const { receipt } = signAtproto(
-    { name: NAME, publicKey: KEY.publicKey, did: '  DID:PLC:ABC ', epoch: 1, createdAt: T0 }, SECRET)
+test('version 1 is the historical lowercase preimage, and cannot carry a did:web path', () => {
+  // The v1 `did` tag is the trimmed, lowercased identifier, and a receipt that
+  // uses it carries no version field. A canonical did:plc and a domain-only
+  // did:web are unchanged by that lowercasing, which is what keeps a deployed
+  // receipt verifiable byte for byte.
+  const plc = signAtproto(
+    { name: NAME, publicKey: KEY.publicKey, did: DID, epoch: 1, createdAt: T0 }, SECRET)
+  assert.deepEqual(plc.event.tags, [
+    ['v', 'hns1'], ['d', `hns:atproto:${NAME}`], ['epoch', '1'], ['did', DID]
+  ])
+  assert.equal(plc.receipt.version, undefined, 'a v1 receipt carries no version field')
+
+  const web = signAtproto(
+    { name: NAME, publicKey: KEY.publicKey, did: 'did:web:Example.COM', epoch: 1, createdAt: T0 }, SECRET)
+  assert.deepEqual(web.event.tags[3], ['did', 'did:web:example.com'], 'a domain folds to lower case')
   assert.ok(verifyAtproto({
-    name: NAME, publicKey: KEY.publicKey, did: 'did:plc:abc', epoch: 1, createdAt: T0, sig: receipt.sig
+    name: NAME, publicKey: KEY.publicKey, did: 'did:web:example.com', epoch: 1, createdAt: T0, sig: web.receipt.sig
   }))
+
+  // A did:web PATH is case-sensitive, and a lowercasing preimage cannot
+  // represent it. Signing one at version 1 is refused rather than silently
+  // binding a different subject.
+  assert.throws(() => signAtproto(
+    { name: NAME, publicKey: KEY.publicKey, did: 'did:web:example.com:user:Alice', epoch: 1, createdAt: T0 }, SECRET),
+  /version 2/)
+})
+
+test('version 2 canonicalises the subject: the domain folds, a did:web path keeps its case', () => {
+  const did = 'did:web:Example.com:user:Alice'
+  const { event, receipt } = signAtproto(
+    { name: NAME, publicKey: KEY.publicKey, did, epoch: 1, createdAt: T0, version: 2 }, SECRET)
+  assert.deepEqual(event.tags, [
+    ['v', 'hns2'], ['d', `hns:atproto:${NAME}`], ['epoch', '1'], ['did', 'did:web:example.com:user:Alice']
+  ])
+  assert.equal(receipt.version, 2, 'the compact receipt carries its own version')
+  assert.ok(verifyAtproto({
+    name: NAME, publicKey: KEY.publicKey, did, epoch: 1, createdAt: T0, sig: receipt.sig, version: 2
+  }))
+  assert.equal(verifyAtproto({
+    name: NAME, publicKey: KEY.publicKey, did: 'did:web:example.com:user:alice', epoch: 1, createdAt: T0, sig: receipt.sig, version: 2
+  }), false, 'path case is part of the binding')
+
+  // The version comes from the receipt. A verifier that retried the other
+  // version after a failed signature would accept a subject the signer never
+  // agreed to.
+  assert.equal(verifyAtproto({
+    name: NAME, publicKey: KEY.publicKey, did, epoch: 1, createdAt: T0, sig: receipt.sig, version: 1
+  }), false, 'a v2 receipt never verifies as v1')
+  const v1 = signAtproto(
+    { name: NAME, publicKey: KEY.publicKey, did: DID, epoch: 1, createdAt: T0 }, SECRET).receipt
+  assert.equal(verifyAtproto({
+    name: NAME, publicKey: KEY.publicKey, did: DID, epoch: 1, createdAt: T0, sig: v1.sig, version: 2
+  }), false, 'and a v1 receipt never verifies as v2')
+})
+
+test('only did:plc and did:web are admissible binding subjects', () => {
+  for (const bad of [
+    'did:plc:abc', // not 24 base32 characters
+    'did:plc:EWVI7NXZYOUN6ZHXRHS64OIZ',
+    'did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK',
+    'did:web:192.168.0.1',
+    'did:web:example.com%3A0',
+    'did:web:example.com:..',
+    'did:web:' + 'a'.repeat(64) + '.com'
+  ]) {
+    assert.throws(() => signAtproto(
+      { name: NAME, publicKey: KEY.publicKey, did: bad, epoch: 1, createdAt: T0 }, SECRET), Error, bad)
+  }
 })
 
 test('a claim receipt and an atproto binding cannot be replayed as each other', () => {

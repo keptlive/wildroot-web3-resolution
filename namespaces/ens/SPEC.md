@@ -53,8 +53,10 @@ what it is worth. The read is an `eth_call` against a **public JSON-RPC endpoint
 over HTTPS**. There is no light client and no Merkle proof of the record against
 a block header. The endpoint is therefore a trusted third party for the mapping
 *name → contenthash*, and it also learns which `.eth` name the user asked for.
-The bytes that mapping points at are content-addressed and are checked by the
-fetching layer; the pointer to them is not checked by anything.
+The record names those bytes by a content address; whether *this* page's bytes
+were actually checked against it is a fact about the fetch and is reported only
+when the fetching layer says so (§7). The pointer to them is not checked by
+anything.
 
 Two properties follow, and both are normative:
 
@@ -127,8 +129,9 @@ Terms specific to this chapter:
   meaning "any compliant batch gateway will do, including your own".
 - **Answer** — a result, or a revert. The chain spoke. Everything else is the
   chain **not having been reached**, and the distinction is load-bearing: it
-  decides whether the browser says "this name is not registered" or "we could
-  not ask". §5.6.
+  decides whether the browser says something about the name's **resolver** or
+  says "we could not ask". An answer is never a statement about registration or
+  ownership, neither of which this chapter reads. §5.6.
 
 ---
 
@@ -342,7 +345,7 @@ browser session's proxied `net.fetch` as `fetchImpl`.
 value                      = abi.decode(encoded, (bytes))
 ```
 
-- `result` null → `no-resolver`.
+- `result` null → `no-resolver` (no usable resolver; §5.6).
 - `encoded` empty or `0x` → `no-content`.
 - otherwise `value` is the raw contenthash byte string.
 
@@ -387,36 +390,46 @@ indistinguishable, downstream, from a verified one.
 
 This is the single most consequential rule in the chapter.
 
-**An error is an answer about the name only when it carries revert data.** A
-revert is the chain speaking, and *which* revert decides the sentence. Every
-other failure — no RPC reachable, a CCIP gateway that did not answer, a lookup
-that did not terminate, a result that will not decode — is the chain not having
-been reached, and an implementation **MUST** report it as `unreachable` with
-HTTP status **502, never 404**. Nothing was learned about the name, so nothing
-may be claimed about it.
+**An error is an answer about the name only when it carries revert data from
+the RPC.** A revert is the chain speaking, and *which* revert decides the
+sentence. Every other failure — no RPC reachable, a CCIP gateway that did not
+answer, a lookup that did not terminate, a result that will not decode — is the
+chain not having been reached, and an implementation **MUST** report it as
+`unreachable` with HTTP status **502, never 404**. Nothing was learned about the
+name, so nothing may be claimed about it.
 
-That default is normative and it is the safe one. Telling someone their own
-name "is not registered" because our RPC list was down is a false statement
-about a fact we never obtained, and it is the statement a naive implementation
-makes, because a revert and a dead endpoint both arrive as a thrown error. The
-test is structural — *is there revert data?* — and **MUST NOT** be a pattern
-match on an error message, which is the least stable interface in the stack.
+That default is normative and it is the safe one. Telling someone something
+about their own name because our RPC list was down states a fact we never
+obtained, and it is the statement a naive implementation makes, because a
+revert and a dead endpoint both arrive as a thrown error. The test is
+structural — *is there revert data?* — and **MUST NOT** be a pattern match on an
+error message, which is the least stable interface in the stack.
+
+**A revert answers a question about the resolver, and only about the
+resolver.** This chapter reads no ownership record, no registrar expiry and no
+`owner(bytes32)`, so no outcome in it establishes whether a name is registered,
+to whom, or until when. An implementation **MUST NOT** render a resolution
+failure as a claim about registration or ownership: a registered name whose
+owner has never set a resolver reverts exactly as a name nobody has ever
+registered does, and the two are indistinguishable from the answer.
 
 When the call throws with revert data, the Universal Resolver's own errors, by
 selector:
 
 | selector | error | kind | shown as |
 |---|---|---|---|
-| `0x77209fe8` | `ResolverNotFound(bytes)` | `no-resolver` | "not registered" |
-| `0x7199966d` | `ResolverNotFound()` | `no-resolver` | "not registered" |
-| `0x1e9535f2` | `ResolverNotContract(bytes,address)` | `no-resolver` | "not registered" |
+| `0x77209fe8` | `ResolverNotFound(bytes)` | `no-resolver` | "has no usable resolver" |
+| `0x7199966d` | `ResolverNotFound()` | `no-resolver` | "has no usable resolver" |
+| `0x1e9535f2` | `ResolverNotContract(bytes,address)` | `no-resolver` | "has no usable resolver" |
 | `0x7b1c461b` | `UnsupportedResolverProfile(bytes4)` | `no-content` | "has no website" |
 | `0x95c0c752` | `ResolverError(bytes)` | `no-content` | "has no website" |
 | anything else | — | `no-content` | "has no website" |
 
-A name with no resolver is not registered. A resolver that does not implement
-`contenthash` is registered and simply has no website. Saying the first about
-the second tells someone their own name does not exist.
+`no-resolver` is **no usable resolver**: either none was found for the name, or
+the address found is not a contract that can answer. `no-content` is a resolver
+that did answer and publishes no website for this name. Both are sentences
+about the resolution path, and the `no-resolver` page **MUST** state in words
+that it settles nothing about registration (`src/ens-protocol.js:401`).
 
 An unrecognised **revert selector** defaults to `no-content` rather than
 `unreachable`, and that is deliberate: the chain did answer, and the answer was
@@ -441,7 +454,7 @@ the page says so. `textRecords()` in `../src/ens-protocol.js`.
 |---|---|---|
 | `content` | a supported content pointer | whatever the content handler returns |
 | `unsupported` | a decoded pointer this client cannot fetch, named | 501 |
-| `no-resolver` | the chain says this name has no resolver | 404 |
+| `no-resolver` | the resolver lookup found no usable resolver; **nothing is claimed about registration** | 404 |
 | `no-content` | the name resolves and publishes no `contenthash` | 404 |
 | `unreachable` | no answer was obtained; **nothing is claimed about the name** | 502 |
 | `invalid-name` | ENSIP-15 rejected the name | 400 |
@@ -450,6 +463,19 @@ Every one of these **MUST** be reported as a failure *of ENS*. None of them
 **MAY** trigger a lookup in another namespace. The reference implementation's
 404 pages say so in words ("It was NOT looked up as a Handshake name"), which
 is worth copying: the user's next question is "so did it try something else?"
+
+The two 404 pages, which are the only pages here that say anything about a
+name:
+
+| kind | title | body |
+|---|---|---|
+| `no-resolver` | `<name> has no usable resolver` | the resolver lookup found no usable resolver; **this does not establish whether the name is registered**; there is no website to load through this resolver; it was not looked up as a Handshake name |
+| `no-content` | `<name> has no website` | the name has no `contenthash` record and may hold only an address; nothing was guessed at; it was not looked up as a Handshake name — followed by the ENSIP-5 records the name does publish, on the resolver's word (§5.6a) |
+
+The `no-resolver` sentence is normative to the extent of §5.6's rule: a page
+that turns this outcome into "is not registered" makes a claim about a
+registry this chapter never read, and tells the owner of a registered name
+with no resolver set that their name does not exist.
 
 A failure to load the resolver machinery at all (§5.1's dependencies) is 502,
 not 404, for the same reason as `unreachable`. `resolve()` loads those
@@ -540,10 +566,35 @@ An ENS resolution produces exactly two steps, in the spine's vocabulary:
 
 | # | label | state | says |
 |---|---|---|---|
-| 1 | **Name records** | `unverified` | what this name points at was read from an Ethereum RPC endpoint; this client runs no light client, so that endpoint's answer is taken on its word, and a wrong or hostile one could name different content |
-| 2 | **Content** | `verified` | whatever address the record named, the bytes fetched are checked against it — the content cannot have been altered in transit, even though the pointer to it is unverified |
+| 1 | **Name records** | `unverified` | ENS lookups use an Ethereum RPC endpoint; this client runs no light client, so that endpoint's answer is taken on its word, and a wrong or hostile one could name different content |
+| 2 | **Content** | `verified` **only on evidence**, otherwise `unverified` | whether the bytes of *this* page were checked against the address the record named |
 
-Aggregating by the spine's weakest-link rule gives **`partial`** — the lock is
+The second step is **evidence-driven, and the scheme alone is not evidence**
+(`../../src/trust-path.js:442`). `schemeSteps(url, dns, bridge, evidence)`
+takes a fourth argument, an evidence bag whose `ens` member is the result the
+fetching process recorded **for this exact request**. The `Content` step is
+`verified` only when all four of these hold — `evidence.ens.url` equals the URL
+being described, `.ok` is `true`, `.protocol` is one of `ipfs`, `ipns` or
+`arweave`, and `.verifiedBytes` is `true` — and it then says that the handler
+checked these bytes while the name-to-content mapping remains RPC-trusted.
+
+With no such evidence the step is `unverified` and says so: *ENS may point to
+IPFS, IPNS or Arweave; the scheme alone does not establish that this page's
+bytes were verified.* An implementation **MUST NOT** promote a content-addressed
+identifier, a `contenthash` codec or the `ens:` scheme into a byte-integrity
+claim — a pointer says what the bytes *should* be, and only a completed check
+says what they *were*. Evidence **MUST** come from the process that performed
+the fetch, never from a response header the fetched host could write. The
+channel that carries it is not specified here — `../../DEVIATIONS.md` EN-8.
+
+An **Arweave**-backed ENS name gets its own sentence when the bytes were not
+checked: an immutable transaction id does not by itself verify gateway bytes.
+The transaction id is permanent and unique to its data, and it is still the
+gateway that hands over the bytes; those are different statements and the panel
+keeps them apart.
+
+Aggregating by the spine's weakest-link rule gives **`partial`** — with or
+without the evidence, since step 1 is unverified either way — the lock is
 **CLOSED and marked TRUSTED**, the same state an ordinary `https://` page is
 in, and never the trustless state. The verdict is one thing everywhere: the
 scheme table's `verify` string, the handler's own comments, the trust panel's
@@ -708,11 +759,13 @@ Every ambiguity in this namespace is resolved *away* from a claim about a name
 nothing was learned about. An unclassified failure, a dead CCIP gateway, a
 lookup that does not terminate and an answer that will not decode are all
 `unreachable` and all served 502. The only 404s are the two the chain actually
-answered: no resolver, and a resolver with no `contenthash`.
+answered: no usable resolver, and a resolver with no `contenthash`.
 
-An implementation **MUST** keep the default on that side. The rule is not a
-nicety: a 404 is a statement about someone's name, and the failure mode of
-getting it wrong is telling a user their own name does not exist.
+An implementation **MUST** keep the default on that side, and **MUST** keep
+both 404s inside what the answer covers — the resolver, never the registration
+(§5.6). The rule is not a nicety: a 404 is a statement about someone's name,
+and the failure mode of getting it wrong is telling a user their own name does
+not exist.
 
 ### 9.5 Privilege follows verification
 

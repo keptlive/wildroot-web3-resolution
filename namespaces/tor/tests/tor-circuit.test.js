@@ -129,6 +129,65 @@ test('a bundled binary that dies with no external tor -> unavailable', async () 
   await tor.stop()
 })
 
+// --- a route that stops existing is revoked, synchronously -----------------
+
+test('a tor that exits revokes the route it had offered, once', async () => {
+  // Availability is not a slow-changing fact: between the process dying and
+  // anybody noticing, socksUrl() would go on naming a port nothing listens
+  // on, and a raw-socket caller would dial it.
+  const child = fakeChild()
+  const tor = new TorNode({
+    dataDir: tmp(),
+    binPath: 'fake-tor',
+    socksPort: 40992,
+    spawnImpl: () => child,
+    detectExternal: async () => false
+  })
+  setTimeout(() => child.stdout.emit('data', Buffer.from('Bootstrapped 100% (done): Done\n')), 20)
+  assert.equal(await tor.start(), 'ready')
+
+  const events = []
+  tor.on('route-unavailable', (e) => events.push(e))
+  child.emit('exit', 1)
+  assert.equal(events.length, 1, 'emitted synchronously with the exit')
+  assert.equal(tor.isAvailable(), false)
+  assert.equal(tor.isReady(), false)
+  assert.equal(tor.socksUrl(), null)
+  assert.equal(await tor.whenReady(), false, 'waiters are flushed false rather than left hanging')
+
+  await tor.stop()
+  assert.equal(events.length, 1, 'a route already revoked is not revoked again')
+})
+
+test('a tor that never offered a route emits nothing when it stops', async () => {
+  // Startup is still free to choose its external fallback: revocation is about
+  // taking back a route that was offered, not about announcing every failure.
+  const tor = new TorNode({ dataDir: tmp(), binPath: null, detectExternal: async () => false })
+  const events = []
+  tor.on('route-unavailable', (e) => events.push(e))
+  assert.equal(await tor.start(), 'unavailable')
+  await tor.stop()
+  assert.equal(events.length, 0)
+})
+
+test('stopping a running tor revokes its route', async () => {
+  const child = fakeChild()
+  const tor = new TorNode({
+    dataDir: tmp(),
+    binPath: 'fake-tor',
+    socksPort: 40991,
+    spawnImpl: () => child,
+    detectExternal: async () => false
+  })
+  setTimeout(() => child.stdout.emit('data', Buffer.from('Bootstrapped 100% (done): Done\n')), 20)
+  await tor.start()
+  const events = []
+  tor.on('route-unavailable', (e) => events.push(e))
+  await tor.stop()
+  assert.equal(events.length, 1)
+  assert.equal(tor.socksUrl(), null)
+})
+
 // --- readiness comes from the log, not from a control port -----------------
 
 test('parseBootstrap reads percent + phase from a real tor notice line', () => {

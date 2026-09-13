@@ -1,6 +1,6 @@
 /*
- * A local, auth-gated, HNS-only HTTP CONNECT tunnel so secure hns:// pages
- * can open WebSockets to their own Handshake host.
+ * A local, HNS-only HTTP CONNECT tunnel so secure hns:// pages can open
+ * WebSockets to Handshake endpoints.
  *
  * WHY THIS EXISTS. hns:// is a `secure:true` scheme (src/main.cjs), so an
  * hns:// document is a SECURE CONTEXT. Chromium blocks mixed content in a
@@ -17,28 +17,26 @@
  * browser's own HNSResolver at connect time, dial the resolved IP, answer
  * `200 Connection Established`, and splice raw TCP. Chromium performs the WS
  * handshake and the end-to-end TLS itself, so the certificate the origin
- * presents is the same one the document's DANE pin is checked against (that
+ * presents is checked against that endpoint's chain-authenticated TLSA (the
  * DANE check lives in the web session's setCertificateVerifyProc, not here —
  * this stays a dumb TCP pipe so it CANNOT terminate or weaken the TLS it is
  * carrying).
  *
  * WHY HTTP CONNECT AND NOT SOCKS5. The first cut of this tunnel was SOCKS5
- * with RFC 1929 username/password auth. It could never work: Chromium's
+ * with RFC 1929 username/password auth. In the tested Electron build, Chromium's
  * SOCKS5 client offers ONLY the "no authentication" method (it does not
  * implement RFC 1929 at all) and ignores `user:pass@` in PAC proxy strings,
  * so the greeting was refused and every wss:// died on the spot. HTTP CONNECT
- * is the one proxy protocol Chromium drives correctly for a wss:// upgrade.
+ * drove the wss:// upgrade successfully in that runtime.
  *
  * ON PROXY AUTH (and why there is none). A second cut required
  * `Proxy-Authorization: Basic` and answered the 407 from Electron's app
- * 'login' event. That ALSO could not work: Chromium does not surface a
+ * 'login' event. In the tested Electron path, Chromium did not surface a
  * proxy-auth challenge for a WebSocket handshake to the embedder — the
- * 'login' event never fires for a wss:// CONNECT, so the 407 is never answered
+ * 'login' event did not fire for a wss:// CONNECT, so the 407 was not answered
  * and every socket dies. So the tunnel does not require auth; its boundary is
- * that it is bound to 127.0.0.1 ONLY and fenced to HNS hosts. A rogue local
- * process gains nothing it could not already do itself — resolve a Handshake
- * name over public DoH and open a TCP connection to its public IP; the tunnel
- * only performs that same name→IP→dial for a caller already on loopback. (If
+ * that it is bound to 127.0.0.1 ONLY and fenced to HNS hosts. Loopback limits
+ * access to this device; it does not authenticate the requesting application. (If
  * a `credentials` object is passed it is still enforced, so a future platform
  * that CAN authenticate a wss:// proxy re-enables the gate with no code change;
  * today none is passed.)
@@ -46,19 +44,19 @@
  * FIVE FENCES, all enforced here, numbered as the public specification numbers
  * them (Chapter 11 §4.4); a CONNECT meets them in the order 0, 1, 4, 2, 3:
  *   (0) LOOPBACK — the listener binds 127.0.0.1 and nothing else; with no
- *       proxy auth possible (above) that bind is the access control.
- *   (1) ONE PORT — only TUNNEL_PORT (443) is spliced. `_443._tcp` is the only
- *       owner name a DANE pin exists at, so 443 is the only port a splice can
- *       be pinned on; `CONNECT host:80` (a plaintext ws:// from a non-secure
+ *       proxy auth in this integration (above), it is a device boundary only.
+ *   (1) ONE PORT — only TUNNEL_PORT (443) is spliced. This browser profile
+ *       looks up DANE pins at `_443._tcp`, so its tunnel supports only that
+ *       port; `CONNECT host:80` (a plaintext ws:// from a non-secure
  *       page) is refused here rather than sent DIRECT, which would put the
  *       name in a system-resolver query.
  *   (4) TOR — while IP Protection is on, a direct dial would leak the real IP.
  *       With the device-local Tor's SOCKS port to hand the dial goes THROUGH
- *       it (src/hns/socks-dial.js, by address, so Tor learns no name); with
+ *       it (src/hns/socks-dial.js, using an address in the SOCKS request); with
  *       none, the CONNECT is refused with a clean 403 (the page sees
  *       ws.onerror). Decided before the name is resolved.
  *   (2) HNS-ONLY — a CONNECT to any non-Handshake host is refused (normal
- *       wss:// relays are sent DIRECT by the PAC and never reach us; this is
+ *       wss:// relays follow the PAC's base privacy route and never reach us; this is
  *       the defence in depth if one ever does).
  *   (3) SSRF — the resolved address is run through the same isPublicAddress
  *       guard as every other HNS fetch, so a name pointing at loopback /
@@ -76,23 +74,23 @@ import { timingSafeEqual } from 'node:crypto'
 import { isHnsHost as defaultIsHnsHost } from '../../../src/hns-host.js'
 import { decodeHnsHost } from '../../../src/hns-url.cjs'
 import { isPublicAddress as defaultIsPublicAddress } from '../../../src/safe-address.js'
-import { anyFreePort } from './free-port.js'
 import { socksDialer } from '../../../src/socks-dial.js'
 
 /**
  * The one port a CONNECT may name. A DANE pin is looked up at `_443._tcp`
  * (Chapter 1 HS-6), so 443 is the only port on which the TLS Chromium runs
  * through this tunnel is pinned to the name. A CONNECT to 80 is what a
- * plaintext `ws://` from a non-secure page becomes; refusing it here means
- * no Handshake WebSocket is ever spliced unpinned — and nothing about the
- * refusal reaches a system resolver, which sending `ws:` DIRECT would.
+ * plaintext `ws://` from a non-secure page becomes. The proxy itself is an
+ * opaque TCP pipe, not a TLS verifier; Chromium's endpoint certificate hook
+ * supplies the TLS authentication. Refusal does not use a system resolver.
  */
 export const TUNNEL_PORT = 443
 
 const HEAD_END = Buffer.from('\r\n\r\n')
 // A CONNECT head is a request line + a handful of headers. Anything larger is
 // not a proxy client talking to us.
-const MAX_HEAD_BYTES = 8 * 1024
+export const MAX_HEAD_BYTES = 8 * 1024
+export const WS_LIMITS = Object.freeze({ headTimeout: 10000, resolveTimeout: 15000, dialTimeout: 20000, maxConnections: 128, maxPending: 32 })
 export const AUTH_REALM = 'wildroot-hns-ws'
 
 /** Constant-time string compare that never short-circuits on length. */
@@ -107,9 +105,9 @@ function safeEqual (a, b) {
   return timingSafeEqual(ab, bb)
 }
 
-function defaultDial (host, port) {
+function defaultDial (host, port, { signal } = {}) {
   return new Promise((resolve, reject) => {
-    const s = net.connect({ host, port })
+    const s = net.connect({ host, port, signal })
     const onErr = (err) => { s.destroy(); reject(err) }
     s.once('error', onErr)
     s.once('connect', () => { s.removeListener('error', onErr); resolve(s) })
@@ -123,29 +121,42 @@ function defaultDial (host, port) {
  * a well-behaved CONNECT client sends none before our 200, but if any arrive
  * they belong to the tunnel and are forwarded, not dropped.
  */
-function readHead (socket) {
+export function readHead (socket, { signal, timeout = WS_LIMITS.headTimeout } = {}) {
   return new Promise((resolve, reject) => {
     let buf = Buffer.alloc(0)
     const onData = (d) => {
-      buf = Buffer.concat([buf, d])
+      const previous = buf.length
+      // Only buffer enough to find a permitted head. A large coalesced tunnel
+      // payload is not a large header and must never count against its limit.
+      buf = Buffer.concat([buf, d.subarray(0, MAX_HEAD_BYTES - previous)])
       const at = buf.indexOf(HEAD_END)
       if (at >= 0) {
+        socket.pause() // retain subsequent tunnel bytes while DNS/dial awaits
         cleanup()
-        resolve({ head: buf.subarray(0, at).toString('latin1'), leftover: buf.subarray(at + HEAD_END.length) })
-      } else if (buf.length > MAX_HEAD_BYTES) {
+        resolve({ head: buf.subarray(0, at).toString('latin1'), leftover: d.subarray(at + HEAD_END.length - previous) })
+      } else if (buf.length >= MAX_HEAD_BYTES) {
         cleanup()
         reject(new Error('request head too large'))
       }
     }
     const onEnd = () => { cleanup(); reject(new Error('socket ended mid-head')) }
+    const onAbort = () => { cleanup(); reject(signal.reason || new Error('request canceled')) }
+    const timer = setTimeout(() => { cleanup(); reject(new Error('request head timed out')) }, timeout)
+    timer.unref?.()
     const cleanup = () => {
+      clearTimeout(timer)
       socket.removeListener('data', onData)
       socket.removeListener('end', onEnd)
+      socket.removeListener('close', onEnd)
       socket.removeListener('error', onEnd)
+      signal?.removeEventListener('abort', onAbort)
     }
     socket.on('data', onData)
     socket.on('end', onEnd)
+    socket.on('close', onEnd)
     socket.on('error', onEnd)
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
   })
 }
 
@@ -202,7 +213,7 @@ export class WsProxy {
    * @param {(host:string)=>boolean} [opts.isHnsHost] host classifier (test override)
    * @param {(addr:string)=>boolean} [opts.isPublicAddress] SSRF guard (test override)
    */
-  constructor ({ resolver, isAnonymized, credentials, dial, isHnsHost, isPublicAddress, torSocks, ports } = {}) {
+  constructor ({ resolver, isAnonymized, credentials, dial, isHnsHost, isPublicAddress, torSocks, ports, limits = {} } = {}) {
     this.torSocks = typeof torSocks === 'function' ? torSocks : () => null
     /** The ports a CONNECT may name. TUNNEL_PORT alone in the browser; a test's TLS server sits elsewhere. */
     this.ports = new Set(Array.isArray(ports) && ports.length ? ports : [TUNNEL_PORT])
@@ -223,15 +234,96 @@ export class WsProxy {
     /** @type {Set<import('node:net').Socket>} live client sockets, so stop()
      *  can tear an in-flight tunnel down instead of hanging on server.close. */
     this._conns = new Set()
+    this.limits = { ...WS_LIMITS, ...limits }
+    for (const [name, value] of Object.entries(this.limits)) {
+      if (!(name in WS_LIMITS) || !Number.isSafeInteger(value) || value <= 0 || value > WS_LIMITS[name]) throw new Error(`ws-proxy: invalid ${name} limit`)
+    }
+    this._contexts = new Set()
+    this._operations = 0
+    this._generation = 0
+    this._route = this._policy()
+  }
+
+  _policy () {
+    const privateMode = !!this.isAnonymized()
+    return { privateMode, socks: privateMode ? this.torSocks() : null }
+  }
+
+  /** A route transition invalidates pending work and established TCP streams. */
+  policyChanged () {
+    this._generation++
+    this._route = this._policy()
+    for (const ctx of this._contexts) {
+      ctx.abort.abort(new Error('WebSocket route policy changed'))
+      ctx.upstream?.destroy()
+      ctx.client.destroy()
+    }
+  }
+
+  /** Defensive getter check; controller events are the immediate revocation. */
+  refreshPolicy () {
+    const next = this._policy()
+    if (next.privateMode !== this._route.privateMode || next.socks !== this._route.socks) this.policyChanged()
+  }
+
+  _current (ctx) {
+    this.refreshPolicy()
+    return !ctx.abort.signal.aborted && !ctx.client.destroyed && ctx.generation === this._generation && !!this.server
+  }
+
+  // Shared resolution may not support cancellation. Its outstanding operation
+  // keeps a slot until it actually settles, so repeated timeout/retry cannot
+  // create unlimited background work. Late dial results are always destroyed.
+  _operation (ctx, run, timeout, dispose = () => {}) {
+    if (!this._current(ctx)) return Promise.reject(new Error('WebSocket request canceled'))
+    if (this._operations >= this.limits.maxPending) return Promise.reject(Object.assign(new Error('Too many pending requests'), { code: 'EBUSY' }))
+    this._operations++
+    const abort = new AbortController()
+    return new Promise((resolve, reject) => {
+      let finished = false
+      const finish = (error, value) => {
+        if (finished) return
+        finished = true
+        clearTimeout(timer)
+        ctx.abort.signal.removeEventListener('abort', canceled)
+        if (error) reject(error)
+        else resolve(value)
+      }
+      const canceled = () => { abort.abort(ctx.abort.signal.reason); finish(ctx.abort.signal.reason || new Error('WebSocket request canceled')) }
+      const timer = setTimeout(() => {
+        const error = Object.assign(new Error('WebSocket connection setup timed out'), { code: 'ETIMEDOUT' })
+        abort.abort(error)
+        finish(error)
+      }, timeout)
+      timer.unref?.()
+      ctx.abort.signal.addEventListener('abort', canceled, { once: true })
+      Promise.resolve().then(() => {
+        if (!this._current(ctx) || abort.signal.aborted) throw new Error('WebSocket request canceled')
+        return run(abort.signal)
+      }).then(value => {
+        this._operations--
+        if (finished || abort.signal.aborted || !this._current(ctx)) { dispose(value); finish(new Error('WebSocket request canceled')) } else finish(null, value)
+      }, error => { this._operations--; finish(error) })
+    })
   }
 
   /** Bind on loopback and start accepting. Resolves with the chosen port. */
   async start (port) {
-    const chosen = port || await anyFreePort('127.0.0.1')
+    if (this.server) throw new Error('ws-proxy: already started')
+    const chosen = port || 0
     this.server = net.createServer((sock) => {
+      this.refreshPolicy()
+      if (this._conns.size >= this.limits.maxConnections || [...this._contexts].filter(ctx => ctx.pending).length >= this.limits.maxPending) { sock.destroy(); return }
       this._conns.add(sock)
-      sock.on('close', () => this._conns.delete(sock))
-      this._handle(sock)
+      const ctx = { client: sock, upstream: null, abort: new AbortController(), generation: this._generation, pending: true }
+      this._contexts.add(ctx)
+      sock.on('close', () => {
+        ctx.abort.abort(new Error('WebSocket client closed'))
+        ctx.upstream?.destroy()
+        this._conns.delete(sock)
+        this._contexts.delete(ctx)
+      })
+      this._handle(sock, ctx).catch(() => sock.destroy()).finally(() => { ctx.pending = false })
     })
     await new Promise((resolve, reject) => {
       this.server.once('error', reject)
@@ -251,6 +343,8 @@ export class WsProxy {
       if (!this.server) return resolve()
       const server = this.server
       this.server = null
+      this.policyChanged()
+      this.port = null
       // Drop any live tunnels first, or server.close waits on them forever.
       for (const s of this._conns) { try { s.destroy() } catch {} }
       this._conns.clear()
@@ -262,6 +356,7 @@ export class WsProxy {
    *  response before the FIN, where a bare `destroy` could drop the queued
    *  bytes and leave the page with a reset instead of a clean proxy error. */
   _refuse (client, status, reason, extraHeaders = []) {
+    if (client.destroyed) return
     const lines = [
       `HTTP/1.1 ${status} ${reason}`,
       ...extraHeaders,
@@ -271,6 +366,9 @@ export class WsProxy {
       '', ''
     ]
     client.end(lines.join('\r\n'))
+    const timer = setTimeout(() => client.destroy(), 1000)
+    timer.unref?.()
+    client.once('close', () => clearTimeout(timer))
   }
 
   _authOk (headers) {
@@ -279,12 +377,12 @@ export class WsProxy {
     return safeEqual(presented, `${this.credentials.user}:${this.credentials.pass}`)
   }
 
-  async _handle (client) {
+  async _handle (client, ctx) {
     client.on('error', () => client.destroy())
     let parsed
     let leftover
     try {
-      const got = await readHead(client)
+      const got = await readHead(client, { signal: ctx.abort.signal, timeout: this.limits.headTimeout })
       leftover = got.leftover
       parsed = parseConnectHead(got.head)
     } catch {
@@ -292,6 +390,7 @@ export class WsProxy {
       try { client.destroy() } catch {}
       return
     }
+    if (!this._current(ctx)) return
     if (!parsed) return this._refuse(client, 400, 'Bad Request')
 
     // 1. Optional proxy auth (skipped when no credentials — the default; see
@@ -324,11 +423,12 @@ export class WsProxy {
     // are unchanged, only the socket's route differs; without it, refuse.
     // Checked BEFORE resolving so nothing about the request touches the
     // network on the refusal path.
+    const route = this._route
     let dial = this.dial
-    if (this.isAnonymized()) {
-      const socks = this.torSocks()
+    if (route.privateMode) {
+      const socks = route.socks
       if (!socks) return this._refuse(client, 403, 'Forbidden')
-      dial = socksDialer(socks)
+      dial = socksDialer(socks, { timeout: this.limits.dialTimeout })
     }
 
     // 5. FENCE 2: HNS-only. Chromium sends the literal name for a
@@ -342,10 +442,11 @@ export class WsProxy {
     // navigation makes), and take the dialable address.
     let resolution
     try {
-      resolution = await this.resolver.resolve(host)
-    } catch {
-      return this._refuse(client, 502, 'Bad Gateway')
+      resolution = await this._operation(ctx, signal => this.resolver.resolve(host, { signal }), this.limits.resolveTimeout)
+    } catch (error) {
+      return this._refuse(client, error.code === 'ETIMEDOUT' ? 504 : error.code === 'EBUSY' ? 503 : 502, 'Bad Gateway')
     }
+    if (!this._current(ctx)) return
     const address = resolution && resolution.address
     if (!address) {
       // No A/SYNTH address to dial (unregistered, or an ipfs=/ar= name that
@@ -363,10 +464,12 @@ export class WsProxy {
     // over this pipe; we never look inside it.
     let upstream
     try {
-      upstream = await dial(address, port)
-    } catch {
-      return this._refuse(client, 502, 'Bad Gateway')
+      upstream = await this._operation(ctx, signal => dial(address, port, { signal, pauseOnConnect: true }), this.limits.dialTimeout, socket => socket?.destroy())
+    } catch (error) {
+      return this._refuse(client, error.code === 'ETIMEDOUT' ? 504 : error.code === 'EBUSY' ? 503 : 502, 'Bad Gateway')
     }
+    if (!this._current(ctx)) { upstream.destroy(); return }
+    ctx.upstream = upstream
     client.write('HTTP/1.1 200 Connection Established\r\n\r\n')
     if (leftover && leftover.length) upstream.write(leftover)
     splice(client, upstream)

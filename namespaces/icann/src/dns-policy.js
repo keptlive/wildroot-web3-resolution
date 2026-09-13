@@ -36,7 +36,7 @@ export function normalizeDnsMode (mode, onUnknown) {
  * `secure`, and the oblivious bridge as the ONLY server. The configured pool
  * is dropped — an encrypted-but-not-oblivious resolver still learns every
  * name and the address asking — so with no bridge running the plan fails
- * closed and ordinary web addresses do not resolve until it is. That is the
+ * closed by requesting secure DNS. Actual cache/provider behavior needs runtime evidence. That is the
  * mode's promise ("nothing is looked up in the clear: if a private lookup
  * fails, the page fails") applied to ICANN names.
  * @param {{mode?: string, servers?: string[]}} [dns]
@@ -62,10 +62,10 @@ export function wantsObliviousBridge ({ dns = {}, odoh = {} } = {}) {
 
 /**
  * The transport plan for ICANN lookups: what the engine's host resolver is
- * told, and what is therefore true about the lookups it makes.
+ * told. Configuration is not proof of the lookup path used by a page.
  *
  * `secure` with no server to point at FAILS CLOSED: the engine is configured
- * for secure mode with an empty list, so nothing resolves, rather than left
+ * for secure mode with an empty list, rather than left
  * on its default, which resolves in the clear. A setting that says "never
  * plaintext" must not silently mean nothing.
  *
@@ -128,38 +128,12 @@ export function effectiveDnsPlan () {
   return effective
 }
 
-/**
- * May the interface say THIS page's name was looked up obliviously?
- *
- * The rule is the point: obliviousness is claimed for a name the bridge
- * actually answered, never because the feature is switched on. In `automatic`
- * mode the engine can resolve a name by other means at any moment, and a panel
- * that reported the setting rather than the event would be making exactly the
- * kind of claim this browser exists to stop making.
- *
- * @param {object|null} bridge the live bridge (exposes `server`,
- *   `servedRecently(host)`, `transport.relays`, `transport.targets`)
- * @param {string} [host]
- * @returns {{live: true, relay: string|null, target: string|null}|null}
- */
+/** Recent exact-host activity, with the route that answered. This does not
+ * correlate a browser navigation or prove how Chromium reused its cache. */
 export function icannBridgeState (bridge, host) {
   try {
-    if (!bridge || !bridge.server) return null
-    if (host && !bridge.servedRecently(host)) return null
-    return {
-      live: true,
-      relay: bridge.transport && bridge.transport.relays && bridge.transport.relays[0]
-        ? hostOf(bridge.transport.relays[0])
-        : null,
-      target: bridge.transport && bridge.transport.targets && bridge.transport.targets[0]
-        ? bridge.transport.targets[0].host
-        : null
-    }
-  } catch {
-    return null
-  }
-}
-
-function hostOf (url) {
-  try { return new URL(url).host } catch { return String(url) }
+    if (!bridge?.server || !host) return null
+    const evidence = bridge.recentEvidence(host)
+    return evidence ? { live: true, ...evidence } : null
+  } catch { return null }
 }

@@ -22,24 +22,22 @@ export const PUBLIC_KEY_MATCH = /^urn:btpk:([a-f0-9]{64})$/i
  * the torrent before any metadata has been fetched — otherwise the user would
  * be asked to approve a bare 40-hex string.
  *
- * Only the v1 infohash form is rewritten. A `xs=urn:btpk:` (BEP-46 mutable)
- * magnet is a bt-fetch address, not something the torrent manager can hold, so
- * it keeps its existing path — and it does so whether or not the same magnet
- * ALSO carries an `xt`, because the handler below gives the mutable key
- * precedence and the two readers of one magnet must not disagree.
+ * A `xs=urn:btpk:` (BEP-46 mutable) magnet also needs consent, but opens a
+ * mutable site through bt-fetch rather than adding a managed torrent. The
+ * mutable key wins even when the same magnet also carries an `xt`.
  *
  * @param {unknown} url
- * @returns {string?} the page URL, or null if this is not an infohash magnet
+ * @returns {string?} the page URL, or null if this magnet is unsupported
  */
 export function magnetToTorrentsPage (url) {
   if (typeof url !== 'string' || !/^magnet:/i.test(url)) return null
   let parsed
   try { parsed = new URL(url) } catch { return null }
-  if (mutableKey(parsed)) return null
-  const match = infoHash(parsed)
+  const mutable = mutableKey(parsed)
+  const match = mutable || infoHash(parsed)
   if (!match) return null
   const name = (parsed.searchParams.get('dn') || '').trim()
-  return `wildroot://torrents?add=${match[1].toLowerCase()}` +
+  return `wildroot://torrents?${mutable ? 'mutable' : 'add'}=${match[1].toLowerCase()}` +
     (name ? `&dn=${encodeURIComponent(name.slice(0, 200))}` : '')
 }
 
@@ -81,14 +79,14 @@ export default async function createHandler () {
   return function magnetHandler (req) {
     try {
       const parsed = new URL(req.url)
-
-      const key = mutableKey(parsed)
-      if (key) return sendFinal(`bittorrent://${key[1]}`)
-
+      // A redirect or public subresource can reach this handler without the
+      // main-frame navigation rewrite. It must still land at inert consent,
+      // never a peer-backed bittorrent URL. No network authority is granted
+      // merely by asking for a magnet resource.
+      const pending = magnetToTorrentsPage(req.url)
+      if (pending) return sendFinal(pending)
       if (parsed.searchParams.has('xt')) {
-        const match = infoHash(parsed)
-        if (!match) return sendError(refusalFor(parsed))
-        return sendFinal(`bittorrent://${match[1]}/`)
+        return sendError(refusalFor(parsed))
       }
 
       return sendError('Magnet link has no `xt` or `xs` parameter')

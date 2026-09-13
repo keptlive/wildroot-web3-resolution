@@ -28,6 +28,7 @@ a departure that no longer exists is not described.
   - RT-11 The IDNA pass fails open
   - RT-12 The dispatcher's 400 branch is unreachable through a WHATWG Request
   - RT-13 hns: is a standard scheme, and pays the URL Standard's host rule for it
+  - RT-14 An explicit http(s):// URL is rewritten into another namespace before it is classified
   - 2.1 Is "everything non-ICANN is Handshake" a defensible default at all?
   - 2.2 Whether a bare word should navigate (RT-3)
   - 2.3 Where the carve-out list should stop (RT-2)
@@ -47,7 +48,7 @@ a departure that no longer exists is not described.
   - HS-5 One DANE profile; an unusable TLSA RRset is refused rather than ignored
   - HS-6 The TLSA owner is always _443._tcp; a port in the URL is ignored
   - HS-8 A DoH-resolved TLSA is used as a pin, on the resolver's word
-  - HS-9 A CNAME target's own RRset is not validated under the target's owner
+  - HS-9 On the address path, a CNAME target's own RRset is not validated under the target's owner
   - HS-10 No RRSIG clock-skew tolerance
   - HS-11 Standards not implemented at all
   - HS-12 A DANE mismatch re-resolves once, then fails closed; there is no "pinned before" memory
@@ -55,6 +56,9 @@ a departure that no longer exists is not described.
   - HS-14 Internationalized names go through the URL parser, not through our own IDNA
   - HS-15 Nameserver failover at query time (resolved 2026-09-06)
   - HS-16 Changing the anonymization mode restarts the SPV node, which re-syncs
+  - HS-17 A pointer alias out of the zone is refused, not resolved in the target's own zone
+  - HS-18 The pointer alias chain is bounded at eight owners, and one alias per owner
+  - HS-19 Content paths are compared byte for byte; no URI normalisation
   - 2.1 SVCB/HTTPS and ECH (HS-3)
   - 2.2 Registry TLDs that refer, and NS targets that are themselves Handshake names
   - 2.3 What the DoH fallback actually promises
@@ -62,6 +66,7 @@ a departure that no longer exists is not described.
   - 2.5 What an SPV proof actually proves
   - 2.6 Whether a proven absence should raise the lock as far as it does
   - 2.7 What DNSLink interoperation is worth while the gateways it was for retire
+  - 2.8 A pathless ipfs= beside a path-bearing dnslink=
   - HS-D1 No per-resolution query budget on NS hops
   - HS-D2 hns: has no IANA URI scheme registration
 - [Chapter 2 — ICANN names](#chapter-2-icann-names) — [chapter file](namespaces/icann/DEVIATIONS.md)
@@ -80,19 +85,24 @@ a departure that no longer exists is not described.
   - IC-14 An http:// link to a numeric-TLD Handshake name is not rewritten
   - IC-15 The obliviousness switch and the resolver pool are configuration-file-only
   - IC-16 The resolver's default lookup is the OS resolver, in the clear
+  - IC-17 The browser cannot observe which resolver answered a navigation, so the panel describes configuration
+  - IC-18 recentEvidence is activity, not provenance, and its window is a guess
+  - IC-19 The route view's ICANN name hop has no route
   - 2.1 Whether "ICANN first" should have a visible escape hatch
   - 2.2 Whether /.well-known/odohconfigs is standardised
   - 2.3 Whether replacing the resolver pool is the right failure ordering
   - 2.4 What the engine does on each kind of DoH failure
-  - 2.5 The ten-minute window and the subdomain rule
+  - 2.5 The ten-minute window
   - 2.6 Whether the snapshot cadence is adequate
   - 2.7 Whether the IDNA divergence can actually move a name
   - 2.8 Whether refusing DANE for ICANN names is right
   - 2.9 Whether a browser should be configuring the resolver at all
   - 2.10 Whether the engine really cannot issue a numeric-TLD http request
+  - 2.11 Whether recent bridge activity is worth reporting at all
   - IC-D1 Lead the resolver pool with the bridge instead of replacing it
   - IC-D3 Put the obliviousness switch and the resolver pool in the settings page
   - IC-D4 Give the browser's drift alarm an offline half
+  - IC-D5 Capture what the engine actually does with a name
 - [Chapter 3 — IPFS, IPNS and DNSLink](#chapter-3-ipfs-ipns-and-dnslink) — [chapter file](namespaces/ipfs/DEVIATIONS.md)
   - IP-1 Two multibases, not the table
   - IP-2 The CID shape exists three times
@@ -104,6 +114,7 @@ a departure that no longer exists is not described.
   - IP-9 car= accepts more than it writes, and more than the decision allows
   - IP-10 A vendor gateway is named in a resolution path
   - IP-11 The windowing policy is ours
+  - IP-12 "Present on the node" is believed for five minutes without asking
   - 2.1 Whether a stated origin is the right primitive at all (IP-9)
   - 2.2 Whether host canonicalisation actually breaks the case-sensitive forms (IP-5)
   - 2.3 What delegating IPNS to the node actually gives us (IP-3)
@@ -137,6 +148,7 @@ a departure that no longer exists is not described.
   - EN-5 A gateway **hostname** is never resolved before it is fetched
   - EN-6 Nothing is cached; every navigation re-resolves
   - EN-7 Whole areas of ENS are not implemented at all
+  - EN-8 The Content trust step needs evidence this specification does not carry a channel for
   - 2.1 Is ens:// TRUSTED, or OPEN?
   - 2.2 Would grading CCIP rigour become right, with a light client?
   - 2.3 Revert data is found by the error's shape
@@ -180,8 +192,11 @@ a departure that no longer exists is not described.
   - DI-3 The result is a bare DID document, as application/json
   - DI-4 did:// is accepted as an alias for did:
   - DI-5 AT Protocol handle resolution is not implemented; the AppView is asked instead
+  - DI-12 A locally derived DID document proves nothing about possession or control
   - DI-10 Nothing enforces that an identity anchor's epoch moves forward
   - DI-11 _nostr.<name> is designed and not published
+  - DI-13 Version 1 of the atproto receipt keeps a lowercasing preimage
+  - DI-14 Only did:plc and did:web may be the subject of a binding receipt
   - 2.1 Whether "recognised, fail-closed" is a resting state
   - 2.2 Whether a DID document should be a *page* at all
   - 2.3 Whether a bare atproto handle should be classified as an atproto address
@@ -201,6 +216,7 @@ a departure that no longer exists is not described.
   - TO-5 Onion services with client authorization cannot be reached
   - TO-6 IP Protection is all-or-nothing for the whole session
   - TO-7 While BLOCKED, a session request fails as a proxy error, not as a page that names the mode
+  - TO-8 onion:// carries HTTP only, so an HTTPS onion service is unreachable
   - 2.1 Whether "device-local" should have any escape hatch at all
   - 2.2 Whether an explicit scheme should be allowed to defeat R1 (TO-2)
   - 2.3 Whether routing before the circuit is ready is the right call (R11)
@@ -208,11 +224,13 @@ a departure that no longer exists is not described.
   - 2.5 Whether the mode is at the right granularity (TO-6)
   - 2.6 Whether onion:// is the right URL form
   - 2.7 What a redirect chain should mean for the address bar
+  - 2.8 Whether a privacy gate this chapter does not own belongs in this listener
   - TO-D1 Per-origin SOCKS credentials for circuit isolation
   - TO-D2 Decide what https://<addr>.onion/ should do
   - TO-D3 Establish, then pin, what happens to cookies
   - TO-D4 Support onion services with client authorization
   - TO-D5 Let a user name their own Tor endpoint, loudly
+  - TO-D6 Let the onion carrier express its transport
 - [Chapter 9 — Key-addressed namespaces](#chapter-9-key-addressed-namespaces) — [chapter file](namespaces/keys/DEVIATIONS.md)
   - KY-1 gemini:// verifies no certificate and pins none
   - KY-2 Only the hex infohash form; BEP-9's base32 magnet is refused
@@ -225,6 +243,7 @@ a departure that no longer exists is not described.
   - KY-9 Engine-reserved host names are reachable: bt-fetch petnames and localhost drives
   - KY-10 Every magnet parameter except xt, xs and dn is ignored
   - KY-11 No freshness is pinned for any mutable address
+  - KY-12 A malformed xs is refused as though the magnet carried no xs
   - 2.1 Whether key **shape** is a sound basis for dispatch at all
   - 2.2 We cannot test the canonicalisation this chapter reasons about
   - 2.3 Whether a dependency's verification should be tested here
@@ -232,6 +251,7 @@ a departure that no longer exists is not described.
   - 2.5 Whether hyper://localhost/ is exposed to web content
   - 2.6 Whether Gemini belongs in this chapter at all
   - 2.7 What Tor's exit does with a Gemini host name, and whether it has been proven
+  - 2.8 The consent contract is specified here and fulfilled somewhere else
   - KY-D1 A Gemini certificate store
   - KY-D2 Give hyper:// the browser's resolver
   - KY-D3 Find out whether web content can reach hyper://localhost/
@@ -251,28 +271,29 @@ a departure that no longer exists is not described.
   - OP-D2 No light-client verification of the registry's answer
   - NT-D1 Numeric top-level names have no test of the whole path
 - [Chapter 11 — Native applications on a Handshake name](#chapter-11-native-applications-on-a-handshake-name) — [chapter file](namespaces/apps/DEVIATIONS.md)
-  - AP-2 The tunnel cannot require proxy authentication, and ships with none
+  - AP-2 The tunnel authenticates no requesting application
   - AP-3 No service workers at a Handshake name
   - AP-4 WebSocket routing is decided by the target host, not by the initiating origin
   - AP-5 A native page's sign-in token is bound to a URL the request is not sent to
   - AP-6 Manifests are unsigned, so an installed application's identity is only its origin
   - AP-7 A Handshake WebSocket is reachable on port 443 and nowhere else
+  - AP-8 On the anonymized route the name is still disclosed to the exit, in SNI
   - 2.1 Whether the 101 is checked for Sec-WebSocket-Accept in our stack
   - 2.2 What Chromium actually sends to the tunnel for a plaintext ws://
-  - 2.3 Whether the PAC leaves loopback traffic reachable in Private mode
+  - 2.3 What reaches a loopback service in Private mode, and by which rule
   - 2.4 Cookie behaviour on an hns:// origin
   - 2.5 Storage partitioning inside a native document
   - 2.6 Whether the PAC is applied to every session that can open a WebSocket
   - 2.7 Internationalised hosts in the PAC
   - 2.8 The numeric-TLD path has never been proven end to end
   - 2.9 verified: true is a live observation, not a regression test
-  - AP-D1 Give the PAC a loopback and private-literal branch
+  - AP-D1 Decide the non-WebSocket loopback policy, and state it somewhere it can be enforced
   - AP-D4 Decide the service-worker question for hns://
   - AP-D5 Sign manifests, and make verified mean something
   - AP-D6 A revoke / manage-applications interface
   - AP-D7 Native discovery for a dotted Handshake name
   - AP-D8 Surface the tunnel's refusal reason
-  - AP-D9 Bound the tunnel's concurrency
+  - AP-D9 Per-name resolution limiting, and the connection that is dropped unanswered
 - [Cross-cutting — Divergence inventory: where privacy and speed pull apart](#cross-cutting-divergence-inventory-where-privacy-and-speed-pull-apart) — [source file](DIVERGENCE.md)
 
 ---
@@ -366,7 +387,7 @@ question open for the rest — see §2.3.
 #### RT-3. A single bare label is a Handshake name
 
 **What.** `pinner`, `hnshosting`, `bananas`, `14898` and `🤝` navigate as
-Handshake names (`src/router.js:383-409`). `com`, `org`, `app`, `blog` and
+Handshake names (`src/router.js:386-414`). `com`, `org`, `app`, `blog` and
 `link` — labels that are themselves ICANN top-level domains — are searches.
 Anything containing whitespace is a search.
 
@@ -410,7 +431,7 @@ not adjudicate; a receiver has to choose.
 **Why.** The alternative — treating a known scheme followed by digits as a host
 — breaks `magnet:?…`-shaped inputs and every `did:`-style path.
 
-**Consequence.** A Handshake top-level name spelled the same as one of the 32
+**Consequence.** A Handshake top-level name spelled the same as one of the 30
 registered schemes cannot be typed with a port. `hns:8080`, `ar:8080`,
 `search:8080`, `media:8080` and so on are read as scheme-plus-path. The
 Handshake name `hns` exists; the others are mostly hypothetical. The failure is
@@ -425,7 +446,7 @@ think it is a bug nobody noticed.
 
 **What.** `NAMESPACES.ICANN` is declared and used by the classifier, but no row
 in `SCHEME_TABLE` carries it — an ICANN name is navigated as `https://`, whose
-row is in namespace `web` (`src/router.js:62-84, 368-370`). So:
+row is in namespace `web` (`src/router.js:62-83, 371-373`). So:
 
 ```
 classify('example.com').namespace  === 'icann'
@@ -462,13 +483,13 @@ and considerably more machinery. See RT-D2.
 #### RT-6. None of the schemes we invented is registered, and none uses `web+`
 
 **What.** Checked against the IANA URI Schemes registry rather than assumed. Of
-the 32 rows in `SCHEME_TABLE`:
+the 30 rows in `SCHEME_TABLE`:
 
 | Status | Count | Schemes |
 |---|---|---|
 | **Permanent** | 2 | `http`, `https` |
 | **Provisional** | 11 | `ipfs`, `ipns`, `ar`, `ens`, `web3`, `nostr`, `at`, `did`, `hyper`, `ssb`, `magnet` |
-| **Unregistered** | 19 | `hns`, `ipld`, `pubsub`, `activitypub`, `onion`, `https+raw`, `gemini`, `bittorrent`, `bt`, `wildroot`, `agregore`, `browser`, `search`, `paste`, `editor`, `bluesky`, `mastodon`, `media`, `docview` |
+| **Unregistered** | 17 | `hns`, `activitypub`, `onion`, `https+raw`, `gemini`, `bittorrent`, `bt`, `wildroot`, `agregore`, `browser`, `search`, `paste`, `editor`, `bluesky`, `mastodon`, `media`, `docview` |
 
 **The standard says.** RFC 7595 sets out the registration procedure and the low
 bar for a Provisional entry: a specification of any stability, and an email to
@@ -538,7 +559,7 @@ the shape any fix should take.
 #### RT-8. `classify()` returns `javascript:`, `data:` and `file:` untouched
 
 **What.** L1 says an explicit scheme is authoritative and the classifier does
-not get a vote. It applies to every scheme (`src/router.js:288-300`):
+not get a vote. It applies to every scheme (`src/router.js:285-303`):
 
 ```
 classify('javascript:alert(1)') -> { scheme: 'javascript', namespace: null, known: false }
@@ -590,7 +611,7 @@ interoperability gap with a standard we otherwise implement.
 #### RT-10. `agregore://` and `browser://` are permanent silent aliases
 
 **What.** Two schemes are served identically to `wildroot://` and rewritten to
-it on navigation. They are never advertised (`src/router.js:152-154`).
+it on navigation. They are never advertised (`src/router.js:150-154`).
 
 **The standard says.** Nothing. Listed because the WHATWG URL Standard's origin
 model is what makes it consequential: three schemes are three tuple origins.
@@ -649,7 +670,7 @@ visible to the interface and to a test. See RT-D5.
 #### RT-12. The dispatcher's 400 branch is unreachable through a WHATWG `Request`
 
 **What.** `dispatch` answers `400` with no namespace marker when the URL will
-not parse *and* names no scheme (`src/router.js:504-518`). A WHATWG `Request`
+not parse *and* names no scheme (`src/router.js:509-523`). A WHATWG `Request`
 cannot be constructed with an unparseable URL, so through the documented
 interface the branch is dead; it is reachable only from a caller that passes a
 plain object with a `url` property, which is what the Electron runtime and our
@@ -697,6 +718,57 @@ constraint on the classifier (SPEC §8.2).
 `D-4`. The URL convention that works around the host parser's numeric rule is
 experimental and carries its own deviations under the `NT` prefix in Chapter 10
 (Part B); neither is restated here.
+
+---
+
+#### RT-14. An explicit `http(s)://` URL is rewritten into another namespace before it is classified
+
+**What.** L1 says an explicit scheme is final (SPEC §3.1), and SPEC §6.4 requires
+a main-frame navigation to `http://vitalik.eth/`, `http://<addr>.onion/` or
+`http://nathan.woodburn/` to be rewritten to `ens://`, `onion://` and `hns://`
+respectively, preserving everything but the scheme
+(`src/hns-host.js:85-99`, `rewriteToHns`). Both are true because they describe **different
+stages**: the rewrite runs in the embedder, before `classify()` is called, and
+what `classify()` is then handed is the rewritten URL, whose scheme it does not
+touch (`src/router.js:285-303`). The classifier carries a note saying so at the
+boundary (`src/router.js:285-286`), and the embedder's stages are written down
+in the Wildroot tree's `docs/BROWSER-ROUTING-CONTRACT.md`.
+
+**The standard says.** [RFC 3986 §3.1](https://www.rfc-editor.org/rfc/rfc3986#section-3.1)
+makes a URI's scheme the thing that "refers to a specification for assigning
+identifiers within that scheme", and §1.1.3 distinguishes a URI from the
+resource it identifies; neither states a conformance verb about a client
+rewriting one URI into another before dereferencing it, and no RFC does. The
+**MUST NOT** being qualified here is this specification's own — L1: *"An
+implementation **MUST NOT** re-classify, sniff, or 'improve' an input that
+already names a scheme."* [RFC 7686 §2](https://www.rfc-editor.org/rfc/rfc7686#section-2)
+is the one place a standard requires the *effect* for part of this: an
+application **SHOULD NOT** resolve a `.onion` name through DNS, which an
+unrewritten `http://<addr>.onion/` would do.
+
+**Why.** A link on an ordinary web page is written `http://`, because that is
+what the page's author had. Without the rewrite it reaches the system resolver,
+which has never heard of the name: a Handshake site is a blank page with no
+error, an ENS name goes to whoever holds the Handshake name `eth`, and an onion
+address is disclosed to a DNS server. Doing the rewrite *inside* the classifier
+would be the sniffing L1 forbids and would make the guarantee untestable, so the
+two are separated instead.
+
+**Consequence.** "An explicit scheme is authoritative" is only true of a stated
+stage, and an implementation reading L1 alone will find §6.4 contradicts it. The
+cost is a specification that has to name three stages wherever it claims L1
+(SPEC §3.1), and a real behavioural surprise for anyone reasoning about the
+whole browser: `https://vitalik.eth/` typed into this browser does **not** make
+an HTTPS request. The rewrite is bounded by the same host rule the classifier
+uses (§6.2) and moves a URL only into the namespace that rule already assigns,
+so it cannot invent a namespace of its own; and it is main-frame navigation
+only, so a subresource fetch is unaffected.
+
+**Status: DELIBERATE**, with the specification wording corrected rather than the
+routing. A rewrite driven by one shared host rule, at a stage that is named, is
+the smallest thing that makes ordinary links work without putting a guess inside
+the classifier. What would be a defect is the rewrite living in two places with
+two rules, which is RT-7's shape and is guarded against there.
 
 ---
 
@@ -793,7 +865,7 @@ Nothing here is normative.
 
 #### RT-D1. Derive the privileged-scheme declaration from the scheme table
 
-Two hand-maintained lists of the same 32 schemes: `SCHEME_TABLE` and the
+Two hand-maintained lists of the same 30 schemes: `SCHEME_TABLE` and the
 Electron privilege declaration in the browser's `src/main.cjs`. The consequence
 of their diverging is not a lint failure — a scheme that is dispatched but never
 declared is unknown to Chromium, and loading one as a main-frame document has
@@ -826,10 +898,11 @@ should be written down wherever it is made.
 
 #### RT-D4. Register `hns:` with IANA
 
-Of the 19 unregistered schemes, 18 are application-private and should stay that
-way. `hns:` is not: it is meant to interoperate, other Handshake clients already
-spell it the same way, and a Provisional registration under RFC 7595 needs a
-specification of any stability and an email to the reviewer (RT-6).
+Of the 17 unregistered schemes, 16 are application-private or somebody else's
+to register, and should stay as they are. `hns:` is neither: it is meant to
+interoperate, other Handshake clients already spell it the same way, and a
+Provisional registration under RFC 7595 needs a specification of any stability
+and an email to the reviewer (RT-6).
 
 **Recommendation.** File it. This repository contains the specification RFC
 7595 asks for, and nothing in the code changes. It removes the situation where
@@ -911,11 +984,25 @@ of this chapter, and its tests in `../../tests/`.
 
 **What.** A successful resolution is cached for 60 seconds regardless of the
 records' TTLs. Only positive results are cached — every failure kind
-(`unreachable`, `dnssec-fail`, `unregistered`) is re-asked. `../../src/resolver.js`.
+(`unreachable`, `dnssec-fail`, `unregistered`) is re-asked.
+`../../src/resolver.js:232` (`cacheTtl`).
+
+Invalidation is explicit and it is generational. `clearCache()` and
+`forget(host)` each increment an epoch (`../../src/resolver.js:241`, `:265`;
+`../../src/doh.js:77`, `:86`), and a resolution that finishes while the epoch
+has moved under it is discarded and re-run, three attempts before it reports
+that the name changed during resolution (`../../src/resolver.js:293`,
+`../../src/doh.js:319`) — so a publish landing mid-lookup cannot repopulate the
+cache it just cleared. On the DoH route the same event marks a name — and
+everything under it after `forget()`, everything at all after `clearCache()` —
+for HTTP revalidation for five minutes, remembering at most 512 names
+(`../../src/doh.js:91` `_fresh`, read at `:204`).
 
 **The standard says.** RFC 2181 §5.2: the TTL is the operator's statement of
 how long an RRset may be reused, and every record in an RRset carries the same
-one.
+one. RFC 9111 §5.2.1.4 defines the `no-cache` **request** directive the
+revalidation uses; it is a directive to the client's own HTTP store, and
+carries no DNS meaning.
 
 **Why.** The cache exists to stop a page's own subresources re-resolving the
 name a dozen times, not to be a recursive resolver. A publish flow that moves a
@@ -924,7 +1011,12 @@ short TTL is usually protecting.
 
 **Consequence.** A record with a TTL below 60 s is honoured late. A record with
 a very long TTL is re-fetched more often than the operator asked. Neither is a
-security property; both are impolite to the authoritative server.
+security property; both are impolite to the authoritative server. The epoch
+adds one visible failure of its own: three invalidations arriving during one
+lookup return an error asking for a retry rather than any answer. Nothing in
+the invalidation reaches the upstream recursive resolver, which serves its own
+cache under its own TTL — an implementation cannot promise a publish is visible,
+only that this client is not the one holding the stale copy.
 
 **Status.** OPEN. Honour the minimum TTL of the RRsets a resolution rests on,
 clamped to a floor and a ceiling, and keep the rule that failures are never
@@ -976,7 +1068,8 @@ resolution algorithm ever issues a query for type 65. `../../src/dns-query.js`.
 
 **The standard says.** RFC 9460 defines the SVCB/HTTPS RR and expects a client
 to query it before connecting; RFC 9848 requires the client to take its
-ECHConfigList from that record.
+ECHConfigList from that record. RFC 8446 §4.2.9, on RFC 6066 §3, is what is
+sent instead: a `server_name` extension in the clear, before any key is agreed.
 
 **Why.** Two independent reasons.
 
@@ -991,8 +1084,13 @@ ECHConfigList from that record.
 **Consequence.** `hns://` connections send the server name in the clear in the
 TLS ClientHello. An observer learns which Handshake site is being visited even
 though the DNS lookup may have been oblivious — so the ODoH work is partly
-undone by the transport. Any SvcParam an operator publishes (`alpn`, `port`,
-`ipv4hint`) is ignored.
+undone by the transport. **This holds on the anonymized route too**: the
+Private-mode site connection of SPEC §8.1 puts an address, not a name, in the
+SOCKS CONNECT request, and then sends the name in `server_name` on the socket
+that request opened (`../../src/dane-connect.js:38`). The Tor exit sees it. An
+implementation **MUST NOT** describe dialling by address as hiding the name;
+what it removes is the disclosure to the proxy. Any SvcParam an operator
+publishes (`alpn`, `port`, `ipv4hint`) is ignored.
 
 **Status.** OPEN, and blocked on something that is not ours: Node's TLS
 bindings. Until they expose ECH, the honest position is this entry rather than
@@ -1080,36 +1178,45 @@ a host was ever pinned; that is HS-12, and it is open.
 
 ---
 
-#### HS-9. A CNAME target's own RRset is not validated under the target's owner
+#### HS-9. On the address path, a CNAME target's own RRset is not validated under the target's owner
 
-**What.** The `CNAME` RRset itself **is** validated: on the address path a
-`CNAME` in a signed zone is not followed until the RRset validates to the
-on-chain DS anchor, with the RFC 4035 §5.3.4 wildcard proof where the answer was
-wildcard-expanded (SPEC §6.5f). What is not done is the rest of RFC 4035
-§5.3.1's chain: the **target's** RRset is not validated under the target's own
-owner name. In practice the target of a Handshake `CNAME` is an ICANN host,
-whose address comes back through the ICANN-host lookup seam (SPEC §6.11) and is
-therefore ICANN's word, not the Handshake zone's. `../../src/resolver.js`.
+**What.** The `CNAME` RRset itself **is** validated on both paths that read
+one. On the **address** path a `CNAME` in a signed zone is not followed until
+the RRset validates to the on-chain DS anchor, with the RFC 4035 §5.3.4
+wildcard proof where the answer was wildcard-expanded (SPEC §6.5f) — and there
+the chain stops: the **target's** RRset is not validated under the target's own
+owner name. In practice that target is an ICANN host, whose address comes back
+through the ICANN-host lookup seam (SPEC §6.11) and is therefore ICANN's word,
+not the Handshake zone's. `../../src/resolver.js` (the CNAME branch of
+`_fromZone`).
+
+The **pointer** path does chase the chain: `_validatedTxtAnswer`
+(`../../src/resolver.js:849`) validates the `CNAME` RRset at each owner as type
+5, re-queries the target inside the same zone when the reply did not already
+carry it (`:878`), and requires a validated `TXT` RRset or a validated denial
+at the owner where the chain ends. So what this entry records is now the
+address path alone. What the pointer path refuses instead of chasing is HS-17.
 
 **The standard says.** RFC 4035 §5.3.1 describes validating each RRset in a
 CNAME chain under its own owner name.
 
-**Consequence.** Two things, of different sizes. A `CNAME` to an ICANN host
-works and the resolution is reported as unvalidated from that point on
-(`dnssecValidated` stays false and the trust panel names the source of the
-address) — which is the truth and cannot be anything else, because the target's
-zone is not anchored to the Handshake chain at all. A `CNAME` *within* a signed
-Handshake zone, pointing at another name in the same zone or a delegated one, is
-not chased and validated the way §5.3.1 describes; its RRset is validated, its
-target's is not.
+**Consequence.** A `CNAME` to an ICANN host works and the resolution is
+reported as unvalidated from that point on (`dnssecValidated` stays false and
+the trust panel names the source of the address) — which is the truth and
+cannot be anything else, because the target's zone is not anchored to the
+Handshake chain at all. A `CNAME` on the address path *within* a signed
+Handshake zone, pointing at another name in the same zone, is not chased and
+validated the way §5.3.1 describes; its RRset is validated, its target's is
+not — even though the pointer path, in the same resolution, would have.
 
 It also decides which half of RFC 7671 §7.2 the DANE base-domain rule rests on
 (SPEC §8): because the expansion is not *secure* in the RFC's sense, the pin is
 correctly looked up at the original name.
 
-**Status.** OPEN, and narrow: what remains is chasing the target
-inside the zone and validating each RRset under its own owner. Keep the
-ICANN-target case reported as unvalidated.
+**Status.** OPEN, and narrower than it was: what remains is chasing the address
+target inside the zone and validating each RRset under its own owner, which the
+pointer path already shows the shape of. Keep the ICANN-target case reported as
+unvalidated.
 
 ---
 
@@ -1314,6 +1421,128 @@ chain-proven.
 
 ---
 
+#### HS-17. A pointer alias out of the zone is refused, not resolved in the target's own zone
+
+**What.** On a signed zone the `TXT` path follows a `CNAME` only while the
+target stays inside the zone the walk is already anchored in. A target whose
+owner is neither the zone apex nor a name under it is refused —
+`{ kind: 'dnssec-unsupported', reason: 'Cross-zone TXT aliases require a
+separate authenticated lookup' }` (`../../src/resolver.js:874`) — and so is a
+target the zone *delegates*, detected by a referral at the re-query
+(`../../src/resolver.js:880`). The same shape at the underscore owner is
+refused a level earlier: a signed zone that delegates `_dnslink.<host>` answers
+the DNSLink query with a referral, which carries neither records nor a denial,
+so the proven-absence rule of SPEC §6.5e rule 5 fails it `dnssec-fail`
+(`../../src/resolver.js:886`).
+
+**The standard says.** RFC 1034 §3.6.2 describes the behaviour as fact rather
+than with a conformance verb (the document predates RFC 2119): a CNAME is
+followed by restarting the query at the canonical name, wherever that name
+lives. RFC 4035 §5.3.1 requires each RRset in such a chain to be validated
+under its own owner name, which for a name in another zone means authenticating
+that zone's keys — its own DS chain, from its own anchor — before anything it
+says is believed.
+
+**Why.** "Its own anchor" is the whole difficulty. A Handshake zone's keys
+authenticate that zone; they say nothing about a name in a sibling zone, in a
+child the parent delegated, or under another top-level name whose DS lives in a
+different chain record. Following the alias correctly means re-entering the
+algorithm at SPEC §6.1 for the target — a second chain lookup, a second
+delegation descent, a second DNSKEY fetch — inside a resolution that already
+has no total query budget (HS-D1). Following it *incorrectly*, by validating
+the target's records against the keys of the zone that pointed at them, is
+worth nothing at all: it accepts whatever the zone that wrote the alias wants
+to say about a name it does not control. Refusing is the fail-closed choice
+between building the second walk and pretending it happened.
+
+**Consequence.** A name whose pointer is published as an alias into another
+zone does not resolve: the refusal ends the resolution, and the address records
+are never reached. Ordinary publications are unaffected — an alias is not how
+either the `ipfs=` convention or DNSLink is normally written — but a zone doing
+something reasonable (one `_dnslink` owner aliased to a shared one in a zone
+the operator also runs) is refused rather than resolved. The kind also
+under-describes the reason: `dnssec-unsupported` is otherwise "signed with an
+algorithm we do not implement", and an interface that renders the kind without
+the reason string tells the user something false about why.
+
+**Status.** OPEN. The fix is to re-enter the resolution at the target name
+rather than to widen the trust, and to bound it: resolve the target as its own
+question from its own anchor, cap the total at one such excursion per pointer
+lookup, and fold the queries into the budget HS-D1 recommends. Until that
+exists, a distinct kind — the failure is neither an unsupported algorithm nor a
+bad signature — would at least stop the panel misreporting it.
+
+---
+
+#### HS-18. The pointer alias chain is bounded at eight owners, and one alias per owner
+
+**What.** `_validatedTxtAnswer` walks at most **eight** owner names in one
+chain (`../../src/resolver.js:854`), refuses an owner it has already visited
+(`:855`, *TXT CNAME loop*), and refuses an owner carrying more than one `CNAME`
+(`:869`, *Ambiguous TXT CNAME target*). A ninth owner is *TXT CNAME chain is
+too deep*. Each refusal is a DNSSEC failure, so the resolution fails closed
+rather than continuing to the address.
+
+**The standard says.** RFC 2181 §10.1 is exact about the per-owner rules and
+this implementation follows them: "There may be only one such canonical name
+for any one alias", and for any label exactly one of — one CNAME (with its
+DNSSEC records), or one or more non-CNAME records, or nothing, or no such name.
+Refusing two aliases at one owner, and refusing a `TXT` beside a `CNAME`, is
+conformance rather than deviation. RFC 1034 §3.6.2 asks that loops be
+"signalled as an error", which is what happens. What has no standard behind it
+is the **number**: no RFC fixes a chain length, and resolvers differ.
+
+**Why.** A chain the client must follow is work a zone chooses for it, and an
+unbounded one is a cheap way to make a client do arbitrary work — the same
+argument the NSEC3 iteration cap rests on (SPEC §6.7). Eight is well past any
+legitimate publication: the case this path exists for is one alias, to one
+shared owner.
+
+**Consequence.** A signed zone that aliases a pointer through nine or more
+owners fails rather than resolving. We know of no such zone, and the failure is
+reported as what it is.
+
+**Status.** DELIBERATE. A bound is required and the exact number is
+conventional; if it ever needs raising it should be raised against a real zone,
+not pre-emptively.
+
+---
+
+#### HS-19. Content paths are compared byte for byte; no URI normalisation
+
+**What.** `mergePointers` treats an absent path and a bare `/` as the same root,
+and compares every other path **exactly** — no percent-decoding, no case
+folding, no `.`/`..` resolution, no trailing-slash equivalence
+(`../../src/pointers.js:328`). Two pointers that differ only in path spelling
+are a `pointer-conflict`, not an agreement.
+
+**The standard says.** RFC 3986 §6.2.1 permits exactly this: simple
+character-for-character comparison is the baseline, and any normalisation in
+§6.2.2 (case, percent-encoding, path segments) is something an implementation
+*may* apply, with the RFC noting each step trades false negatives for the risk
+of false positives. DNSLink itself publishes no equality rule for the path at
+all, which is why this is written down rather than assumed.
+
+**Why.** A comparison that declared two spellings equal would then have to
+choose one of them to fetch, and in a content-addressed path the spelling
+selects the DAG link: `%2F` is a character in a link name, not a separator, and
+a decode changes which link is meant. Choosing wrongly serves *different
+content* under an agreement the publisher never made — the failure the whole
+conflict rule exists to prevent. A false conflict is visible and fixable by the
+publisher; a false agreement is neither.
+
+**Consequence.** A publisher who writes `/docs` in one record and `/docs/` (or
+a percent-encoded equivalent) in the other gets a refusal naming both paths,
+where a normalising client would have loaded the site. That is the intended
+direction of the error, and the message is actionable because it prints each
+pointer with its path.
+
+**Status.** DELIBERATE. Normalisation here is not a convenience but a choice
+about which bytes to fetch, and it belongs to whoever publishes the records, not
+to the resolver comparing them.
+
+---
+
 
 
 ### 2. Things we are not sure about
@@ -1452,6 +1681,30 @@ read is right, and not confident how long "the ecosystem reads DNSLink" stays
 true if the ecosystem's own defaults keep shrinking. If it stops being true the
 read costs one query per resolution and should be re-argued, not quietly kept.
 
+#### 2.8. A pathless `ipfs=` beside a path-bearing `dnslink=`
+
+The path is part of what a pointer names, so it is part of the comparison that
+decides whether two records agree (SPEC §10.1, HS-19). The awkward case is the
+one publication where the two record formats are not equally expressive:
+`ipfs=<cid>` at the name has **no path in its grammar**, while
+`dnslink=/ipfs/<cid>/docs` does. Today that pair is a `pointer-conflict`, and
+the alternative reading — the record at the name says nothing about a path, so
+it does not contradict one — is not obviously wrong.
+
+We chose the conflict for one reason: the other reading requires taking the path
+from the record that has one, which is a precedence rule, and a precedence rule
+between two records is exactly what SPEC §10.1 refuses everywhere else. Whoever
+controls the DNSLink record would decide the path while the record at the name
+sat there saying something different. The cost is real and falls on a publisher
+doing the recommended thing: writing both records for interoperation, with a
+path, now needs the path in neither — which in practice means publishing the
+DNSLink record alone.
+
+What would settle it is a grammar for a path at the name, so both records can
+say the same thing and the comparison stays a comparison. We have not defined
+one, and inventing a private extension to a convention other clients read is
+not obviously better than this refusal.
+
 ---
 
 ### 3. Open design items
@@ -1469,7 +1722,11 @@ DNSLink query (SPEC §6.5d) is one more per zone on every name, including a plai
 address-record name that carries no pointer at all, which is the price of being
 able to detect a disagreement rather than only a missing record; on the DoH
 route it is asked in parallel and costs no round trip, on the
-authoritative-DNS route it costs one.
+authoritative-DNS route it costs one. A signed zone can add more: each `CNAME`
+at either pointer owner costs another `TXT` query when the reply did not
+already carry the target's records, up to the chain bound of HS-18, and the
+second authenticated walk HS-17 recommends would add a whole resolution to the
+same unbudgeted total.
 
 **Recommendation.** Thread a counter through the resolution context — one
 object, incremented at the single place a query is issued — cap it at roughly
@@ -1677,7 +1934,9 @@ validating resolver of our own for ICANN names would be a second DNS stack for
 a namespace we deliberately do not own.
 
 **Consequence.** An ICANN address is the resolver's word. The Domain name step
-says exactly that, and never reads `verified`.
+never reads `verified`, and where it can name a resolver at all — the oblivious
+form of SPEC §6.2 — it says in those words that the answer is still that
+resolver's word.
 
 **Status: DELIBERATE.** It is a real gap and it is the ordinary web's gap; we do
 not think a browser should quietly close it in a way no other browser does.
@@ -1720,9 +1979,12 @@ who can answer for them.
 **What.** In Fast mode — the configured plan — the default `dns.mode` is
 `automatic`: encrypted DNS to the configured resolvers, falling back to
 unencrypted system DNS when none answer. The plan reports this as
-`plaintextFallback: true` and the interface says it in words. In Private mode
+`plaintextFallback: true`, and the interface says what that configuration
+*permits* — "Automatic DNS permits system fallback; this does not show that
+fallback occurred" (`../../src/trust-path.js:480`) — because whether any given
+lookup took the fallback is not observable from here (IC-17). In Private mode
 the block is replaced by `privateDns()` before it is read (SPEC §5.7), so the
-fallback does not exist there: `secure`, the bridge alone, or nothing.
+fallback is not configured there: `secure`, the bridge alone, or nothing.
 
 **The standard says.** RFC 8484 defines the DoH transport but not a fallback
 policy; RFC 8310 §8.2, on the analogous DoT case, distinguishes an opportunistic
@@ -1762,23 +2024,26 @@ configuration would expect — `dns.servers` names four resolvers and, with the
 default `odoh.icann`, none of them is used.
 
 **Why.** A mixed list is simpler to get wrong than to get right: the engine
-would fall from an oblivious template to a plain one silently, and the
-interface's per-name claim (SPEC §6.2) would become the only thing that could
-tell the two apart.
+would fall from an oblivious template to a plain one silently, and nothing
+here would see it happen. The interface's per-name claim (SPEC §6.2) is
+narrower than that job needs — it reports the hosts the bridge answered, which
+is evidence that the oblivious path was used *for a lookup of that host*, not
+evidence about which template served any particular navigation (IC-17).
 
 **Consequence.** Turning obliviousness on changes the floor beneath a failed
-lookup from *encrypted* to *plaintext* in Fast mode's `automatic`, and to a
-total ICANN outage in `secure` mode — configured, or forced by Private. The
-second is the honest trade; the first is a downgrade the user did not ask for
-by asking for more privacy.
+lookup from the configured *encrypted* pool to *plaintext* in Fast mode's
+`automatic`, and to no floor at all in `secure` mode — configured, or forced by
+Private. The second is the honest trade; the first is a downgrade the user did
+not ask for by asking for more privacy.
 
 **Status: OPEN.** We think leading the pool with the bridge is strictly better
 on privacy and would take it — but only with a measurement first. What is
 missing is not the code (`servers = [bridge.template, ...servers]`) but the
 evidence: we have not measured what the engine does with a mixed template list,
 how it chooses between entries, or how long it remembers a failing one. Until
-that is measured, prepending would make the per-name claim carry weight we have
-not tested it for. IC-D1.
+that is measured, prepending would put a silent downgrade where nothing can
+see it, since the panel cannot say which template answered (IC-17). IC-D1, and
+the measurement it needs is IC-D5.
 
 ---
 
@@ -2003,9 +2268,12 @@ that can be wrong.
 
 The Fast / Private switch (SPEC §5.7) is in the settings page and the Privacy
 menu, and it does not expose these two keys either. With `odoh.icann: false`
-Private mode resolves **no** ICANN name at all — the plan fails closed with no
-bridge — and nothing on the switch says so; only the Domain name step does,
-after the fact.
+Private mode leaves the engine with no resolver for ICANN names at all — the
+plan fails closed with no bridge — and nothing on the switch says so. The
+Domain name step names that configuration after the fact ("Secure DNS
+configured to refuse new lookups"), which is the wrong moment and, being a
+statement about the configuration rather than about the page, the wrong
+sentence to learn it from.
 
 **Status: OPEN.** Add a checkbox for `odoh.icann` in the same DNS privacy
 block, with the cost stated in the hint text — including that Private mode
@@ -2047,6 +2315,134 @@ once and visibly; or keep the default and record on each resolution which
 transport the lookup used, so the trust step can say "in the clear" when it
 was. Either is better than a default whose safety depends on a caller reading
 a comment.
+
+---
+
+#### IC-17. The browser cannot observe which resolver answered a navigation, so the panel describes configuration
+*RFC 8310 §8.2, `app.configureHostResolver` · `../../src/trust-path.js:459-503`, `../../src/route-path.js:234-248`*
+
+**What.** For an ICANN name the engine resolves, from its own cache when it
+has an entry, and reports neither the transport it used nor whether it made a
+query at all. `app.configureHostResolver` is a one-way call: a mode and a list
+of templates go in, and nothing comes back — no event, no readback, no
+per-navigation record. So every branch of the Domain name step but one
+(`icannNameStep()`) describes the **plan the engine was given** and says the
+lookup path was not observed, and the route view's ICANN name hop is
+`unknown` in every branch (`icannNameHop()`; SPEC §6.4).
+
+**The standard says.** RFC 8310 §8.2, on the analogous DoT case, distinguishes
+an opportunistic profile from a strict one and is explicit that the
+opportunistic profile gives no protection against an active attacker: a client
+that wants the guarantee **MUST** choose the strict profile. That is a choice
+made by *policy*, in advance — which is exactly what `dns.mode` is. Neither
+that document, nor RFC 8484, nor RFC 9230 defines any way for a client to
+establish **after** the fact which profile carried a particular name; each
+assumes the client is the one making the query and therefore already knows.
+Here it is not: the engine makes the query, and does not say.
+
+**Why.** We configure the engine's resolver; we do not implement it (SPEC
+§1.1). Reimplementing ICANN resolution to gain observability would mean a
+second DNS stack for a namespace we deliberately do not own, and would
+duplicate the engine's cache with our own.
+
+**Consequence.** The interface's ceiling is lower than a reader expects. It
+can say what was asked for and what the bridge has a record of answering; it
+cannot say "this page's address came from there". Every sentence in the panel
+and the route view is written to that ceiling, which is why a fail-closed plan
+is `unverified` rather than `failed` (SPEC §6.1) and why the route summary
+leads with what was not recorded (SPEC §6.4). A user reading "Secure DNS
+configured" learns a true thing about the browser and nothing about this page.
+
+**Status: OPEN**, and the open part is evidence rather than design. We
+recommend capturing the engine's own DNS record in the shipping build — a
+`netLog` capture over a scripted navigation, per mode and per failure kind —
+and, where that shows a fact the panel could carry per navigation, threading
+it through as the resolution events are threaded through on the Handshake
+path. Until then the wording stays at the ceiling above. IC-D5, and §2.4 is
+the same measurement seen from the failure side.
+
+---
+
+#### IC-18. `recentEvidence` is activity, not provenance, and its window is a guess
+*RFC 1035 §3.2.1, RFC 8499 · `../../src/odoh-bridge.js:176-200`, `src/dns-policy.js:131-139`*
+
+**What.** The bridge keeps a bounded, in-memory map of the exact hostnames it
+has answered: host and query type as the key, and `{host, queryType, relay,
+target, rcode, at}` as the value, capped at 512 entries and ordered by a
+monotonic sequence number so a slow older query cannot overwrite a newer
+result. `recentEvidence(host)` returns the newest entry for that **exact**
+host if it is under ten minutes old and its rcode is NOERROR or NXDOMAIN, and
+that — labelled `evidence: 'recent-lookup'` — is the only positive claim the
+Domain name step can make (SPEC §6.2 form 1).
+
+**The standard says.** RFC 1035 §3.2.1 defines a record's TTL as "the time
+interval that the resource record may be cached before the source of the
+information should again be consulted", and RFC 8499 defines a cached answer
+as one served without a new query. The lifetime of an answer is therefore the
+answer's own, published per record; a fixed ten-minute window is unrelated to
+it in both directions.
+
+**Why.** It is the strongest true statement available. The engine will not say
+what answered a navigation (IC-17), so the bridge's own log of what *it*
+answered is the only per-name fact in the system. Ten minutes was chosen to
+outlive a page load and little else.
+
+**Consequence.** Three gaps, all of which the wording has to carry and does:
+
+1. **A lookup is not this navigation.** The bridge may have answered
+   `example.com` for a subresource, a prefetch, or a page loaded minutes ago,
+   while this navigation used a cached address. The step says "evidence of
+   recent lookup activity, not proof that this page used that answer"
+   (`../../src/trust-path.js:465-469`).
+2. **Ten minutes is neither a TTL nor a session.** A one-minute record can be
+   re-resolved by some other path inside the window, and a day-long record can
+   fall out of it while still being the address in use.
+3. **The record is writable by anything that can reach the bridge**, which is
+   why the endpoint path is a per-launch secret and `Origin`/`Sec-Fetch-Site`
+   are refused (SPEC §5.3): a page that could make the bridge resolve a name
+   of its choosing would be writing the interface's evidence.
+
+What it is *not* is a claim about a parent or a child name: one lookup for
+`example.com` says nothing about `a.example.com`, in either direction.
+
+**Status: DELIBERATE** as to the shape — the exact-host rule, the rcode rule
+and the sequence ordering we would all choose again — and **OPEN** as to the
+window, which is a guess we would rather replace with the answer's own TTL.
+§2.5.
+
+---
+
+#### IC-19. The route view's ICANN name hop has no route
+*Our own design · `../../src/route-path.js:28`, `:234-248`, `:255-274`*
+
+**What.** The route view answers "who saw this request", hop by hop, with one
+of `local`, `oblivious`, `tor`, `direct`, `refused` — and, for this hop only,
+`unknown`. The ICANN name-lookup hop is `unknown` in **every** branch,
+including the branch where the bridge holds exact-host evidence, and
+`summarizeRoute()` leads with "Some route details were not recorded; this view
+cannot establish every party that saw this page request."
+
+**The standard says.** Nothing; this is a deviation from our own stated design,
+which is that this view names, for each hop, who was shown this computer's
+address and what they were shown.
+
+**Why.** `direct` and `oblivious` are both measurements. `direct` asserts that
+a named party saw this address together with this name; `oblivious` asserts
+that no single party saw both. Neither is available for a lookup performed by
+the engine (IC-17), and a route view that guessed would be making the precise
+claim this browser exists to stop making — in the one view a user opens
+*because* they want to know who saw them.
+
+**Consequence.** The ICANN row is the only row in the view that never resolves
+to a route, and an `https://example.com` page therefore always carries the
+"not recorded" summary, however much is known about its other hops. That is
+honest and it is also an admission, on the majority of pages, that the most
+common navigation in the browser is the one this view can say least about.
+
+**Status: OPEN**, blocked on the same evidence as IC-17. If a `netLog` capture
+establishes a per-navigation fact — that a query left through the bridge's
+template for this host, say — this hop can carry `oblivious` for that case and
+keep `unknown` for the rest. IC-D5.
 
 ---
 
@@ -2095,22 +2491,25 @@ The bridge's failure policy was chosen on the assumption that it does. If it
 does not, a relay outage in Fast mode's `automatic` is a hard failure rather
 than a silent downgrade — which would be *better* for privacy and worse for
 availability, and either way we should know which one we shipped. In Private
-mode the question does not arise: `secure` refuses every fallback, so a SERVFAIL
-from the bridge is a failed lookup whichever way the engine reads it. The same
-measurement answers what threshold IC-1's staleness check should use only by
-analogy; that one is a separate guess.
+mode we expect the question not to arise, because `secure` is documented to
+refuse every fallback and a SERVFAIL from the bridge should then be a failed
+lookup whichever way the engine reads it — but that is the same unmeasured
+documentation, and the engine's cache sits in front of all of it (IC-17). The
+same measurement answers what threshold IC-1's staleness check should use only
+by analogy; that one is a separate guess. IC-D5 is the measurement.
 
-#### 2.5. The ten-minute window and the subdomain rule
+#### 2.5. The ten-minute window
 
-`servedRecently()` vouches for a name the bridge answered within ten minutes,
-and for any subdomain of such a name. Both are guesses. Ten minutes can outlive
-the answer's own TTL, so a page can be reported as obliviously resolved when
-this navigation's address came from somewhere else. The subdomain rule is the
-right *direction* — the reverse would let one attacker-chosen lookup vouch for
-its parent, and even for `com` — but "we resolved `example.com`, therefore
-`a.b.example.com` was oblivious too" is not strictly true either. The
-alternative, threading the actual resolution event through to the interface, is
-not available to us: the engine does the resolving.
+`recentEvidence()` reports a lookup the bridge answered within ten minutes, for
+that exact host. Ten minutes is a guess, and it is a guess about the wrong
+quantity: what governs how long an answer stays in use is the record's own TTL
+(IC-18), which the bridge does not read — it forwards bytes it does not
+interpret beyond the envelope. So the window can outlive the answer, and it can
+also expire while the answer is still the one in use. Reading the TTL out of
+the reply would make the window the answer's own, at the cost of parsing RDATA
+the bridge has no other reason to touch, and would still be a statement about
+the bridge's answer rather than about this page's address. We do not know
+whether that trade is worth making.
 
 #### 2.6. Whether the snapshot cadence is adequate
 
@@ -2148,9 +2547,9 @@ configuration file most people will never open. There is a coherent opposite
 position: the operating system owns DNS, a browser that overrides it fragments
 the user's threat model across applications, and a corporate or household
 resolver that exists for a reason is silently bypassed. We think the plaintext
-default is bad enough to justify overriding it, and we say which resolver
-answered. We would not call the question settled — and IC-11's missing DDR is
-the standard's own answer to it, which we have not taken.
+default is bad enough to justify overriding it, and we say which resolver the
+engine was pointed at. We would not call the question settled — and IC-11's
+missing DDR is the standard's own answer to it, which we have not taken.
 
 #### 2.10. Whether the engine really cannot issue a numeric-TLD http request
 
@@ -2161,6 +2560,20 @@ our own tests. We have not instrumented the engine's navigation path to confirm
 that no code path anywhere constructs such a request by another route — through
 a redirect target, say, or a subresource URL assembled relative to a base. If
 one does, IC-14 becomes a real gap rather than an unreachable one.
+
+#### 2.11. Whether recent bridge activity is worth reporting at all
+
+IC-18's record is the only positive per-name fact in the system, and it is one
+step removed from the question the user is asking. There is a coherent position
+that a panel should say nothing rather than say something true about a
+neighbouring event: "the bridge recently answered a lookup for this host" will
+be read as "this page was resolved obliviously" by most people who see it, no
+matter how the sentence is worded, and a caveat everybody skips is not a
+caveat. The position we shipped is the opposite one — suppressing the single
+real observation leaves the user with nothing but settings, which are further
+from the truth still — but it is a judgement about how a sentence is read, and
+we would rather it were challenged by somebody who tests interfaces on people
+than settled by us.
 
 ---
 
@@ -2211,6 +2624,24 @@ into the browser tree, with its imports pointed at `src/ui/icann-tlds.cjs` and
 staleness assertion at the same time — `Version` is a `YYYYMMDDNN` integer, so
 "this snapshot is more than N days old" is a one-line offline check, and §2.6
 is the open question of what N should be.
+
+#### IC-D5. Capture what the engine actually does with a name
+
+Four claims in this chapter stop at "configured" because nothing measures the
+engine: which resolver answered a navigation (IC-17), whether the route hop can
+ever be better than `unknown` (IC-19), what `automatic` does on a SERVFAIL as
+against a transport failure (§2.4), and how a mixed template list is used
+(IC-D1). They are one measurement.
+
+**Recommendation.** In the shipping browser build, drive a scripted navigation
+per mode (`off`, `automatic`, `secure`, Private) and per failure kind (relay
+down, target down, bridge-returned SERVFAIL, cold cache, warm cache) with the
+engine's own network log capturing, and record for each: whether a query was
+made at all, which template carried it, and what happened after a failure.
+Publish the table here. Then decide, with evidence: whether any per-navigation
+fact can be carried into the Domain name step and the route hop, whether the
+bridge should lead the pool rather than replace it, and which of §2.4's two
+behaviours we shipped.
 
 ---
 
@@ -2341,8 +2772,8 @@ signed record with a value, a sequence number and a validity period, and how a
 resolver chooses between two records for the same key.
 
 **Why.** Doing it here means running a libp2p stack, a DHT client and a record
-store inside the resolver — which is the daemon this implementation already
-ships, twice over.
+store inside the resolver — which is precisely the node this implementation
+already ships and already asks.
 
 **Consequence.** Everything an implementation of this chapter can say about an
 `ipns://` answer is second-hand. It cannot report which sequence number it got,
@@ -2357,12 +2788,12 @@ rather than glossed. What we owe and cannot yet give is §2.3.
 
 #### IP-5. A URL host is canonicalised; two of our address forms are case-sensitive
 
-**What.** All four schemes are registered as **standard** schemes in the Wildroot
+**What.** Both schemes are registered as **standard** schemes in the Wildroot
 tree (`src/main.cjs`, `P2P_PRIVILEGES.standard = true`), and a standard scheme's
-host is lowercased by the URL parser. Meanwhile a CIDv0 (`Qm…`) is base58btc, a
-legacy IPNS key (`Qm…`) and a modern peer ID (`12D3Koo…`) likewise, and a
-`pubsub://` topic is arbitrary text. A CIDv1 in base32 and an IPNS key in
-base32 or base36 are already lowercase and are unaffected.
+host is lowercased by the URL parser. Meanwhile a CIDv0 (`Qm…`) is base58btc,
+and a legacy IPNS key (`Qm…`) and a modern peer ID (`12D3Koo…`) likewise. A
+CIDv1 in base32 and an IPNS key in base32 or base36 are already lowercase and
+are unaffected.
 
 **The standard says.** The [WHATWG URL Standard](https://url.spec.whatwg.org/#host-parsing)
 lowercases the host of a special (registered, standard) scheme.
@@ -2374,28 +2805,29 @@ secure-context features for these schemes. It is the same trade the spine
 records for `hns://` in its §5: a standard scheme cannot opt out of the URL
 Standard's host handling.
 
-**Consequence.** A *navigated* `ipfs://Qm…`, `ipns://Qm…`, `ipns://12D3Koo…` or
-`pubsub://MixedCase` is expected to arrive at the handler with its host
-lowercased and therefore broken. A CID is protected on the path that matters
-most — a pasted bare CIDv0 is re-spelled as its base32 CIDv1 form before it
-becomes a URL (SPEC §3) — and a CID reached through a Handshake `ipfs=` pointer
-never becomes a URL host at all. An `ipns=` pointer builds `ipns://<key>` inside
-the main process (the Wildroot tree's `src/hns/index.js:443`), where Node's
-parser applies and preserves case, so it is probably unaffected. `pubsub://` and
-a typed peer-ID IPNS key are the exposed cases, and neither is re-spelled.
+**Consequence.** A *navigated* `ipfs://Qm…`, `ipns://Qm…` or `ipns://12D3Koo…`
+is expected to arrive at the handler with its host lowercased and therefore
+broken. A CID is protected on the path that matters most — a pasted bare CIDv0
+is re-spelled as its base32 CIDv1 form before it becomes a URL (SPEC §3) — and a
+CID reached through a Handshake `ipfs=` pointer never becomes a URL host at all.
+An `ipns=` pointer builds `ipns://<key>` inside the main process (the Wildroot
+tree's `src/hns/index.js:443`), where Node's parser applies and preserves case,
+so it is probably unaffected. A **typed peer-ID IPNS key** is the exposed case,
+and it is not re-spelled.
 
 **Status.** `OPEN`, and **unmeasured** — the paragraph above is reasoning, not a
 measurement, and §2.2 says what would settle it. The fix is not obvious either:
 lowercasing is correct behaviour for a standard scheme, so the choices are to
 re-spell every address into a case-insensitive multibase before it goes in a
-host (which works for a CID and for an IPNS key, and not for a topic), to accept
-that a topic containing an uppercase letter is unaddressable, or to carry the
-address somewhere other than the host. Measure first (IP-D8).
+host — which works for a CID and for an IPNS key, at the cost of a decode on a
+path that is currently a shape test (IP-1) — or to carry the address somewhere
+other than the host. Measure first (IP-D8).
 
 #### IP-6. No HAMT-sharded directories
 
-**What.** `directoryCid` (`src/cid.js`) refuses a folder whose basic directory
-node would exceed kubo's 256 KiB HAMT threshold, with `NOT_SUPPORTED`.
+**What.** `directoryNode` (`src/cid.js:347`), which `directoryCid` is a thin
+wrapper over, refuses a folder whose basic directory node would exceed kubo's
+256 KiB HAMT threshold, with `NOT_SUPPORTED`.
 
 **The standard says.** [UnixFS](https://github.com/ipfs/specs/blob/main/UNIXFS.md)
 defines `HAMTDirectory`, and kubo shards a directory past that threshold.
@@ -2438,7 +2870,7 @@ header that exercises the two-byte length form — and pinned in
 
 #### IP-8. The archive-root check is a claim check
 
-**What.** After a warm fetch, `src/origin-warm.js:179` asserts that the CID being
+**What.** After a warm fetch, `src/origin-warm.js:184` asserts that the CID being
 warmed is among the roots the archive names. Those roots come from the archive's
 **own header** (the Wildroot tree's `src/hns/ipfs.js`, `importCar`), not from the
 node.
@@ -2471,7 +2903,7 @@ no standing outside it, and its behaviour may change.
 **What.** The writer only ever produces the gateway form `<site>/ipfs/<cid>`
 (the Wildroot tree's `src/publish.js:515,662`). The reader does not: `parseOrigin`
 (`../../src/pointers.js:133`) accepts any absolute `https:` URL under 480 bytes,
-and `src/origin-warm.js:203` has a branch for an origin that is not a gateway —
+and `src/origin-warm.js:208` has a branch for an origin that is not a gateway —
 fetch the whole archive or nothing.
 
 **The standard says.** No published standard says how a name announces a
@@ -2499,7 +2931,7 @@ not. See IP-D2.
 
 #### IP-10. A vendor gateway is named in a resolution path
 
-**What.** `src/origin-warm.js:42-44` maps `<label>.pinthis` to
+**What.** `src/origin-warm.js:43-45` maps `<label>.pinthis` to
 `https://pinthis.cloud` — a name-to-provider table in the code.
 
 **The standard says.** Nothing directly; SPEC §8.1 permits such a table and
@@ -2513,7 +2945,7 @@ no new party learns anything.
 **Consequence.** One company's gateway is named in a resolution path, for one
 TLD. The general mechanism has since made it unnecessary for any name published
 after `car=` existed, and a stated origin already wins over the table when both
-are present (`src/origin-warm.js:200`).
+are present (`src/origin-warm.js:205`).
 
 **Status.** `OPEN`, and transitional: it is deleted once the names that predate
 `car=` have been re-published with a stated origin, and not before — deleting it
@@ -2543,6 +2975,50 @@ engineering. The parts worth defending are normative and stated as such in SPEC
 §8.2: never pin a partial DAG, bound the response whether or not the gateway
 honoured the range, and every block still arrives hash-checked.
 
+#### IP-12. "Present on the node" is believed for five minutes without asking
+
+**What.** What the warmer has imported — a whole archive, or a slice of a large
+one — is remembered so the next read is free, and that memory is trusted for
+`PRESENCE_TTL_MS` (five minutes, `src/block-presence.js:21`) before it is
+re-confirmed with **one** offline block lookup of the root CID
+(`src/block-presence.js:63-80`, called from `src/origin-warm.js:134-136` and
+`:239-243`). A root the node no longer has forgets that CID and every slice
+recorded under it. A node that cannot answer is not read as eviction: the
+memory is kept and the next read asks again.
+
+**The standard says.** Nothing normative — no published specification governs a
+client's cache of what a node holds. What governs the behaviour is
+[kubo](https://github.com/ipfs/kubo)'s garbage collector, which the browser
+starts with `--enable-gc` and which removes every block that is not pinned or
+otherwise referenced; its `Datastore.GCPeriod` (1 h) and
+`Datastore.StorageGCWatermark` (90 % of `StorageMax`) decide when it runs.
+SPEC §12.2 is why the warmed blocks are exposed to it: a stated-origin import
+is deliberately **not** pinned.
+
+**Why.** The alternative believed forever. After a collection the warmer went on
+answering *"present"* for an archive the node had dropped, so the one fetch that
+would have brought the bytes back was the one being skipped — and in Private
+mode, where the node is offline and cannot fetch them itself, the content stayed
+broken for the life of the process. Re-confirming on every read instead would
+put a node round-trip in front of every seek in a video, which is the case the
+windowing in SPEC §8.2 exists to make fast.
+
+**Consequence.** The bound is a heuristic and not a guarantee. A collection
+*inside* the window is not noticed until the window ends, so for up to five
+minutes a read can still be answered from a memory of blocks that are gone; the
+read then fails or stalls exactly as it would have without a warmer, and the
+next one re-warms. In the other direction the cost is one local lookup per CID
+per five minutes, which is not a network request and does not reach any third
+party.
+
+**Status.** `DELIBERATE`. The honest statement of what this buys is *"a
+collection is noticed within minutes"*, and that is what SPEC §8.3 says. Pinning
+the import would remove the problem and is refused for a better reason (SPEC
+§12.2, §8.2): a pinned partial DAG makes the node walk the network for the rest
+of it, and a pinned archive is never reclaimed. Being told by the node when it
+collects would remove the heuristic altogether; kubo has no such notification,
+so this is the available shape.
+
 ### 2. Things we are not sure about
 
 #### 2.1. Whether a stated origin is the right primitive at all (IP-9)
@@ -2570,9 +3046,9 @@ the URL, and nothing we found says how a **name** announces one.
 #### 2.2. Whether host canonicalisation actually breaks the case-sensitive forms (IP-5)
 
 The reasoning is in IP-5 and it is only reasoning. What would settle it is one
-navigation each to `ipfs://Qm…`, `ipns://12D3Koo…` and `pubsub://MixedTopic` in
-the shipping browser, and a look at the URL the handler receives. Until that is
-run, IP-5's consequence paragraph is a prediction.
+navigation each to `ipfs://Qm…` and `ipns://12D3Koo…` in the shipping browser,
+and a look at the URL the handler receives. Until that is run, IP-5's
+consequence paragraph is a prediction.
 
 #### 2.3. What delegating IPNS to the node actually gives us (IP-3)
 
@@ -2590,7 +3066,7 @@ This is the open remainder of the DNSLink story. The resolver reads DNSLink
 itself, on both routes, for a name resolved through this stack (SPEC §6.3).
 What is unknown is the *node-side* reader: kubo resolves a DNSLink when an IPNS path names a domain rather than a
 key, and `ipns://example.com` is a URL a user can type. The reference
-implementation sets `DNS.Resolvers: {}` on both daemons, deliberately, because
+implementation sets `DNS.Resolvers: {}` on the node, deliberately, because
 the "auto" value meant DoH queries to third parties. What that empty value
 leaves — the system resolver, or nothing — is untested, and there is no test for
 `ipns://example.com` in either tree.
@@ -2692,7 +3168,7 @@ anybody.
 
 #### IP-D7. Delete the hard-coded `.pinthis` gateway table
 
-`src/origin-warm.js:42-44` maps one TLD to one company's gateway (IP-10). `car=`
+`src/origin-warm.js:43-45` maps one TLD to one company's gateway (IP-10). `car=`
 generalises it, and the code already prefers a stated origin when both exist.
 
 **Recommendation.** Re-publish the names that predate `car=` so they state their
@@ -2706,18 +3182,18 @@ Both need a running browser or a running daemon, which this package deliberately
 does not have, so both belong in the Wildroot tree's live suite.
 
 1. **Host canonicalisation (IP-5, §2.2).** Navigate the shipping browser to
-   `ipfs://Qm…`, `ipns://12D3Koo…` and `pubsub://MixedTopic` and log the URL the
-   handler receives. If the host arrives lowercased, those address forms are
-   unreachable as URLs and IP-5 becomes a fact rather than a prediction.
-2. **`ipns://<domain>` (§2.4).** With `DNS.Resolvers: {}` set on both daemons,
-   does kubo still resolve a DNSLink, and if it does, through which resolver?
+   `ipfs://Qm…` and `ipns://12D3Koo…` and log the URL the handler receives. If
+   the host arrives lowercased, those address forms are unreachable as URLs and
+   IP-5 becomes a fact rather than a prediction.
+2. **`ipns://<domain>` (§2.4).** With `DNS.Resolvers: {}` set on the node, does
+   kubo still resolve a DNSLink, and if it does, through which resolver?
    There is no test for it in either tree. The question is not whether this
    stack can read a DNSLink — it reads one directly (SPEC §6.3) — but whether
    the `ipns://<domain>` URL form works and whether it makes a DNS query nobody
    declared.
 
 **Recommendation.** Write both, in that order. The first decides whether SPEC
-§4.2 and §4.4 state a hazard or a defect; the second decides whether
+§3 and §4.2 state a hazard or a defect; the second decides whether
 `ipns://<domain>` is a supported form, an undeclared plaintext lookup, or a URL
 that should be refused.
 
@@ -2750,28 +3226,24 @@ authorising that.
 
 ### 4. What this chapter leaves out
 
-1. **Retrieval, both daemons.** The `ipfs://` handler
-   (`src/protocols/ipfs-protocol.js`) is Electron-bound — it takes a `session`,
-   registers a protocol handler and manages an `ipfsd-ctl` daemon lifecycle. The
-   `hns://` node (`src/hns/ipfs.js`) spawns and adopts a kubo process, writes its
-   config, and streams ranged reads over its HTTP RPC. Neither is resolution.
-   Two pure functions are lifted out of the second — `parseByteRange`
-   (`src/byte-range.js`) and `carRoots` (`src/car-roots.js`) — because the
-   resolution half genuinely depends on them; nothing else is.
-2. **`js-ipfs-fetch`'s semantics for `ipld://` and `pubsub://`.** The re-encoding
-   an `Accept` header triggers, and the event-stream form of a pubsub
-   subscription, are that library's, cited in `REFERENCES.md` and not
-   respecified.
-3. **The kubo-identity tests.** Four tests in the Wildroot tree spawn the bundled
+1. **Retrieval, and the node.** `src/hns/ipfs.js` in the Wildroot tree spawns
+   and adopts a kubo process, writes its config, and streams ranged reads over
+   its HTTP RPC; `src/protocols/ipfs-protocol.js` is the Electron-bound adapter
+   that parses an `ipfs://`/`ipns://` URL, resolves an IPNS name on that node
+   and hands the rest to it. Neither is resolution. Three pure pieces are lifted
+   out — `parseByteRange` (`src/byte-range.js`), `carRoots`
+   (`src/car-roots.js`) and the presence bookkeeping (`src/block-presence.js`) —
+   because the resolution half genuinely depends on them; nothing else is.
+2. **The kubo-identity tests.** Four tests in the Wildroot tree spawn the bundled
    kubo binary and compare its `ipfs add` output to `src/cid.js` over fresh
    fixtures, including the 174-link boundary and a depth-3 tree. They need a
    60 MB binary this package does not depend on, so they stay there. What is here
    instead is the pinned vectors those tests produced, which prove agreement on
    the cases someone thought to freeze and not on every input.
-4. **Everything after the bytes arrive** — content-type sniffing, directory
+3. **Everything after the bytes arrive** — content-type sniffing, directory
    listing pages, media handling, the conversion pipeline. None of it is
    addressing.
-5. **The write path.** How an `ipfs=` record is published, an IPNS key created or
+4. **The write path.** How an `ipfs=` record is published, an IPNS key created or
    an archive uploaded is a different problem with a different threat model
    (SPEC §1.1).
 
@@ -3318,7 +3790,7 @@ answer.
 
 | Thing | Why not |
 |---|---|
-| **ENS text records** (`text(bytes32,string)`) — `url`, `description`, `com.twitter`, the avatar | Nothing renders them. They would be the natural content of a "name info" panel, which does not exist. |
+| **ENS text records** (`text(bytes32,string)`) beyond the seven keys the no-website page lists (EN-1) | Nothing renders them. They would be the content of a "name info" panel, which does not exist; a successful navigation still reads one record. |
 | **Multichain address records** (ENSIP-9) | A wallet's job, not a browser's. |
 | **`Registry.ttl(bytes32)`** | Nothing caches (EN-6), so there is nothing for a TTL to govern. |
 | **ENS on an L2, read natively** | Reached through CCIP-Read (SPEC §6) like every other client without an L2 light client. Reading the L2 directly would swap one trusted RPC for another. |
@@ -3335,6 +3807,48 @@ that needs a record other than `contenthash` needs a different tool.
 
 ---
 
+#### EN-8. The `Content` trust step needs evidence this specification does not carry a channel for
+
+**What.** The panel's second step (SPEC §7) is `verified` only when it is handed
+a result for the exact request being described — same URL, `ok`, a protocol of
+`ipfs`/`ipns`/`arweave`, and `verifiedBytes` true — through `schemeSteps()`'s
+fourth argument (`../../src/trust-path.js:261`, `ensContentStep` at
+`../../src/trust-path.js:442`). **Nothing in this repository produces that
+object.** It comes from the process that performed the fetch: in Wildroot, the
+main process that ran the IPFS or Arweave handler. An implementation that takes
+this code and wires nothing in gets an `unverified` `Content` step on every ENS
+page, for ever.
+
+**The standard says.** No cited standard governs an interface's trust output.
+The governing rule is the spine's own and this chapter's §7: a step may be
+`verified` only where *this client* completed the check, and a claim the client
+cannot substantiate must not be shown. EIP-1577 defines a **pointer**, and a
+pointer is a statement about what bytes should be, never a record that they
+were checked.
+
+**Why.** The alternative is worse in exactly the way the rule exists to
+prevent. Grading the content from the scheme, the codec or a response header
+produces a green-adjacent claim for a fetch that may have been a plain gateway
+read — and for Arweave it is wrong even in principle, because an immutable
+transaction id says nothing about which bytes a gateway handed over. An absent
+result is honestly reported as absent; an invented one is not recoverable.
+
+**Consequence.** The specification is complete about *when* the step may be
+`verified` and silent about *how* the evidence reaches the trust builder: the
+shape is documented (SPEC §7) and the transport is not. Two conforming
+implementations can therefore differ in a visible way — one showing `Content`
+verified for a CID-checked fetch, one showing it unverified — with neither in
+the wrong. The verdict does not differ: `Name records` is unverified either
+way, so the lock stays **TRUSTED** in both (SPEC §7).
+
+**Status: PARTIALLY IMPLEMENTED.** The rule and the shape are specified and
+pinned by `../../tests/trust-path.test.js`; the channel is not. The evidence
+must keep coming from the process that performed the fetch — a response header
+the fetched host could write is not evidence, and an implementation that reads
+one has re-introduced the claim this entry exists to prevent.
+
+---
+
 ### 2. Things we are not sure about
 
 #### 2.1. Is `ens://` TRUSTED, or OPEN?
@@ -3348,7 +3862,9 @@ The case for **TRUSTED**: the honest comparison is with an ordinary `https://`
 page, where a CA vouched for the name and the browser believed it. An ENS
 resolution is the same *shape* of trust — one third party's word for a
 name-to-thing binding — over a connection that is at least encrypted, and the
-content at the end is content-addressed, which is more than `https://` offers.
+record names the content by address rather than by location, which is more
+than `https://` offers (whether this page's bytes were checked against that
+address is then a fact about the fetch, EN-8).
 Painting it OPEN puts it in the same bucket as plain `http://`, which is
 strictly worse and is a claim of its own.
 
@@ -3441,8 +3957,8 @@ time rather than at fetch time.
 `web3` is registered with the peer-to-peer privilege set — standard, secure,
 service-worker-capable, fetch-enabled — so an arbitrary contract gets a real,
 persistent, secure-context origin keyed by its own address. `ens://` is held at
-an opaque origin for a resolution that is better verified, because the content
-at the end of an ENS pointer is at least content-addressed. The privilege
+an opaque origin for a resolution that is better verified, because an ENS
+pointer at least names its content by address. The privilege
 gradient runs the wrong way.
 
 **Recommendation.** Demote `web3` to `ens://`'s posture — non-standard,
@@ -4323,8 +4839,9 @@ question the callers ask.
 operator's database lookup*. It is the same shape of gap as the `ens://`
 handler's — the binding is RPC-trusted, not chain-proven — and this chapter
 reports it the same way: SPEC §4 marks the step unverified, the lock is
-TRUSTED and never green, and the trust panel says in words that this is the
-server's word.
+TRUSTED and never green, and the trust panel names the hop it took — "DID
+directory over HTTPS" — and says in the same breath that the PLC operation log
+is not audited here.
 
 **Status: OPEN**, and it is the highest-value thing that could be *added*
 rather than fixed. Fetch the audit log, verify the operation chain — each
@@ -4424,12 +4941,52 @@ keep the AppView only as a last resort reported as unverified. See DI-D1.
 
 ---
 
+#### DI-12. A locally derived DID document proves nothing about possession or control
+
+**What.** `did:key`, `did:jwk` and `did:pkh` are answered without a network
+request, from the identifier alone, and the key material is validated rather
+than merely measured: canonical multicodec prefixes, a re-exporting canonical
+PKCS#1 encoding for RSA, prime-order-subgroup checks for Ed25519, a low-order
+rejection for X25519, an OpenSSL-accepted compressed point for every other
+curve, and a full JWK import for `did:jwk` (`src/did-local.js:43`, `:75`,
+`:122`, `:180`; SPEC §5.1a). The response carries
+`X-Resolution-Trust: derived` and the trust step for it stays **unverified**,
+saying in words that deriving a document proves no possession and no control
+(`../../src/trust-path.js:363`).
+
+**The standard says.** The did:key, did:jwk and did:pkh method specifications
+define the document as a **function of the identifier**: a conforming resolver
+computes it and is finished. None of them defines an authentication step, and
+W3C DID Core §5.3 is explicit that a verification method in a document is a
+*claim about* a key, not evidence that anyone holds it — authentication is a
+separate proof, made against the document, at use time.
+
+**Why.** The validation exists so that a document this resolver emits contains
+key material a verifier can actually use, and so that one key has exactly one
+spelling. It cannot do more than that: the identifier is public by
+construction, so anyone may present anyone else's.
+
+**Consequence.** `derived` is the strongest state in this chapter and it is
+still not `verified`. An interface that read "no lookup was needed" as "this is
+the person" would be wrong about every one of these methods, which is why the
+step says the opposite out loud. The residual risk of the validation itself is
+availability, not authenticity: a key type OpenSSL or `@noble/curves` refuses
+is a `400` here even if some other resolver would have derived a document from
+it.
+
+**Status: DELIBERATE.** Validate the key, claim nothing about its holder, and
+say which of the two you did. The honest limit is part of the output, not a
+caveat in a document nobody reads.
+
+---
+
 #### Experimental: identity anchors
 
-The two deviations below are in the **experimental** part of this chapter
-(SPEC §9): record formats that are shipped and signed by the browser's
-keystore but are not a proposed standard and may change. They are separated
-here so a reader does not weigh them against the stable resolution path.
+The deviations below are in the **experimental** part of this chapter
+(SPEC §9): record and receipt formats that are shipped and signed by the
+browser's keystore but are not a proposed standard and may change. They are
+separated here so a reader does not weigh them against the stable resolution
+path.
 
 #### DI-10. Nothing enforces that an identity anchor's `epoch` moves forward
 
@@ -4492,6 +5049,79 @@ operator's word, exactly the thing `_hns` was built to stop being.
 its own — the `hns:nostr:` `d`-tag prefix, by the same argument that makes
 `hns:atproto:` non-interchangeable with `hns:` (SPEC §9.3) — or remove it from
 the code's documentation until it is real. Half a format is worse than either.
+
+---
+
+#### DI-13. Version 1 of the atproto receipt keeps a lowercasing preimage
+
+**What.** An atproto binding receipt is versioned (SPEC §9.3). Version 2
+canonicalises the subject per method. **Version 1 lowercases the whole
+identifier** — `did.trim().toLowerCase()` — and is retained exactly
+(`src/receipt.js:115`). Signing a `did:web:` **path** binding at version 1 is
+refused rather than mis-bound (`src/receipt.js:143`), and a verifier takes the
+version from the receipt and never retries the other one
+(`src/receipt.js:181`).
+
+**The standard says.** The W3C did:web method maps a DID's colon-separated
+segments onto a URL: the first is the domain, with an optional percent-encoded
+port, and the rest are **path** segments. DNS names are case-insensitive
+(RFC 1035 §2.3.3, RFC 4343; label syntax and lengths from RFC 1035 §2.3.1 and
+RFC 1123 §2.1) so folding the domain is sound; a URL path is
+case-sensitive, and RFC 3986 §6.2.2.1 limits case normalisation to the scheme
+and host for exactly that reason. Lowercasing a whole `did:web` identifier is
+therefore not the canonicalisation the method implies.
+
+**Why.** Version-1 receipts are **published and are still verified**. The
+deployed registry reconstructs them with the lowercased subject, so any change
+to that preimage — including a correct one — invalidates every receipt in the
+field. The fix is a new version, not an edit to the old one.
+
+**Consequence.** Two preimages exist, and which one applies is data rather than
+inference. A version-1 receipt cannot express a case-sensitive `did:web` path,
+so those bindings are refused at signing time instead of being silently folded
+into a different subject — including when the path is already lowercase, since
+the receipt would then be indistinguishable from one binding a differently
+cased path. The cost is that path bindings need a version-2-aware registry
+before they can be issued at all.
+
+**Status: DELIBERATE** for as long as version-1 receipts are deployed. The
+compatibility is deliberate; the lowercasing is not defended on its merits, and
+version 2 is what an implementation starting today should sign.
+
+---
+
+#### DI-14. Only `did:plc` and `did:web` may be the subject of a binding receipt
+
+**What.** `canonicalAtprotoDid()` admits a `did:plc` of exactly 24 lowercase
+base32 characters and a `did:web` whose domain is valid (labels of at most 63
+characters, name of at most 253, not an IP literal, optional `%3A<port>` in
+1–65535) with path segments that are non-empty, are not `.` or `..`, and carry
+no separator or control character once percent-decoded. Every other method,
+and every malformed instance of those two, is refused before signing
+(`src/receipt.js:152`).
+
+**The standard says.** The AT Protocol identity specification admits `did:plc`
+and `did:web` as account DIDs and says a client should reject others; the
+did:plc method fixes its identifier as base32 of a truncated hash, which is
+where the 24-character form comes from. W3C DID Core §3.1 permits any
+registered method in the syntax itself, so this is narrower than DID Core
+alone.
+
+**Why.** A receipt is an authorisation, and an authorisation over a subject
+nobody can resolve is a signature over a string. Narrowing at signing time also
+removes the case-folding question for every method that is not one of these
+two, rather than answering it per method later.
+
+**Consequence.** A binding to an account whose DID uses another method — a
+`did:key` account, a future method — cannot be signed here, and would need this
+rule extended alongside a canonicalisation for it. A malformed `did:plc` fails
+at signing rather than producing a receipt that never verifies against a real
+account.
+
+**Status: DELIBERATE.** The admissible set matches the network the binding is
+for, and refusal happens where the user can still be told.
+
+---
 
 ---
 
@@ -4732,10 +5362,15 @@ more than a tidy package (SPEC, *Layout*).
 reading or writing a repository, rendering a feed. This chapter ends at "here
 is the DID document / here is the PDS / here is the key".
 
-**Dependencies.** This chapter adds exactly one runtime dependency beyond the
-Node standard library and the shared modules of `../../src/`:
-**`@noble/curves`**, for BIP-340 over secp256k1, reached through `src/keys.js`
-and `src/nostr-event.js`. `src/did-protocol.js`, `src/unimplemented-protocol.js`,
+**Dependencies.** Beyond the Node standard library and the shared modules of
+`../../src/`, this chapter uses two runtime dependencies:
+**`@noble/curves`**, for BIP-340 over secp256k1 through `src/keys.js` and
+`src/nostr-event.js`, and for the Ed25519 and X25519 point checks in
+`src/did-local.js` (SPEC §5.1a); and **`multiformats`**, for the base58btc
+decode of a `did:key` identifier. `src/did-local.js` also uses `node:crypto`
+— `createPublicKey` and `ECDH.convertKey` — to import a key rather than only
+measure it, which is what makes an unusable key a `400` here instead of a
+verifier's problem later. `src/did-protocol.js`, `src/unimplemented-protocol.js`,
 `src/bsky.js` and `src/xrpc.js` need nothing beyond `fetch`, `Response`, `URL`
 and `AbortSignal` from the platform; `src/gate.js` adds only the shared
 `../../src/delivery-mode.js`, for the words its refusal carries.
@@ -4760,8 +5395,8 @@ provide — that an onion address never reaches a name resolver — holds, and i
 tested at all four entry points** (`namespaces/tor/tests/onion-leak-guard.test.js`).
 Everything below is about the *other* things: what is disclosed to the service
 once the tunnel is up, the granularity of the mode, an unmeasured cookie jar,
-and one exception to the leak rule that lives in the router's first law rather
-than in this namespace.
+the one transport the carrier scheme cannot express, and one exception to the
+leak rule that lives in the router's first law rather than in this namespace.
 
 Paths written `../../src/…` are shared modules of the top-level package; paths
 written `src/…` and `tests/…` are this chapter's, under `namespaces/tor/`.
@@ -4775,7 +5410,7 @@ written `src/…` and `tests/…` are this chapter's, under `namespaces/tor/`.
 **What.** Two of this handler's answers are `200` documents where a caller might
 expect a failure status. In Fast mode — IP Protection off — an `onion://`
 navigation gets a `200` interstitial explaining what to turn on, where, and what
-the limitation is (`src/onion-protocol.js:125-128`, `:228-238`). When an onion
+the limitation is (`src/onion-protocol.js:129-131`, `:228-238`). When an onion
 service redirects to a target outside Tor, the answer is a `200` page naming the
 destination and offering it as a link (`:167-172`).
 
@@ -4816,7 +5451,7 @@ choice.
 **What.** `https://<addr>.onion/` typed by a user, or followed as a top-level
 link, keeps its explicit scheme. It is not reclassified into the `tor`
 namespace, because the router's first law is that an explicit scheme selects the
-protocol and is never sniffed (`../../src/router.js:362-376`).
+protocol and is never sniffed (`../../src/router.js:287-290`).
 
 **The standard says.** RFC 7686 §2: software that does not implement the Tor
 protocol "should generate an error" for a `.onion` name and "should not perform
@@ -4851,7 +5486,7 @@ than a patch to apply; see §2.2 and TO-D2.
 #### TO-3. No SOCKS stream isolation: everything shares circuits
 
 **What.** One SOCKS proxy URL with no credentials is applied to the whole
-session (`src/anonymize.js:243-258`), and the five main-process paths that dial
+session (`src/anonymize.js:300-315`), and the five main-process paths that dial
 the same port for themselves — the Handshake resolver's authoritative hop, an
 A-record `hns://` site's DANE-pinned socket, the `wss://` tunnel's upstream, a
 `gemini://` TLS socket and a Nostr relay's WebSocket, all through
@@ -4893,7 +5528,7 @@ saying it is absent.
 #### TO-4. Whether the session cookie jar reaches the onion fetch is not established
 
 **What.** The handler forwards no `Cookie` header and passes no `Set-Cookie`
-back (`src/onion-protocol.js:182-190`, `:209-219`). Whether the injected
+back (`src/onion-protocol.js:200-214`, `:209-219`). Whether the injected
 session-bound fetch attaches session cookies of its own accord is **not
 determined** by this code, and no test in this package or the browser's asserts
 either way.
@@ -4926,7 +5561,7 @@ pin the choice. See TO-D3.
 #### TO-5. Onion services with client authorization cannot be reached
 
 **What.** The generated `torrc` configures no `ClientOnionAuthDir`
-(`src/tor.js:197-208`), and there is no interface for entering a
+(`src/tor.js:199-208`), and there is no interface for entering a
 client-authorization key.
 
 **The standard says.** rend-spec-v3 specifies client authorization for v3 onion
@@ -4951,7 +5586,7 @@ TO-D4.
 #### TO-6. IP Protection is all-or-nothing for the whole session
 
 **What.** There is one proxy state for the whole browser session
-(`src/anonymize.js:243-258`), and it is driven by Settings › Content delivery ›
+(`src/anonymize.js:300-315`), and it is driven by Settings › Content delivery ›
 Mode (SPEC §2). Reaching a single onion service means putting the whole browser
 in Private: every tab, every protocol handler and the search fan-out through
 Tor, and the Handshake, ICANN, Nostr and peer-to-peer policies that move with
@@ -5015,6 +5650,63 @@ replace the engine's error page with one built from the controller's note — th
 same words: the mode, nothing loads, the switch — using the same hook the
 Tor-ready reload of SPEC §7.4 already has on those tabs. Keep the blackhole; add
 the page.
+
+---
+
+#### TO-8. `onion://` carries HTTP only, so an HTTPS onion service is unreachable
+
+**What.** The `onion://` carrier scheme has no way to express TLS (SPEC §5,
+R16): the handler always builds `http://<host>[:port]<path>`
+(`src/onion-protocol.js:140`), and `parseOnionUrl` has no notion of a transport
+(`:54-74`). A `Location` on `https:` pointing at any `.onion` host — the
+service's own included — is therefore classified `unsupported-transport`
+(`:95`) and answered **501**, naming the HTTPS address and saying the redirect
+was not followed because following it would remove TLS (`:161-168`). Nothing is
+sent to that address. There is no way, from inside this browser, to reach an
+onion service that will only serve HTTPS.
+
+**The standard says.** RFC 7686 §2 requires that the name be handed to Tor
+rather than resolved, and says nothing about the transport spoken inside the
+tunnel; rend-spec-v3's rendezvous protocol likewise authenticates the *service*
+and says nothing about the application protocol carried over it. Neither
+requires TLS and neither forbids it, so the HTTP-only choice is not a
+departure from either. It is a departure from **RFC 9110 §15.4**, whose
+redirect semantics a user agent is expected to follow for 301/302/303/307/308:
+this handler refuses one class of `Location` rather than following it, and
+answers **RFC 9110 §15.6.2 `501 (Not Implemented)`** — *"the 501 status code
+indicates that the server does not support the functionality required to
+fulfill the request"* — which is the accurate code, because the functionality
+that is missing is this browser's.
+
+**Why.** Re-encoding `https://<addr>.onion/x` as `onion://<addr>.onion/x` would
+be a silent downgrade with two edges. The service asked for a different
+**security context** — its own certificate, its own HSTS state, its own idea of
+what a secure origin is — and Tor's structural authentication of the endpoint
+is not a substitute the browser is entitled to choose on the service's behalf.
+And the rewrite is **lossy**: URL normalisation drops an explicit `:443`, so the
+"same" address would be fetched on port 80 over cleartext. Following it would
+also mean serving bytes the service published under TLS inside an origin that
+cannot express TLS (SPEC §9.4). Refusing is the only one of the three options
+(follow, rewrite, refuse) that neither lies to the user nor to the service.
+
+**Consequence.** A real and stated limitation, not a fixed defect: **an onion
+service that serves only HTTPS cannot be reached in this browser.** A service
+that redirects HTTP to HTTPS — an increasingly ordinary configuration on the
+clearnet, and one some onion operators mirror — is reachable only as far as the
+redirect, and the user gets a 501 page explaining the transport, not the page
+they asked for. How large that population is has **not been measured**: most
+onion services serve plain HTTP inside the tunnel precisely because the onion
+address already authenticates them, but we have no survey and are not going to
+claim one. The refusal at least names the address, so the user can open it in a
+client that does support it.
+
+**Status: OPEN.** The refusal is right for as long as the carrier is HTTP-only —
+the alternative is a silent downgrade, which is worse than a failure — but the
+carrier being HTTP-only is the thing to fix. The engineering item is §3,
+**TO-D6**. Until it lands, no document or interface may describe `onion://` as
+scheme-agnostic, and the redirect classifier **must** keep the host test ahead
+of the transport test (`src/onion-protocol.js:91`, `:95`) so that a clearnet
+`https://` target is still refused for being clearnet.
 
 ---
 
@@ -5137,6 +5829,20 @@ learn about the hop. It has no security consequence we can see (the origin is
 identical by construction), and we are noting it because "the browser cannot see
 the redirect" is the sort of thing that turns out to matter later.
 
+#### 2.8. Whether a privacy gate this chapter does not own belongs in this listener
+
+Electron allows one `webRequest.onBeforeRequest` per session, so the leak guard,
+the Wildroot API gate and the WebSocket policy are one function
+(SPEC §3.1). The composition is forced, and the fail-closed rule (R18) makes it
+safe in the direction that matters. What we are less comfortable with is the
+other direction: a fault in a policy **this chapter does not specify** — the
+WebSocket policy is Chapter 11's — now cancels requests inside the module whose
+job is the onion leak rule, and a reader auditing "does an onion subresource
+ever escape?" has to read code that has nothing to do with onions to be sure.
+The alternative is worse (a second listener silently replaces the first, which
+is exactly how this file's first comment says the leak was nearly reopened), so
+we keep it. We would rather Electron let us compose properly.
+
 ---
 
 ### 3. Open design items
@@ -5230,6 +5936,27 @@ uncertain this should be built: the moment the setting exists, it is the thing a
 bad tutorial tells people to point at somebody else's server. Being talked out
 of it is a good outcome.
 
+#### TO-D6. Let the onion carrier express its transport
+
+`onion://` means HTTP inside Tor and cannot say anything else, so an HTTPS
+redirect is refused and an HTTPS-only onion service is unreachable (TO-8). The
+refusal is the right answer to the wrong shape.
+
+**Recommendation.** Decide the carrier question before adding any code. The
+options we can see are: a **second scheme** (`onions://`), which is honest and
+ugly and doubles every scheme registration, every classifier row and every
+trust-state case; a **default-port convention** (`onion://host:443/` means TLS),
+which is invisible to a reader and collides with a service that really does
+serve HTTP on 443; or **negotiating inside the handler** — attempt TLS over the
+SOCKS socket the way Chapter 9's Gemini path builds its own (`socksDialer`,
+`../../src/socks-dial.js`), and record what was actually negotiated in the trust
+state rather than in the URL. The third is the only one that does not put a
+transport in an address, and it is also the one that raises the real question:
+what a certificate *means* on a host name that is already a public key, and
+which trust step (SPEC §8) an onion page reached over TLS should get. Measure
+first how many onion services refuse plain HTTP; if the answer is "almost none",
+the honest fix is to leave TO-8 open and say so, not to build this.
+
 ---
 
 ### 4. What this chapter leaves out
@@ -5259,21 +5986,27 @@ Three things are deliberately absent from `src/` and `tests/`:
 
 3. **The session wiring.** Which Electron sessions the proxy is applied to, how
    `net.fetch` is bound, how the anonymize controller composes with the
-   WebSocket PAC, and how the `DeliveryMode` controller is wired to the
+   WebSocket PAC, which `websocketPolicy` is injected into the one
+   `onBeforeRequest` listener (the policy is Chapter 11's, `../apps/`; this
+   chapter specifies only the dispatch and the fail-closed rule, SPEC §3.1),
+   and how the `DeliveryMode` controller is wired to the
    settings page, the Privacy menu and the stored configuration (the controller
    itself, `../../src/delivery-mode.js`, is in this package; the `failClosed`
    flag the browser passes is set there) all live in the browser's
    `src/index.js` and `src/protocols/index.js`. `AnonymizeController` takes duck-typed sessions
-   (`{ setProxy, closeAllConnections }`) and the onion handler takes an injected
-   `fetchImpl`, so both are fully exercised here without Electron — but the
-   *wiring* is the browser's, and SPEC §7.5 specifies its policy rather than its
-   code.
+   (`{ setProxy, closeAllConnections }`), `installSubresourceGuard` takes a
+   duck-typed session and injected policies, and the onion handler takes an
+   injected `fetchImpl`, so all three are fully exercised here without
+   Electron — but the *wiring* is the browser's, and SPEC §7.5 specifies its
+   policy rather than its code.
 
 One thing is included that is arguably out of scope and is flagged rather than
 trimmed: **`src/tor.js` contains the whole Tor client lifecycle** — spawning,
 the pid-file orphan reap, the 30-second supervision probe and the recovery
 respawn. Resolution depends only on the availability states and the SOCKS
-endpoint (SPEC §7). It is kept whole because every source file in this
+endpoint (SPEC §7) — though the line between the two is thinner than it looks:
+revoking a route the moment its process ends (SPEC §7.7) is lifecycle code that
+decides what `socksUrl()` reports, which is resolution. It is kept whole because every source file in this
 repository is byte-identical to its counterpart in the Wildroot tree, so a fix
 in one is provably the same fix in the other, and a trimmed copy of a
 security-relevant module is a worse problem than an over-broad one.
@@ -5458,7 +6191,9 @@ stated correctly. The engineering item is §3, **KY-D2**.
 
 **What.** `magnet` has a namespace of its own, distinct from `bittorrent`
 (`../../src/router.js`, `NAMESPACES.MAGNET`), even though every successful
-magnet is a 308 into `bittorrent://` and every failing one is a 400.
+magnet is a 308 into the consent page (`wildroot://torrents?…`,
+`src/magnet-protocol.js:86-87`) and every failing one is a 400. No answer in
+this namespace is a `bittorrent://` URL at all.
 
 **The standard says.** Nothing: the namespace is this specification's own unit,
 defined in the spine. BEP 9 defines the magnet URI and says nothing about how a
@@ -5473,10 +6208,12 @@ the swarm was consulted when nothing was.
 `X-Resolution-Namespace: magnet`, so anything counting failures per namespace
 sees two namespaces where a user sees one protocol.
 
-**Status: DELIBERATE.** A redirect is an answer, not a fallback — the same
-reasoning that justifies the key-shape split inside the BitTorrent namespace
-(SPEC §K.7.2). Stated because a reader comparing the namespace list to the
-scheme list will notice the extra row.
+**Status: DELIBERATE**, and the consent hand-off makes it more so: a magnet is
+answered by a page that asks the user, and the BitTorrent namespace is not
+entered at all until they agree (SPEC §K.7.5). A redirect is an answer, not a
+fallback — the same reasoning that justifies the key-shape split inside the
+BitTorrent namespace (SPEC §K.7.2). Stated because a reader comparing the
+namespace list to the scheme list will notice the extra row.
 
 ---
 
@@ -5620,12 +6357,13 @@ and **KY-D4**.
 #### KY-10. Every magnet parameter except `xt`, `xs` and `dn` is ignored
 
 **What.** `tr=` (tracker), `ws=` (web seed), `so=` (select file indices),
-`x.pe=` (peer address) and everything else are read and discarded. Only the
-info-hash or public key and the display name survive the 308 into
-`bittorrent://`.
+`x.pe=` (peer address) and everything else are read and discarded
+(`src/magnet-protocol.js:32-42`). Only the info-hash or public key and the
+display name survive the 308 into the consent page, and only those two reach
+the `bittorrent://` address the user may then approve.
 
 **The standard says.** BEP 9 defines `tr=` and `dn=` alongside `xt=`; BEP 53
-defines `so=`.
+defines `so=` (§"Select specific file indices for download").
 
 **Why.** The `bittorrent://` URL form has no room for them: the address is a
 key and a path and nothing more. Discovery is the DHT's job (BEP 5), and file
@@ -5676,6 +6414,49 @@ refusal to render a lower one without saying so, and a trust step that reports
 "newest seen" rather than staying silent. Written down because "the address is
 the key, so it is verified" is a claim that quietly excludes freshness, and a
 reader is entitled to know that.
+
+---
+
+#### KY-12. A malformed `xs` is refused as though the magnet carried no `xs`
+
+**What.** A magnet whose only address parameter is an `xs` the browser cannot
+read — a `urn:btpk:` whose key is not 64 hex characters, or an `xs` carrying
+some other URN — is answered *"Magnet link has no `xt` or `xs` parameter"*
+(`src/magnet-protocol.js:92`). That sentence is untrue of it: it has an `xs`.
+The path there is `magnetToTorrentsPage()` declining the magnet (`:86`) and the
+`xt` branch not applying (`:88`), which leaves the final message meant for a
+magnet that really carries neither parameter. `urn:btpk:` + 63 hex — a
+truncated paste, the likeliest way to produce this — is refused with those
+words.
+
+**The standard says.** BEP 9 defines `xt` (*exact topic*) and BEP 46 defines the
+`xs=urn:btpk:` (*exact source*) parameter this refusal denies the existence of.
+The conformance verb is this chapter's own: SPEC §K.7.1 states that an
+implementation **SHOULD** refuse a form it recognises and cannot use *by naming
+it*, "a refusal that describes a *different* identifier sends its reader looking
+for the wrong fault". This is that failure, applied to `xs` rather than `xt`.
+
+**Why.** The named refusals were written for the `xt` branch: `refusalFor()`
+(`:67-76`) reads `searchParams.getAll('xt')` and names the BEP-52 `urn:btmh:`
+and BEP-9 base32 forms it finds there (KY-2, KY-3). Nothing equivalent reads
+`xs`, so an `xs` that fails `PUBLIC_KEY_MATCH` falls past both branches to the
+catch-all.
+
+**Consequence.** A user with a truncated or mistyped BEP-46 magnet is told to
+look for a parameter that is in front of them, which is the specific
+wrong-fault-hunting this chapter's own rule exists to prevent. No security
+consequence: the refusal is in-namespace, carries no `Location`, and nothing is
+dialled either way (SPEC §K.7.5). It is an accuracy defect in a message, in a
+chapter that holds accurate refusals to be part of the specification.
+
+**Status: OPEN.** Give `xs` the treatment `xt` already has: test
+`searchParams.getAll('xs')` before the catch-all and name what was found — an
+`xs` carrying `urn:btpk:` with the wrong number of hex characters is a malformed
+public key, and an `xs` carrying another URN is a source form this browser does
+not read — keeping *"Magnet link has no `xt` or `xs` parameter"* for the magnet
+of which it is true. A few lines beside `refusalFor()`, and the same test shape
+as "a form this browser does not read is refused BY NAME"
+(`tests/magnet.test.js`).
 
 ---
 
@@ -5794,6 +6575,32 @@ type* and nothing about latency, exit-policy refusals, or what a capsule that
 blocks known exits does. Gemini servers are hobby infrastructure and some of
 them will refuse Tor; the honest statement is that the route is correct and
 unmeasured.
+
+#### 2.8. The consent contract is specified here and fulfilled somewhere else
+
+SPEC §K.7.5 specifies the two confirmation URLs a magnet becomes —
+`wildroot://torrents?add=<infohash>` and `wildroot://torrents?mutable=<key>` —
+and `tests/magnet.test.js` pins both, on both readers. Every test in this
+package therefore establishes one half of the rule: **nothing peer-backed is
+reached without the page.** The other half — that the page then *asks* — is
+behaviour this package contains no code for and can write no test against.
+
+That is a split, not an unknown. The reference implementation honours both
+forms: Wildroot's torrents page reads `?mutable=`, requires exactly one such
+parameter matching the same 64-hex shape rather than guessing at a malformed
+one, and renders an "Open this mutable site?" confirmation with the key shown —
+the mutable twin of the "Add this torrent?" card the `?add=` form gets. It is
+named here as an existence proof that the contract is satisfiable and is
+satisfied, not as a normative citation: it is a browser file, outside this
+package, and nothing in this specification depends on its internals.
+
+What remains genuinely uncertain is what a *second* implementation would do.
+An implementation that wired `magnetToTorrentsPage()` to a page which acted on
+the URL without asking would pass every test in this directory and break the
+rule the chapter is built on, because the rule lives across a boundary the tests
+cannot cross. We do not have a way to close that from here, and a reader copying
+this design should treat §K.7.5's consent requirement as binding on the page
+they write, not as something the resolution layer can enforce for them.
 
 ---
 
@@ -6225,10 +7032,12 @@ key — holds, and the pin is proven through a real spliced connection by
 `tests/ws-proxy.test.js` ("e2e: the tunnel preserves end-to-end TLS so a DANE
 pin verifies through it"). The five fences hold and each is pinned by a test,
 including on the anonymized route, where the upstream is dialled through the
-device-local Tor by address and the name is never given to the proxy.
-Everything below is about the *other* things: the authentication that cannot
-exist, the service worker we do not allow, the origin the token is bound to, the
-manifest nobody signs, and a long list of what we have not measured.
+device-local Tor using an address in the SOCKS request, so the proxy performs no
+lookup for us. Everything below is about the *other* things: the authentication
+that is not reachable, the caller the tunnel cannot identify, the name the TLS
+handshake still discloses, the service worker we do not allow, the origin the
+token is bound to, the manifest nobody signs, and a long list of what we have not
+measured.
 
 Paths written `../../src/…` are shared modules of the top-level package; paths
 written `src/…` and `tests/…` are this chapter's, under `namespaces/apps/`.
@@ -6239,43 +7048,55 @@ extracted into this repository (SPEC.md, "Paths").
 
 ### 1. Deviations
 
-#### AP-2. The tunnel cannot require proxy authentication, and ships with none
+#### AP-2. The tunnel authenticates no requesting application
 
 **What.** The tunnel is an unauthenticated local proxy. It accepts a `CONNECT`
 from any process on the machine that can reach `127.0.0.1:<port>`, subject only
-to the port, Handshake-only, SSRF and Tor fences. The `Proxy-Authorization`
-check is implemented and constant-time (`src/ws-proxy.js:217`, `:276-280`,
-`:300-303`) but is skipped because no credential is passed
-(browser `src/protocols/index.js:267-277`).
+to the port, Handshake-only, SSRF and Tor fences and to the limits of SPEC
+§4.5.3. The `Proxy-Authorization` check is implemented and constant-time
+(`src/ws-proxy.js:228`, `:374-378`, `:399-402`) but is skipped because no
+credential is passed (browser `src/protocols/index.js:267-277`). Nothing else
+identifies the caller: the listener binds `127.0.0.1` (`:332`), and a loopback
+bind is a statement about which *device* may reach the port, not about which
+*program* on that device did.
 
 **The standard says.** RFC 9110 §11 (with RFC 7235's mechanism) defines exactly
 this: a proxy answers `407` with `Proxy-Authenticate` and the client retries
-with `Proxy-Authorization`. RFC 1928/1929 define the SOCKS5 equivalent. Both
-are available on paper and neither is reachable in practice: Chromium's SOCKS5
-client offers only the "no authentication" method, and Chromium does not
-surface a proxy-auth challenge to its embedder for a `wss://` handshake, so the
-`407` is never answered and the socket dies instead of retrying.
+with `Proxy-Authorization`. RFC 1928/1929 define the SOCKS5 equivalent. Both are
+available on paper and neither was reachable in the runtime this implementation
+targets: in the tested Electron build Chromium's SOCKS5 client offered only the
+"no authentication" method, and on the tested path Chromium surfaced no
+proxy-auth challenge to its embedder for a `wss://` handshake, so the `407` was
+never answered and the socket died instead of retrying (SPEC §4.3). Those are
+measurements of one build and one code path, not properties of the protocols,
+and they have not been repeated on every engine version this implementation has
+since run on: an old experiment is not evidence about a future version.
 
 **Why.** Two implementations were built and neither could connect once. The
-choice is between a fence that cannot be enforced and an honest statement that
-the boundary is the loopback bind plus the four content fences.
+choice is between a fence that could not be enforced in that runtime and an
+honest statement of what the boundary actually is.
 
 **Consequence.** Any local process can use the tunnel to resolve a Handshake
-name and open a TCP connection to its public address on port 443. That is a real
-widening of what this component does compared with an authenticated proxy, and
-the argument that it is acceptable is a specific one: a process already on
-loopback can resolve the same name over public DoH and dial the same address by
-itself, so the tunnel confers no capability it lacked — while the port,
-Handshake-only and SSRF fences mean it confers rather *less* than a general
-proxy would. In Private mode that connection is made through the user's own
-Tor client rather than directly — or, while that Tor is blocked, not at all —
-which is a route the local process could also have taken itself.
+name with the browser's own resolver and open a TCP connection to that name's
+public address on port 443 — in Private mode, through the user's own Tor client;
+while Tor is blocked, not at all. The fences bound what it can reach (one port,
+Handshake names only, public addresses only) and the limits bound how much of it
+it can hold at once, but nothing bounds *who* may ask. A host on which any local
+process is assumed benign loses nothing; a host on which it is not has a local
+capability here that no user interface shows and no grant covers.
 
-**Status: DELIBERATE.** The credential path is retained and tested
-(`tests/ws-proxy.test.js`, "OPTIONAL auth (future platform)") so that a platform
-which can authenticate a `wss://` proxy re-enables the gate with no code change.
-Until then, no document, comment or interface may describe proxy authentication
-as a protection of this feature.
+**Status: OPEN.** We would still ship without a proxy credential — there was
+none to be had — but we would not again describe the loopback bind as the access
+control, and the gap is real rather than notional. Two things would close it and
+neither is done: authenticate the peer at the operating-system level (match the
+connecting process to this browser's own — `SO_PEERCRED` on Linux,
+`LOCAL_PEERPID` on macOS, `GetExtendedTcpTable` on Windows — and refuse every
+other caller), or use a platform that can answer a proxy challenge for a
+`wss://` CONNECT, for which the credential path is retained and tested
+(`tests/ws-proxy.test.js`, "OPTIONAL auth (future platform)") so the gate
+re-enables with no code change. Until one exists, no document, comment or
+interface may describe proxy authentication, or the loopback bind, as
+authenticating the caller.
 
 #### AP-3. No service workers at a Handshake name
 
@@ -6328,8 +7149,12 @@ whether a Handshake name is live and holds a socket, and can reach a Handshake
 application's socket API with whatever credentials that application accepts
 cross-origin. It learns nothing the name does not already publish, and the
 application's own `Origin` check is the defence the platform intends — but a
-Handshake application author should know that their socket is reachable from
-the whole web, not only from their own origin.
+Handshake application author should know two things about it. Their socket is
+reachable from the whole web, not only from their own origin; and an `Origin`
+header is a statement made by the requesting user agent about itself, so it is a
+filter against ordinary cross-origin pages and not a proof of who is connecting.
+Anything the server must be *sure* of belongs in the authentication of SPEC §5.4,
+not in a header.
 
 **Status: DELIBERATE.** Matching the web platform is right here; diverging would
 make Handshake sockets behave unlike every other socket, which is a worse trap
@@ -6408,7 +7233,7 @@ warned about.
 #### AP-7. A Handshake WebSocket is reachable on port 443 and nowhere else
 
 **What.** The tunnel accepts a `CONNECT` to 443 and refuses every other port
-before resolving (`TUNNEL_PORT`, `src/ws-proxy.js:90`, `:317-319`; SPEC §4.4
+before resolving (`TUNNEL_PORT`, `src/ws-proxy.js:87`, `:416-418`; SPEC §4.4
 fence 1). The PAC still routes `wss://<name>:8443/…` to the tunnel — it decides
 on scheme and host, not port — so an application that serves its socket
 anywhere but 443 is routed here and then refused with a `403` the page cannot
@@ -6425,13 +7250,22 @@ Chapter 1's own deviation HS-6 — and the
 engine's certificate-verification request carries a hostname with **no port**
 (browser `src/index.js:1330-1351`), so even a resolver that fetched the right
 RRset would have nothing to select it with at verification time. Accepting an
-arbitrary port would therefore mean splicing TLS that the pin check cannot
-cover — which is exactly what fence 1 exists to prevent.
+arbitrary port would therefore mean splicing TLS that this profile's pin check
+could not cover — which is what fence 1 exists to prevent.
 
 **Consequence.** A publisher must terminate its WebSocket on 443 at the
 Handshake name (SPEC §4.8), which is what every reference deployment does
 anyway, and a non-default port is a dead end with a bad error. The cost is
-carried by the deployment, not by the trust story.
+carried by the deployment, not by the trust story. Two things the port rule is
+**not** must be stated with it, because both are easy to assume and neither is
+true. It does not guarantee the pin: the pin is checked by the engine's
+certificate-verification procedure (SPEC §4.7), and a splice on 443 whose name
+publishes no TLSA still fails there, not here. And it does not guarantee TLS:
+the tunnel reads no byte after the `200`, so it cannot tell a TLS ClientHello
+from a plaintext WebSocket handshake. What the rule actually does is confine
+every splice to the one port this implementation's pin lookup covers, and
+decline the plaintext case that the web platform can actually produce — a
+`ws://` from a non-secure page, which arrives as `CONNECT <name>:80`.
 
 **Status: DELIBERATE**, with a clean fix if a port ever needs to be. Give the
 resolution a port parameter, read `_<port>._tcp.<name>`, and thread the port
@@ -6439,6 +7273,48 @@ from the CONNECT through to the certificate check; until the engine's
 verification callback carries the port, the honest set is the one port the pin
 covers, and refusing is better than splicing unpinned. Both halves must move
 together, or the port becomes reachable before it becomes pinned.
+
+#### AP-8. On the anonymized route the name is still disclosed to the exit, in SNI
+
+**What.** In Private mode the upstream is dialled through the device-local Tor,
+and the SOCKS request carries the **resolved address** (`ATYP` IPv4 or IPv6),
+never a name (`socksDialer`, `../../src/socks-dial.js:104-159`; the fence-4
+branch at `src/ws-proxy.js:426-432`). That is all it does: the SOCKS server
+performs no lookup on our behalf. The stream it then carries is the user agent's
+own TLS handshake, spliced end to end (`:473-475`), and that handshake names the
+host in the clear.
+
+**The standard says.** [RFC 8446](https://www.rfc-editor.org/rfc/rfc8446)
+§4.2.9 and [RFC 6066](https://www.rfc-editor.org/rfc/rfc6066) §3 define
+`server_name`: the client **SHOULD** include the server name in the ClientHello,
+and the ClientHello is not encrypted, so every hop that carries it can read the
+name. RFC 6066 §3 says so itself, and directs a deployment that needs the name
+hidden to another mechanism.
+[RFC 9848](https://www.rfc-editor.org/rfc/rfc9848) (Encrypted ClientHello) is
+that mechanism; it is not deployed on this path (Chapter 1, HS-3: the SVCB
+record that would carry the ECH configuration is parsed but not queried, and the
+runtime exposes no ECH option).
+
+**Why.** The address-form SOCKS request was chosen for two reasons that both
+still hold — it keeps a name out of the proxy's own resolver, and it leaves the
+SSRF guard an address to inspect — and neither of them was ever a claim about
+the ClientHello. The over-claim ("by address, so Tor learns no name") came from
+reading a property of the SOCKS hop as a property of the stream.
+
+**Consequence.** A Tor exit relay carrying a Handshake `wss://` sees which name
+the socket is for, and so does anything between that exit and the origin. What
+Private mode does hide on this path is the user's own address from the origin,
+and the lookup from the local network. An interface that says more than that is
+wrong, and a user choosing Private mode to keep *which name they are using*
+private is not getting it.
+
+**Status: OPEN.** The fix is ECH, which is blocked on the same two things
+Chapter 1 records for the document path — querying SVCB for the ECH
+configuration, and a runtime that exposes an ECH option — plus a decision about
+what to do when a Handshake name publishes no ECH configuration at all, which
+today is all of them. Until then the honest statement is the one SPEC §4.4 and
+§8 now make, and the claim must not be restated as "the name never leaves this
+device".
 
 ---
 
@@ -6477,26 +7353,51 @@ The Tor route of SPEC §4.4 fence 4 is pinned by test against a stub SOCKS
 server; it has not been measured against a real Tor circuit. Two things are
 therefore unquantified: what a WebSocket handshake costs through a circuit that
 may still be building (Chapter 8 §7.2 routes before readiness deliberately), and
-what a long-lived socket does to a session whose circuits are shared by
-everything in it (Chapter 8 TO-3). Neither is a correctness question — the
+what a long-lived socket does to the rest of the session, which asks for no
+stream isolation and whose actual circuit assignment is Tor's own decision and
+not something we have observed (Chapter 8 TO-3). Neither is a correctness
+question — the
 fences and the pin are the same on both routes — but a realtime application is
 the one kind of page for which "it works, slowly, forever" is a different
 product from "it works".
 
-#### 2.3. Whether the PAC leaves loopback traffic reachable in Private mode
+#### 2.3. What reaches a loopback service in Private mode, and by which rule
 
+Three mechanisms decide this and only one of them is ours, which is why it took
+a review to state it correctly.
+
+Chromium applies an **implicit bypass** for loopback destinations, and the
+`<-loopback>` token *removes* that implicit bypass rather than restoring it
+([`net/docs/proxy.md`](https://chromium.googlesource.com/chromium/src/+/HEAD/net/docs/proxy.md#overriding-the-implicit-bypass-rules)).
 The privacy controller's own configuration carries
 `proxyBypassRules: '<-loopback>'` (`_defaultConfig` in
-`namespaces/tor/src/anonymize.js`). The PAC decorator replaces the whole
-configuration with `{mode: 'pac_script', …}` (browser `src/index.js`), and the
-PAC has no loopback branch: in Private mode, its non-WebSocket answer for
-`http://127.0.0.1:<port>/` is the anonymizer's SOCKS directive — the Tor port
-while routed, the blackhole port while blocked. Whether Chromium applies an
-implicit loopback bypass to a PAC-configured session is exactly the thing we
-could not establish from the specification or from a measurement. If it does
-not, then every in-process loopback service a page fetches (a content-gateway
-port, a media sidecar) is routed into Tor — which refuses it — for as long as
-Private mode and the tunnel are both on. See AP-D1.
+`namespaces/tor/src/anonymize.js`), so what that configuration asks for is that
+loopback *be* proxied; the PAC decorator then replaces the whole configuration
+with `{mode: 'pac_script', …}` (browser `src/index.js`) and the bypass list goes
+with it. The PAC has no loopback branch, so its non-WebSocket answer for
+`http://127.0.0.1:<port>/` in Private mode is the anonymizer's SOCKS directive.
+
+What the token is documented to do and what it did are two different facts, and
+the second is version-specific. In the reference implementation's integration
+testing on **Electron 43.4.1 / Chromium 150**, `<-loopback>` was **ignored**
+under a PAC configuration in the native test: loopback stayed DIRECT whatever
+the configuration asked for. That is an observation about one build on one path,
+not a rule about Chromium, and an implementation relying on the token should
+repeat the measurement on its own engine version rather than inherit ours.
+
+WebSockets therefore do not rest on it at all. They are decided by an explicit
+policy at the request level rather than by a proxy return value
+(`localWsPolicy`, browser `src/hns/ws-proxy-policy.js:8-21`; SPEC §4.6): a
+Private-mode `ws:`/`wss:` to a local host is cancelled unless it is the exact
+endpoint of an already-running, granted Local App whose page and frame origins
+both match it, while a WebSocket to a remote host keeps the base Tor route with
+no DIRECT fallback.
+
+What remains unmeasured is everything that is **not** a WebSocket: whether an
+ordinary loopback fetch under this PAC is likewise left DIRECT by the implicit
+bypass, or is routed into the session's SOCKS directive — where Tor refuses it —
+for as long as Private mode and the tunnel are both on. The two look identical
+in the configuration and completely different on the wire. See AP-D1.
 
 #### 2.4. Cookie behaviour on an `hns://` origin
 
@@ -6523,8 +7424,10 @@ The decorator returns the base configuration unchanged for any session that is
 not the web-content session (browser `src/index.js:1133`). That is right for the
 sessions we know about, and we have not enumerated every session in the
 application that could host a document able to open a `wss://`. A session
-without the PAC sends `wss://<handshake name>` DIRECT, where it fails as an
-unresolvable host — a failure, not a leak, but an obscure one.
+without the PAC sends `wss://<handshake name>` along that session's own base
+route — direct in Fast mode, the session proxy in Private — where it fails as an
+unresolvable host, because only the tunnel can resolve a Handshake name. A
+failure, not a leak, but an obscure one.
 
 #### 2.7. Internationalised hosts in the PAC
 
@@ -6561,20 +7464,35 @@ the memory of one successful run is not one.
 Work we know is worth doing and have not done. Each names the file and lines to
 start from.
 
-#### AP-D1. Give the PAC a loopback and private-literal branch
+#### AP-D1. Decide the non-WebSocket loopback policy, and state it somewhere it can be enforced
 
 `FindProxyForURL` has exactly two answers — the tunnel for Handshake
-WebSockets, the anonymizer's directive for everything else
-(`src/ws-proxy-pac.js:58-63`) — and installing it discards the
+WebSockets, the base directive for everything else
+(`src/ws-proxy-pac.js:63-68`) — and installing it discards the
 `proxyBypassRules: '<-loopback>'` the privacy controller would otherwise apply
-(browser `src/hns/anonymize.js:243-247`, `src/index.js:1142-1145`). Whether that
-matters depends on §2.3, which we could not settle.
+(browser `src/hns/anonymize.js:243-247`, `src/index.js:1142-1145`).
 
-**Recommendation.** Return `DIRECT` from the PAC for `localhost`, for IPv4 and
-IPv6 loopback and private literals, and for a bracketed literal — before the
-WebSocket branch, so it holds for both. It costs four lines, it restores the
-bypass the controller intended in the one configuration where the controller no
-longer owns it, and it removes the need to answer §2.3 at all.
+**Not the recommendation.** Adding a `DIRECT` branch for loopback and private
+literals is the obvious four lines, and it is the wrong move for two separate
+reasons. First, the reasoning it rests on is backwards: `<-loopback>` *removes*
+Chromium's implicit loopback bypass
+([`net/docs/proxy.md`](https://chromium.googlesource.com/chromium/src/+/HEAD/net/docs/proxy.md#overriding-the-implicit-bypass-rules)),
+so a PAC branch returning `DIRECT` would not be "restoring the bypass the
+controller intended" — the controller asked for the opposite. Second, a PAC
+answer is a route hint and not a decision: on **Electron 43.4.1 / Chromium 150**
+the reference implementation's integration testing found the token ignored under
+a PAC and loopback DIRECT regardless (§2.3), which is precisely why the local
+WebSocket rule is a request guard that can *cancel*.
+
+**Recommendation.** Decide the policy as a policy, then enforce it where a
+request can be cancelled rather than merely routed. For WebSockets that is done
+(`localWsPolicy`, browser `src/hns/ws-proxy-policy.js:8-21`; its contract is
+SPEC §4.6). What is left is the non-WebSocket half: measure which rule actually
+governs a loopback fetch under a PAC configuration (§2.3), then either extend
+the same request-level gate to those requests or state, in the privacy
+interface, that loopback services are reachable in Private mode and why.
+Whichever way it goes, it should be one written policy with one enforcement
+point, not a bypass token in one configuration and a PAC branch in another.
 
 #### AP-D4. Decide the service-worker question for `hns://`
 
@@ -6609,26 +7527,38 @@ so the change is in the discovery base and its test.
 
 #### AP-D8. Surface the tunnel's refusal reason
 
-Every fence answers a distinct HTTP status that the WebSocket API discards, so
+Every refusal answers a distinct HTTP status that the WebSocket API discards, so
 "this is not port 443", "Private mode, and the Tor client is not connected",
-"this name has no address", "this name resolves to a private address" and "the origin
-is down" are one untyped `error` event to the page and nothing at all to the
-user (`src/ws-proxy.js:264-274`).
+"this name has no address", "this name resolves to a private address", "the
+origin is down", "we are at capacity" (`503`) and "it timed out" (`504`) are one
+untyped `error` event to the page and nothing at all to the user
+(`src/ws-proxy.js:358-372`).
 **Recommendation.** Record each refusal with its reason and the name, and show
 it where the connection's trust state is already shown. The information exists
 and is thrown away at the socket boundary.
 
-#### AP-D9. Bound the tunnel's concurrency
+#### AP-D9. Per-name resolution limiting, and the connection that is dropped unanswered
 
-The tunnel accepts and tracks unbounded connections
-(`src/ws-proxy.js:230-235`), and every accepted CONNECT to an unresolved
-Handshake host costs one resolution. **Recommendation.** A cap on live tunnels
-and a small per-name rate limit on resolutions, refusing with `503` beyond it.
-The risk today is bounded by the loopback bind, so this is hygiene rather than a
-hole — but it is the kind of hygiene that is much easier to add before the
-tunnel's dials are, in Private mode, made through the user's own Tor circuit
-(SPEC §4.4 fence 4), where every accepted CONNECT costs circuit capacity
-as well as a resolution.
+The concurrency bound exists: 128 live client sockets, 32 connections in setup,
+32 outstanding resolutions or dials, each with its own deadline, and `503`
+beyond the pending limit (`WS_LIMITS`, `src/ws-proxy.js:93`; the accept gate at
+`:316`; the pending gate at `:279`; SPEC §4.5.3). Two things around it are not
+done.
+
+There is **no per-name limit**: one name that resolves slowly can occupy the
+whole pending budget from a page that opens sockets in a loop, and in Private
+mode each of those dials costs circuit capacity as well as a resolution (SPEC
+§4.4 fence 4). **Recommendation.** A small per-name rate limit on resolutions,
+refusing with `503` like the global one, and a shorter deadline for a name
+already known to be failing.
+
+And a connection over `maxConnections` is **destroyed without a response**
+(`:316`), where every other refusal in this chapter is a complete HTTP response
+followed by a graceful half-close (SPEC §4.5.1). RFC 9110 §15.6.4 gives `503`
+exactly this meaning and RFC 9110 §10.2.3 gives it a `Retry-After`.
+**Recommendation.** Answer the over-cap connection with `503` as the pending
+gate does, unless a measurement shows that writing to a client at that point
+costs more than it tells anyone.
 
 ---
 
@@ -6695,10 +7625,10 @@ Chapter 8), the only privacy setting the browser has today. Sizes are rough:
 | 3 | **Handshake names over DoH / ODoH** (Ch. 1 §9) | ODoH to `odoh.hns.one` through an independent relay; plain DoH to `query.hns.one` when the relay path fails (a leak of the name, and the trust state names the endpoint) | the same, and fails closed: `unreachable`, said in words | **Shipped as the Private/Fast switch**: in Private `DoHResolver({ strictOblivious })` never takes the plain fallback; the page names the mode, says nothing is known about the site, and points at the switch (`privateRefusal('lookup')`) | **No** — the fallback exists precisely because the relays are two and can both fail; the only both-sides option is more relays (a provider-side change: run one ourselves that is *not* the target operator) | done |
 | 4 | **The resolver's plaintext `dns.lookup()`** for NS and CNAME targets that are ICANN hosts (Ch. 1 §6.5, §6.8) | the OS resolver, in the clear, from the chain path | the same lookup through the browser's DoH/ODoH client | **Done**: `HNSResolver` takes `lookup`, the browser hands it `DoHResolver.addressOf`; nameserver names and CNAME targets go through DoH/ODoH in every mode. The OS resolver is the library default only | **BOTH.** Resolving the ICANN host through the ODoH bridge or `DoHResolver` is neither slower in any way a user sees nor less functional; it removes the plaintext query on the fast path too | built |
 | 5 | **ODoH configuration fetch** (`/.well-known/odohconfigs`, Ch. 2 IC-9) | fetched directly from the target at startup | through a relay, or pinned in the release | **Leak** of "this user runs Wildroot's oblivious path" to the target, once per start | **BOTH, in principle.** An ODoH relay forwards only the oblivious query (RFC 9230 §4.2), not a GET for `/.well-known/odohconfigs`, so "through the relay" is not available as written; the both-sides shape is a config pinned in the release and refreshed through Tor when IP Protection is on | **S–M** |
-| 6 | **ICANN browsing DNS** (Ch. 2 §5) | Chromium's own secure DNS to the configured pool (encrypted, not oblivious) | the loopback ODoH bridge | **Degrade with a stated cost**: the bridge replaces the pool; in `automatic` mode the fallback below it is **plaintext system DNS** (IC-7); in `secure` mode there is none; the panel reports which happened | **BOTH, mostly.** The bridge is the both-sides answer for the lookup itself (private, and encrypted DNS was already a round trip). The remaining trade is availability: what happens when the bridge cannot answer — DoH to the pool (fast, not oblivious) or nothing. A cache of bridge answers narrows the window; more relays narrow it further | **S–M** — a PRIVATE mode is `secure` + bridge; measure the engine on a mixed template list before deciding whether the pool sits behind the bridge |
+| 6 | **ICANN browsing DNS** (Ch. 2 §5) | Chromium's own secure DNS to the configured pool (encrypted, not oblivious) | the loopback ODoH bridge | **Degrade with a stated cost**: the bridge replaces the pool; in `automatic` mode the fallback below it is **plaintext system DNS** (IC-7); in `secure` mode there is none. The panel reports the **configuration**, and the bridge's own record of having answered that exact name — it cannot report which path a given navigation took, because the engine resolves the name from its own cache out of this process's sight, and it says so rather than guessing (SPEC §4, `recentEvidence()`) | **BOTH, mostly.** The bridge is the both-sides answer for the lookup itself (private, and encrypted DNS was already a round trip). The remaining trade is availability: what happens when the bridge cannot answer — DoH to the pool (fast, not oblivious) or nothing. A cache of bridge answers narrows the window; more relays narrow it further | **S–M** — a PRIVATE mode is `secure` + bridge; measure the engine on a mixed template list before deciding whether the pool sits behind the bridge |
 | 7 | **ICANN page fetches** (Ch. 2) | direct | through Tor (the session proxy) | **Shipped as the Private/Fast switch**: Private routes the session through the device-local Tor and **fails closed** when Tor cannot be had (`MODES.BLOCKED`, a loopback blackhole proxy — never a direct fallback); ICANN names resolve through the oblivious bridge only (`privateDns()`); the site sees a Tor exit | **No** — the site must see *some* address; only Tor or a VPN-shaped relay hides the user's, and both cost latency and Tor-blocking sites. This is the divergence the switch *is* | done |
-| 8 | **IPFS: the local node's DHT and bitswap** (Ch. 3 §7) | kubo dials peers directly; peers learn the user's IP and every CID asked for | a trustless gateway over the proxied fetch with every block verified, or kubo over Tor | **Refuse** (503) for `ipfs://`, `ipns://` and an `ipfs=` name while anonymization is on — the stated-origin fetch itself is proxied (row 9), but the local node would PROVIDE the imported blocks to the DHT, which is the disclosure the gate exists for | **BOTH, for named sites.** A Handshake name can state its origin (`car=`, Ch. 3 §8) and the browser can fetch the whole CAR from it over HTTPS and verify every block on import — no DHT, no peers, first byte from one round trip. Private because the origin sees a Tor exit when proxied and one CID it already serves; fast because it is a single HTTPS fetch. Our own provider (pinthis) already announces every sub-root so that the default mode is both private and fast. What it does not cover: a bare `ipfs://` CID with no stated origin, which needs a configured trustless gateway (a third party sees the CID) | **DONE 2026-09-06** — the local node runs `kubo daemon --offline` in Private (no swarm, no DHT client, no announces; `IPFSNode.setRouting`, the policy table's `contentNode`) and as a DHT client in Fast, restarted on the switch; the stated-origin fetch serves named sites privately from the imported archive. **L** for kubo over Tor remains for a bare CID |
-| 9 | **Origin warming and the `car=` stated origin** (Ch. 3 §8, experimental) | an HTTPS fetch of a CAR from the stated origin: faster first paint; the origin sees the user's IP and the CID | the same fetch over the proxied session fetch | **Proxied** — origin-warm rides the proxied session fetch; still unreachable while anonymized by inheritance from row 8's gate | **BOTH** — this row *is* the no-trade-off attempt for row 8: the fetch is verification-on-import already; injecting the proxied fetch makes it private with no loss. The warm path should stop being a warm-up and become the anonymized delivery path | the fetch is built; ungating waits on row 8's node-side change |
+| 8 | **IPFS: the local node's DHT and bitswap** (Ch. 3 §7) | kubo dials peers directly; peers learn the user's IP and every CID asked for. There is **one** node: `ipfs://`, `ipns://` and a Handshake name's `ipfs=` pointer all read the node the browser already runs, so this is one gate over one disclosure and not two | a trustless gateway over the proxied fetch with every block verified, or kubo over Tor | **Refuse** (503) for `ipfs://`, `ipns://` and an `ipfs=` name while anonymization is on — the stated-origin fetch itself is proxied (row 9), but the local node would PROVIDE the imported blocks to the DHT, which is the disclosure the gate exists for | **BOTH, for named sites.** A Handshake name can state its origin (`car=`, Ch. 3 §8) and the browser can fetch the whole CAR from it over HTTPS and verify every block on import — no DHT, no peers, first byte from one round trip. Private because the origin sees a Tor exit when proxied and one CID it already serves; fast because it is a single HTTPS fetch. Our own provider (pinthis) already announces every sub-root so that the default mode is both private and fast. What it does not cover: a bare `ipfs://` CID with no stated origin, which needs a configured trustless gateway (a third party sees the CID) | **DONE 2026-09-06** — the local node runs `kubo daemon --offline` in Private (no swarm, no DHT client, no announces; `IPFSNode.setRouting`, the policy table's `contentNode`) and as a DHT client in Fast, restarted on the switch; the stated-origin fetch serves named sites privately from the imported archive. **L** for kubo over Tor remains for a bare CID |
+| 9 | **Origin warming and the `car=` stated origin** (Ch. 3 §8, experimental) | an HTTPS fetch of a CAR from the stated origin: faster first paint; the origin sees the user's IP and the CID | the same fetch over the proxied session fetch | **Proxied** — origin-warm rides the proxied session fetch. The node garbage-collects unpinned blocks, so what an import left there is trusted for five minutes and then re-confirmed with one offline block lookup of the root (`namespaces/ipfs/src/block-presence.js`); a collected archive is fetched from the origin again instead of being answered "present" for the life of the process — which in Private, where the node is offline and cannot fetch the missing blocks itself, is the difference between a site that loads and one that does not | **BOTH** — this row *is* the no-trade-off attempt for row 8: the fetch is verification-on-import already; injecting the proxied fetch makes it private with no loss. The warm path should stop being a warm-up and become the anonymized delivery path | the fetch is built; ungating waits on row 8's node-side change |
 | 10 | **Cooperative delivery** (the coop project, not in this specification yet) | fetch from other Wildroot users' nodes: fast, and every peer learns the user's IP and CID | peers reached as onion services, or refuse | not shipped in either mode (Phase 0 blocked on provider peer identity); the switch's disclosure says so | **Unknown.** The both-sides shape would be peers that serve as onion services, so a fetcher learns nothing about a peer and a peer nothing about a fetcher; whether that is fast enough to be worth having is unmeasured. Serving-on-by-default is a disclosure by construction | **L** — a design decision before it ships |
 | 11 | **Arweave gateways** (Ch. 4 §6) | `ar.io` gateway over the proxied session fetch; the gateway sees the txid and the user's IP | the same over Tor | **Proxied** — works while anonymized | **BOTH, already.** The same code path serves both; the only cost is Tor latency, which is the IP Protection switch (row 7) | done; byte verification (AR-1) is a trust item, not a privacy one |
 | 12 | **ENS resolution** (Ch. 5 §5) | public Ethereum RPC over the proxied fetch; the endpoint sees the `.eth` name and the user's IP | the same over Tor; a light client removes the endpoint entirely | **Proxied** — works while anonymized; CCIP-Read gateways ride the same fetch | **BOTH, partly.** A short positive cache (EN-6) removes repeat questions on both paths. Removing the endpoint's knowledge of *which* name needs either a light client or an oblivious relay for `eth_call` — the latter is the ODoH idea applied to JSON-RPC and nobody runs one | done for privacy under Tor; **L** for a light client |
@@ -6708,11 +7638,11 @@ Chapter 8), the only privacy setting the browser has today. Sizes are rough:
 | 16 | **DID documents, AT Protocol and WebFinger** (Ch. 7) | `plc.directory` or the `did:web` host over the proxied fetch | the same over Tor | **Proxied** — `did:` works while anonymized | **BOTH, already** for the transport; the directory still learns *which* DID (an audit-log mirror would remove even that, and is the trust item DI-2) | done |
 | 17 | **Tor / `onion://`** (Ch. 8) | none — the namespace exists only through the device-local Tor | the only path | works only with IP Protection on; interstitial otherwise | not a divergence: there is one path by design | per-site circuit isolation (TO-3) is the open privacy item |
 | 18 | **Gemini** (Ch. 9 §K.6) | `tls.connect` from the main process: the OS resolver sees the host, the capsule sees the user's IP | dial through the Tor SOCKS port; resolve through the browser's resolver | **Done**, half: while anonymized the capsule is dialled through Tor BY NAME (no OS lookup) and refused only without a Tor port; with protection off the OS resolver still sees the host | **BOTH, half.** Resolving the host through the browser's resolver instead of the OS's is free on both paths (and opens Gemini over Handshake names). Hiding the IP from the capsule is Tor, row 7 | built for the anonymized half; the protection-off lookup through the browser's resolver remains **S** |
-| 19 | **hyper / SSB / BitTorrent discovery** (Ch. 9) | DHT, swarm and gossip from the main process over UDP and TCP; peers learn the user's IP and what is sought | refuse, and say why | **Shipped as the Private/Fast switch**: refused (503) in Private with the mode, the reason, "nothing was asked" and the switch on the page (`privateRefusal('p2p')`); a Handshake name with a stated origin loads from that origin instead (row 9) | **No.** A DHT is a disclosure to strangers by design; a TCP-only proxied swarm is a different, weaker engine. The honest both-sides answer for a *named* site is row 8's: state an origin and fetch from it | **L**, and possibly "refuse, and say why" is the right private path |
+| 19 | **hyper / SSB / BitTorrent discovery** (Ch. 9) | DHT, swarm and gossip from the main process over UDP and TCP; peers learn the user's IP and what is sought | refuse, and say why | **Shipped as the Private/Fast switch**: refused (503) in Private with the mode, the reason, "nothing was asked" and the switch on the page (`privateRefusal('p2p')`). A stated origin does **not** re-enable these protocols: row 9's origin path is an IPFS CAR fetch verified against the CID asked for, and there is no equivalent engine here for a hypercore, an SSB feed or a torrent, so the refusal says that rather than promising an origin it cannot use | **No.** A DHT is a disclosure to strangers by design; a TCP-only proxied swarm is a different, weaker engine. The honest both-sides answer for a *named* site is row 8's: state an origin and fetch from it | **L**, and possibly "refuse, and say why" is the right private path |
 | 20 | **hyper DNSLink lookups** (Ch. 9 KY-4) | `hyper-sdk` asks a DoH JSON resolver (Cloudflare by default) — a third party learns which hypercore names are opened | the same lookup at the browser's own bridge, or through Tor | **Leak** to a third-party resolver even with anonymization off; refused with the engine while on | **BOTH, not free.** `hyper-sdk` speaks the DoH JSON API and would not trust the bridge's loopback certificate, while the bridge speaks wire format for Chromium; pointing the engine at the bridge needs a JSON endpoint on the bridge and a fetch that trusts its pin | **M** |
 | 21 | **WebSockets to a Handshake name** (Ch. 11 §4) | the loopback CONNECT tunnel dials the resolved address from the main process | the tunnel dials through the Tor SOCKS port | **Done**: with IP Protection on the upstream is dialled through the Tor SOCKS port (`torSocks` → `socksDialer`); refused only without one | **BOTH, at Tor's latency.** Built: chain proof, DANE pin and fences unchanged, only the socket's route differs | built |
 | 22 | **Search** (`search://`) | the metasearch backend over the proxied fetch | the same over Tor | **Proxied** | **BOTH, already** — the backend is ours and blind-token-gated; it sees a Tor exit when IP Protection is on | done |
-| 24 | **The A-record `hns://` document fetch** (Ch. 1 §8) — the raw-socket path outside the session proxy, which no earlier row inventoried | `tls.connect` to the resolved address with the DANE pin checked on the handshake; the site sees the user's IP | the same socket through the Tor SOCKS port, by address | **Done**: `src/dane-connect.js connectDane({ dial })` — in Private the site is dialled through the SOCKS port by address (Tor learns an IP and no name), the pin is checked on that handshake, SNI is the name; with no Tor port the page is refused (`privateRefusal('site')`), never sent directly | **BOTH, at Tor's latency** — the check is identical on both routes | built |
+| 24 | **The A-record `hns://` document fetch** (Ch. 1 §8) — the raw-socket path outside the session proxy, which no earlier row inventoried | `tls.connect` to the resolved address with the DANE pin checked on the handshake; the site sees the user's IP | the same socket through the Tor SOCKS port, by address | **Done**: `src/dane-connect.js connectDane({ dial })` — in Private the site is dialled through the SOCKS port **by address**, so the name is absent from the SOCKS request and no resolver on the local network is asked; the pin is checked on that handshake. This does **not** hide the name from the exit — the ClientHello carries it as `server_name` (RFC 8446 §4.2.9), and ECH is the unsolved part (Chapter 1 HS-3). With no Tor port the page is refused (`privateRefusal('site')`), never sent directly | **BOTH, at Tor's latency** — the check is identical on both routes | built |
 | 23 | **Bootstrap and configuration fetches** (kubo AutoConf, delegated routers, mDNS; the ICANN TLD snapshot; the ODoH config) | kubo's are disabled by policy (Ch. 3); the TLD list is bundled; the ODoH config is row 5 | — | no leak from kubo by construction; row 5 remains | **BOTH, by policy** — bundling and disabling are the no-trade-off answers, already taken | — |
 
 What follows from the table, recorded rather than decided:

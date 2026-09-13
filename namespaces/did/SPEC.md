@@ -253,6 +253,7 @@ The honest assignment for this family, as implemented:
 
 | Step | State | Because |
 |---|---|---|
+| `did:key` / `did:jwk` / `did:pkh` → DID document | **derived** | No lookup happens: the document is computed from the identifier, and the key material in it is validated rather than merely measured (§5.1a). `derived` is not `verified` — nothing here proves possession of the private key or control of the account (§5.1b), so the step the interface is given is `unverified` with that sentence in it. |
 | `did:plc` → DID document | **unverified** | `plc.directory` is asked, and the document it returns must be about the DID asked for — a check that catches a wrong answer but proves nothing about a consistent lie. The PLC operation log that would make the method self-certifying is not fetched (`../../DEVIATIONS.md` DI-2). |
 | `did:web` → DID document | **unverified** | The document is whatever the domain served over WebPKI TLS, from a public host, without redirects, within a deadline — and it must be about the DID asked for. WebPKI is the ICANN root plus every CA (§10.3). |
 | handle → DID | **unverified** | Bluesky's public AppView is asked (§6.1). Neither authoritative method from the AT Protocol handle specification is used. |
@@ -268,11 +269,23 @@ step has one real check and no proof, so the lock it earns is **TRUSTED**,
 never green.
 
 An implementation SHOULD give the interface a `did`-specific step rather than a
-generic "no verification path for this scheme". The reference implementation
-does: the panel names the identifier step, marks it unverified, and says in
-words that the document was checked to be about the identifier asked for and
-that for `did:plc` the operation log which would prove it was not audited — so
-this is that server's word.
+generic "no verification path for this scheme", and that step **MUST** name the
+method's own retrieval rather than describing every DID as a fetched document.
+The reference implementation emits one `Identifier` step per method family
+(`../../src/trust-path.js:363`), all three `unverified`, each saying that the
+security panel has no recorded result for the page:
+
+| method | source | and it says |
+|---|---|---|
+| `did:key`, `did:jwk`, `did:pkh` | Local DID derivation — no remote lookup | the method derives its document from the identifier itself, and deriving a document does not prove anyone possesses the corresponding private key or controls the account (§5.1b) |
+| `did:plc` | DID directory over HTTPS | the document is retrieved over HTTPS and its `id` checked; the PLC operation log is not audited here (DI-2) |
+| `did:web` | DID domain over HTTPS | the document is retrieved over HTTPS and its `id` checked; the domain and WebPKI remain trusted (§10.3) |
+| anything else | DID method not established | no successful resolution has been recorded for this identifier |
+
+A local method **MUST NOT** be described as a remote lookup, and a remote one
+**MUST NOT** be described generically: the two have different failure modes and
+a panel that says "fetched over HTTPS" about a `did:key` is describing a
+request that never happened.
 
 ---
 
@@ -295,22 +308,101 @@ An implementation MUST:
 - refuse a method it does not implement with a **400** and no network request.
 
 The reference implementation fetches documents for two methods, `plc` and
-`web`, and DERIVES them — no network, no trust decision — for three whose
+`web`, and DERIVES them — no network, no third party — for three whose
 identifier is the key or the account itself: `did:key` (a multibase
 multicodec public key → a `Multikey` document), `did:jwk` (a base64url JSON
 Web Key → `JsonWebKey2020`; a key carrying private material is refused) and
 `did:pkh` (a CAIP-10 account id → `EcdsaSecp256k1RecoveryMethod2020` for
 `eip155`/`bip122`, `Ed25519VerificationKey2018` for `solana`/`tezos`). Those
-answer with `X-Resolution-Trust: derived`, the one DID document a browser can
-call verified, because nobody was asked (`../src/did-local.js`, pinned to
-the specifications' own vectors in `../tests/did-local.test.js`). Everything
-else — `did:ion`, `did:ethr` — is refused, and the refusal names the
-supported set so a user sees why.
+answer with `X-Resolution-Trust: derived` (`../src/did-local.js`, pinned to
+method vectors in `../tests/did-local.test.js`). Everything else — `did:ion`,
+`did:ethr` — is refused, and the refusal names the supported set so a user sees
+why.
+
+`derived` is its own trust state and is **not** `verified`. Nobody was asked,
+so there is no third party to be wrong; but a document derived from an
+identifier says only that the identifier is well-formed key material. §5.1a
+says what is checked, and §5.1b says what that is still worth — which is
+nothing about possession or control.
 
 **Refusing before the network is normative, not an optimisation.** A malformed
 or unsupported DID that reaches `fetch` is a request an attacker chose the
 shape of; refusing it locally is the same discipline §8 applies to a whole
 namespace.
+
+### 5.1a What a local method validates
+
+A local method's whole input is attacker-supplied and its whole output is a
+document other code will read as key material. An implementation therefore
+**MUST** validate the key itself, not only its shape and length: a byte string
+of the right length that is not a key on the curve it claims is not a DID, and
+a document built from one hands a verifier something it will fail on later, in
+a place with less context.
+
+The identifier is capped at **16 384 characters** before anything else
+(`../src/did-local.js:44`), so no parse runs on an unbounded string.
+
+**`did:key`** (`../src/did-local.js:75`). The identifier is base58btc
+multibase; the multicodec varint prefix is read **canonically** — a
+trailing-zero continuation is refused, and a fifth byte above `0x0f` is refused
+(`../src/did-local.js:60`) — so exactly one encoding names each key type. After
+the length each codec fixes:
+
+| key type | what is checked |
+|---|---|
+| RSA (`0x1205`) | the bytes import as a PKCS#1 public key, the imported key is RSA, and it **re-exports to exactly the same DER** — one canonical encoding per key, so no second spelling of the same modulus resolves — and the exported JWK passes the checks below |
+| Ed25519 (`0xed`) | 32 bytes that decode to a valid curve point which is **not small-order and is torsion-free** — a point in the prime-order subgroup, as RFC 8032 §5.1.7 requires of anything a signature is verified against |
+| X25519 (`0xec`) | 32 bytes probed with a **public, deterministic** X25519 computation, which rejects a low-order point (RFC 7748 §6.1). It is a well-formedness probe, **not a possession proof**: no user secret and no network are involved |
+| secp256k1, P-256, P-384, P-521 | a **compressed** point (leading byte `0x02` or `0x03`) that OpenSSL accepts (`ECDH.convertKey`), which is the on-curve check |
+
+**`did:jwk`** (`../src/did-local.js:122`). The identifier **MUST** be unpadded
+canonical base64url (RFC 4648 §5) that re-encodes to the identifier byte for
+byte, decode to valid UTF-8, and parse as a JSON object with a `kty`. A member
+carrying private material (`d`, `p`, `q`, `dp`, `dq`, `qi`, `k`) is refused
+outright — a private key in an identifier is a leak, not a DID. Then
+(`../src/did-local.js:180`):
+
+- `use`, when present, is exactly `sig` or `enc` (RFC 7517 §4.2). An unknown
+  value is refused rather than ignored, because the `use` decides which
+  verification relationships the document lists;
+- `EC`: a known curve, with `x` and `y` each the exact coordinate length for
+  it, canonical base64url;
+- `OKP` (RFC 8037): `Ed25519` or `X25519`, with `x` 32 canonical base64url
+  bytes put through the same point checks as `did:key`, and the curve and the
+  `use` **MUST** agree — an `Ed25519` key marked `enc`, or an `X25519` key
+  marked `sig`, is refused;
+- `RSA` (RFC 8017): modulus 128–1024 bytes, no leading zero byte, odd, with an
+  odd exponent of at most 8 bytes and `3 <= e < n`;
+- finally the JWK is imported with `createPublicKey({ format: 'jwk' })`, which
+  is the structural and on-curve check no length test can replace.
+
+**`did:pkh`** validates CAIP-10 syntax for the chain namespaces it admits. An
+account identifier is not key material and there is nothing else to check.
+
+Nothing here contacts the network, and nothing here reads a clock. Every
+refusal is deterministic and a refusal is **400**, never a fetch.
+
+### 5.1b What a derived document still does not prove
+
+**Validating a key proves nothing about possession of the corresponding private
+key, and nothing about control of the account.** An implementation **MUST NOT**
+present a locally derived document as authentication of whoever supplied the
+identifier. Anyone can copy anyone's `did:key`, `did:jwk` or `did:pkh` and
+publish it; the identifier is public by construction.
+
+What a valid local derivation establishes is narrower and worth stating
+exactly:
+
+- the identifier is **well-formed** for its method, and encodes in exactly one
+  way (so two spellings cannot name one key);
+- the key material is **usable** — a real point on the curve it names, in the
+  right subgroup, importable by a key library;
+- the document is the **one this method's specification derives** from that
+  identifier, and nobody was asked for it.
+
+That is why these methods are `derived` and never `verified` in §4, and why
+the trust step for them says in words that deriving a document proves no
+possession or control (`../../DEVIATIONS.md` DI-12).
 
 ### 5.2 `did:plc`
 
@@ -472,8 +564,15 @@ Both hold for the PDS lookup of §6.2 as well: it reads a document through the
 same URL builder and the same host guard, and makes the same `id` comparison.
 The two callers establish the same things because they run the same code.
 
+For a **local** method (§5.1a) the list is different, because there was no
+request: the identifier is well-formed, its key material is valid and usable,
+and the document is the one the method derives from it. That is all, and in
+particular it is **not** a statement about who is on the other end (§5.1b).
+
 Specifically it does **not**:
 
+- **prove possession or control** for a local method — a `did:key`, `did:jwk`
+  or `did:pkh` identifier is public, and anyone may present anyone's (§5.1b);
 - **verify the `did:plc` operation log** (§5.2), so a `did:plc` document is the
   directory's word;
 - **prove anything about a `did:web` document beyond WebPKI**, which is the
@@ -829,7 +928,7 @@ kind:       30078
 pubkey:     <the control key>
 created_at: <the receipt's created_at>
 content:    ""
-tags:       [["v","hns1"], ["d","hns:atproto:<name>"], ["epoch","<epoch>"], ["did","<did>"]]
+tags:       [["v","hns<version>"], ["d","hns:atproto:<name>"], ["epoch","<epoch>"], ["did","<did>"]]
 ```
 
 Two properties are normative:
@@ -838,9 +937,67 @@ Two properties are normative:
   is what makes a claim receipt and a handle grant non-interchangeable, so
   neither can be replayed as the other. `tests/identity-anchor.test.js` pins
   both directions.
-- **The `did` tag binds the exact account**, lowercased and trimmed before
-  signing so the preimage is canonical. The signature can only mean "this
-  control key authorised *this* DID".
+- **The `did` tag binds the exact account.** The signature can only mean "this
+  control key authorised *this* DID", so how the DID is spelled in the preimage
+  is part of what was signed, and is fixed by the receipt's version below.
+
+#### Versions
+
+The receipt is **versioned**, and the version is in the preimage: the `v` tag
+is `hns1` or `hns2`. `atprotoEvent`, `signAtproto` and `verifyAtproto` take a
+`version` (1 or 2; anything else is refused), and a version-2 compact receipt
+carries `version: 2` alongside `createdAt` and `sig`
+(`../src/receipt.js:115`, `:138`, `:181`).
+
+**A verifier MUST take the version from the receipt, and MUST NOT infer it or
+retry another version after a signature fails.** Trying versions until one
+verifies makes the signer's choice of preimage the attacker's choice: the two
+versions spell a subject differently on purpose, and a receipt that verifies
+under a preimage its signer did not use binds a subject nobody authorised.
+Absence of the field means version 1, because that is what a deployed receipt
+looks like — not because a verifier may guess.
+
+**Version 1** is the historical preimage, retained exactly: the `did` tag is
+`did.trim().toLowerCase()`. Nothing else about it may change, because receipts
+signed under it are published and are still verified.
+
+**Version 2** canonicalises the subject per method, `canonicalAtprotoDid()`
+(`../src/receipt.js:152`), which is also the admissibility rule for **both**
+versions — a subject it refuses is never signed:
+
+- **`did:plc:`** MUST be exactly 24 lowercase base32 characters (`a`–`z`,
+  `2`–`7`). A `did:plc` identifier is a truncated hash rendered in one fixed
+  form (§5.2); anything else is not one.
+- **`did:web:`** has its **domain lowercased** and validated — labels of at
+  most 63 characters from the letter-digit-hyphen set that RFC 1035 §2.3.1 and
+  RFC 1123 §2.1 give, a name of at most 253, not an IP literal — with an
+  optional percent-encoded port (`%3A<port>`, 1–65535) normalised to `%3A` and
+  a decimal number. Domain names compare case-insensitively (RFC 1035 §2.3.3,
+  RFC 4343), so folding the domain changes nothing about which host is named.
+- **A `did:web:` path keeps its case.** The W3C did:web method maps the
+  remaining colon-separated segments onto a URL **path**, and a path is
+  case-sensitive: `…:user:Alice` and `…:user:alice` are two different
+  documents, and lowercasing one into the other would bind an account the
+  signer never named. Segments are checked (no empty segment, no `.` or `..`,
+  no separator or control character after percent-decoding) and otherwise
+  passed through unaltered.
+- Any other method is refused. `did:plc` and `did:web` are the only admissible
+  binding subjects (`../../DEVIATIONS.md` DI-14).
+
+Canonicalisation runs on the **signing** side for both versions, so a subject
+it refuses is never signed here. A version-1 *preimage* is still built by
+lowercasing alone, which is what keeps it byte-identical to the deployed form;
+an implementation MUST NOT read that as permission to sign a subject this rule
+refuses.
+
+**Signing a `did:web:` path binding at version 1 is refused outright**
+(`../src/receipt.js:143`). The deployed registry reconstructs version-1
+receipts with a lowercased subject and cannot represent a case-sensitive path,
+so a version-1 signature over such a subject would verify against a DID other
+than the one the user authorised (`../../DEVIATIONS.md` DI-13) — including when *this* path happens to be
+lowercase, since the receipt would then be indistinguishable from one binding a
+differently-cased path. A path binding requires version 2 and a verifier that
+understands it.
 
 The receipt is signed in the client, by a key that never leaves it; what
 crosses the network is the name, the DID, `created_at` and the signature. A
@@ -952,6 +1109,15 @@ the domain's security, and the domain's security is WebPKI — which is exactly
 the trust model this project exists to offer an alternative to. §9.4 accepts
 that trade deliberately, for reach; a specification should say so rather than
 let a reader assume a self-certifying identifier is self-certifying.
+
+For a **local** method nobody is asked, so none of the above applies — and
+neither does anything better. A derived document establishes that the
+identifier is well-formed and its key material real (§5.1a) and **nothing about
+who presented it**: these identifiers are public, and validating a key is not a
+challenge anyone answered (§5.1b). An implementation that treats "no network
+request was needed" as a stronger result than "a server was asked" has made a
+category error: the two fail in different ways, and neither authenticates a
+person.
 
 ### 10.4 Privacy: asking is a disclosure
 

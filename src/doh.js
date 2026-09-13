@@ -66,6 +66,37 @@ export class DoHResolver {
      * clear. Read per query, so a mode switch applies to the next lookup.
      */
     this.strictOblivious = strictOblivious
+    this.freshNames = new Map()
+    this.freshAllUntil = 0
+    this.cacheEpoch = 0
+  }
+
+  forget (host) {
+    const name = String(host || '').toLowerCase().replace(/\.$/, '')
+    if (!name) return 0
+    this.cacheEpoch++
+    for (const [key, until] of this.freshNames) if (until <= Date.now()) this.freshNames.delete(key)
+    this.freshNames.delete(name)
+    this.freshNames.set(name, Date.now() + 300000)
+    if (this.freshNames.size > 512) this.freshNames.delete(this.freshNames.keys().next().value)
+    return 1
+  }
+
+  clearCache () {
+    this.cacheEpoch++
+    this.freshAllUntil = Date.now() + 300000
+    this.freshNames.clear()
+  }
+
+  _fresh (host) {
+    const now = Date.now()
+    if (now < this.freshAllUntil) return true
+    const name = String(host || '').toLowerCase().replace(/\.$/, '')
+    for (const [key, until] of this.freshNames) {
+      if (until <= now) this.freshNames.delete(key)
+      else if (name === key || name.endsWith(`.${key}`)) return true
+    }
+    return false
   }
 
   /** Is the plain-DoH fallback refused right now? */
@@ -166,7 +197,12 @@ export class DoHResolver {
       let outcome
       try {
         const res = await this.fetchImpl(`${base}?dns=${param}`, {
-          headers: { accept: 'application/dns-message' },
+          // There is no JS answer cache here, but Electron's net.fetch has
+          // an HTTP cache. Revalidate recently published names and DNSLink
+          // descendants without changing the transport or accepting a hint
+          // as a DNS answer. An upstream recursive cache still owns its TTL.
+          ...(this._fresh(name) ? { cache: 'reload' } : {}),
+          headers: { accept: 'application/dns-message', ...(this._fresh(name) ? { 'cache-control': 'no-cache' } : {}) },
           signal: AbortSignal.timeout(this.timeout)
         })
         if (!res.ok) {
@@ -279,7 +315,13 @@ export class DoHResolver {
     // that distinguishes the two paths.
     const start = Date.now()
     try {
-      const out = await this._resolveTimed(host)
+      let out
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const epoch = this.cacheEpoch
+        out = await this._resolveTimed(host)
+        if (epoch === this.cacheEpoch) break
+        if (attempt === 2) throw new Error('The name changed during resolution; retry the lookup.')
+      }
       timers.record(out && out.oblivious ? 'odoh' : 'doh', Date.now() - start, true)
       return out
     } catch (err) {
@@ -315,7 +357,7 @@ export class DoHResolver {
     const strings = stringsOf(txt)
     const merged = mergePointers(pointerFrom(strings), dnslinkPointerFrom(stringsOf(dl)))
     if (merged.conflict) {
-      const show = (p) => `${p.kind} ${p.cid || p.key || p.txid}`
+      const show = (p) => `${p.kind} ${p.cid || p.key || p.txid}${p.path || '/'}`
       return {
         kind: 'pointer-conflict',
         reason: `${host} publishes two content pointers that disagree: ` +

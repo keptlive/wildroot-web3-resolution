@@ -34,6 +34,9 @@ it.
 - **[`DEVIATIONS.md`](DEVIATIONS.md)** — every departure from a cited standard,
   every place we are not sure we are right, and every design decision left
   open, per chapter. Read this one.
+- **[`REVIEW.md`](REVIEW.md)** — the open findings: what this implementation
+  does not establish, and what it owes, in one short list. If you are deciding
+  whether to trust any of this, read it beside `DEVIATIONS.md`.
 - **[`DIVERGENCE.md`](DIVERGENCE.md)** — the cross-cutting inventory of every
   place where privacy and speed pull apart: what the fast path does, what the
   private path does, what the code does, and whether a no-trade-off option
@@ -84,6 +87,8 @@ SPEC.md                     the spine: the shared model, namespace selection, th
 REFERENCES.md               generated from the chapters: an index of every identifier, then each chapter's table
 DEVIATIONS.md               generated from the chapters: every deviation, uncertainty and open design item, plus the divergence inventory
 DIVERGENCE.md               the privacy-vs-speed inventory (a source file; also appended to DEVIATIONS.md)
+REVIEW.md                   the open review findings: what is not established, and what is owed
+REVIEW-DOCS-REWRITE-2026-09-12.md   why one proposed documentation rewrite was not merged, and the rule a future one is held to
 scripts/build-docs.mjs      generates the two files above (npm run docs; npm run docs:check fails when stale)
 src/                        the Handshake chapter's modules and the modules every chapter shares
 tests/                      the Handshake suite (and the shared modules' tests)
@@ -140,8 +145,17 @@ only the current behaviour: there is no history of defects in these documents.
 Where the specification and the code disagree, that is a bug in one of them —
 please say which you think it is.
 
-Two things this release commits to are worth naming here. **DNSLink is the
-migration path**: a Handshake name's content is read from its `ipfs=` record
+Three things this release commits to are worth naming here. **A setting is not
+an observation**: where the implementation cannot see what happened to a
+request — an `http(s)` host resolved by the engine out of this process's sight,
+a byte check that happens after resolution — the panel names the configuration
+that was in force, says the path was not observed, and stops. It does not
+convert a setting into a claim about the page, and a route view that cannot
+account for every hop says so instead of describing the hops it knows as if
+they were the whole story.
+
+**DNSLink is the migration
+path**: a Handshake name's content is read from its `ipfs=` record
 and from its `_dnslink` record under the same rules, so a site published for
 IPFS Companion, Brave or kubo opens in Wildroot unchanged and a Wildroot site
 opens there. **The chain proof survives anonymization**: with IP Protection on,

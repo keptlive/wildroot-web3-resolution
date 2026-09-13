@@ -349,3 +349,92 @@ test('failClosed: OFF still goes direct, and a routed TOR still reports its SOCK
 test('the blackhole is a loopback port, never a routable address', () => {
   assert.match(BLACKHOLE_RULES, /^socks5:\/\/127\.0\.0\.1:\d+$/)
 })
+
+// --- a route that stops existing is revoked, not left standing -------------
+
+class RevocableTor extends FakeEmittingTor {
+  async start () { return 'ready' }
+  isReady () { return true }
+  revoke (reason) { this.emit('route-unavailable', { reason }) }
+}
+
+test('route-unavailable revokes the route immediately: failClosed blackholes it', async () => {
+  // A tor that dies mid-session is not a slow tor. Until the node says so the
+  // controller would go on handing torSocks() to raw-socket callers that would
+  // dial a port nothing is listening on.
+  const s = fakeSession()
+  const tor = new RevocableTor()
+  const c = new AnonymizeController({ sessions: s, tor, failClosed: true })
+  await c.setMode(MODES.TOR)
+  assert.equal(c.torSocks(), 'socks5://127.0.0.1:41000')
+
+  tor.revoke('Tor process exited')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(c.mode, 'blocked')
+  assert.equal(c.isOn(), true, 'the gates keep refusing')
+  assert.equal(c.torSocks(), null, 'no raw-socket path can reuse a route that is gone')
+  assert.equal(s.calls.setProxy.at(-1).proxyRules, BLACKHOLE_RULES)
+})
+
+test('route-unavailable while OFF changes nothing', async () => {
+  const s = fakeSession()
+  const tor = new RevocableTor()
+  const c = new AnonymizeController({ sessions: s, tor, failClosed: true })
+  const before = s.calls.setProxy.length
+  tor.revoke('Tor stopped')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(c.mode, 'off')
+  assert.equal(s.calls.setProxy.length, before, 'a node the user is not using cannot change the session')
+})
+
+// --- the switching interval -------------------------------------------------
+
+test('isSwitchingToTor is the narrower question the raw-socket paths ask', async () => {
+  // Between "the user asked for Tor" and "the session proxy is installed"
+  // there is an interval in which a raw socket must not dial directly. isOn()
+  // keeps its own meaning across it — a gate for onion loads, true only once
+  // the session actually has a proxy.
+  const seen = []
+  const tor = fakeTor({ state: 'ready' })
+  const c = new AnonymizeController({
+    sessions: {
+      setProxy: async () => {
+        seen.push({ isOn: c.isOn(), switching: c.isSwitchingToTor(), socks: c.torSocks() })
+      },
+      closeAllConnections: async () => {}
+    },
+    tor
+  })
+  assert.equal(c.isSwitchingToTor(), false)
+  const pending = c.setMode(MODES.TOR)
+  assert.equal(c.isSwitchingToTor(), true, 'set before the first await, not after it')
+  assert.equal(c.torSocks(), null, 'so no raw socket dials directly in the interval')
+  await pending
+  assert.equal(c.isSwitchingToTor(), false)
+  assert.equal(c.torSocks(), 'socks5://127.0.0.1:41000')
+  // While the proxy was being applied the gate was still closed and the SOCKS
+  // URL still withheld.
+  assert.deepEqual(seen, [{ isOn: false, switching: true, socks: null }])
+})
+
+test('a slow bootstrap cannot land after a later switch', async () => {
+  // Every await in setMode is followed by a sequence check, so a tor that
+  // takes its time starting cannot route a session the user has since sent
+  // back to Fast.
+  let release
+  const slow = {
+    start: () => new Promise((resolve) => { release = () => resolve('ready') }),
+    isReady: () => true,
+    socksUrl: () => 'socks5://127.0.0.1:41000',
+    whenReady: async () => true
+  }
+  const s = fakeSession()
+  const c = new AnonymizeController({ sessions: s, tor: slow })
+  const pending = c.setMode(MODES.TOR)
+  await c.setMode(MODES.OFF)
+  release()
+  await pending
+  assert.equal(c.mode, 'off')
+  assert.equal(c.isSwitchingToTor(), false)
+  assert.equal(s.calls.setProxy.at(-1).mode, 'direct')
+})
