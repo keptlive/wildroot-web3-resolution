@@ -27,9 +27,8 @@
  * fallback worth knowing: when it cannot hold two outbound peers it resolves
  * its two seed hostnames through a list hard-wired in hsd/lib/net/lookup.js
  * (1.1.1.1, 8.8.8.8/8.8.4.4, OpenDNS) over plaintext UDP 53 — not the OS
- * resolver, not the browser's ODoH. Not observed in the capture; recorded in
- * ~/hns/PRIVACY-COSTS.md §8. We never call getpeerinfo, which would
- * reverse-DNS every peer.
+ * resolver, not the browser's ODoH. Not observed in the capture. We never
+ * call getpeerinfo, which would reverse-DNS every peer.
  */
 
 import { spawn } from 'node:child_process'

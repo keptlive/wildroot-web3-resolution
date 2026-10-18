@@ -4,9 +4,8 @@
 0.7.2 at code baseline `bd720c1`, and it is not the current state of this
 repository: most of what it asks for is implemented, and the rest is written
 down as still owed. For where each finding stands against the code as it is
-now, read [`REVIEW.md`](../REVIEW.md); for why the documentation rewrite this
-review accompanied was not kept, read
-[`REVIEW-DOCS-REWRITE-2026-09-12.md`](../REVIEW-DOCS-REWRITE-2026-09-12.md).
+now, read [`REVIEW.md`](../REVIEW.md). The documentation rewrite this review
+accompanied was not kept.
 The reproductions and the priorities below are why the work was done, and are
 worth reading in their own right.
 

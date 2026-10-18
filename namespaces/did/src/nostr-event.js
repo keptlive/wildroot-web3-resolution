@@ -1,5 +1,5 @@
 // NIP-01 events: build, sign, verify. The signing counterpart of the
-// verify-only module in ~/hns/nostr/src/nostr-event.js — the canonical
+// verify-only module in hns-nostr's src/nostr-event.js — the canonical
 // serialization here MUST stay byte-identical to that resolver's, because
 // what this file signs is exactly what that file (and every other Nostr
 // client on earth) recomputes: sha256 of [0,pubkey,created_at,kind,tags,

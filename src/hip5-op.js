@@ -44,7 +44,7 @@
  * resolver cannot): an eth_call is a selector plus some 32-byte words over
  * `fetch`, and keccak comes from @noble/hashes, already in the tree. The
  * encodings are ported from the service that WRITES these records
- * (~/hns/dsld/service/resolve.cjs and voucher.cjs), so reader and writer
+ * (the registry service's resolve.cjs and voucher.cjs), so reader and writer
  * cannot drift; docs/HIP5-OP.md carries the ABI, the fallback order and the
  * draft text.
  */
@@ -197,7 +197,7 @@ function createRpc ({ rpcUrls, fetchImpl, timeout }) {
 /**
  * Decode an ABI-encoded `bytes` return value (offset word, length word,
  * payload). Every offset is bounds-checked, unlike the writer-side copy in
- * ~/hns/dsld: these bytes come from a public RPC, not from our own contract
+ * the registry service: these bytes come from a public RPC, not from our own contract
  * call, so a length word of 2^200 must produce "no record", not a throw deep
  * inside a subarray.
  */

@@ -1,11 +1,11 @@
 /*
  * Validates the JS DNSSEC verifier against a zone signed by the Python signer
- * (~/hns/dnssec.py) — the exact interop that matters, since the browser must
- * verify what our infrastructure actually produces.
+ * (the HNS.one signer, dnssec.py) — the exact interop that matters, since the
+ * browser must verify what our infrastructure actually produces.
  *
  * The signed artifact is VENDORED at tests/fixtures/dir.dnssec.json. It used
- * to be read from ~/hns/dir.dnssec.json and skip when absent, which meant the
- * whole file — DS digest, real RRSIG verification, the full
+ * to be read from the operator's dir.dnssec.json and skip when absent, which
+ * meant the whole file — DS digest, real RRSIG verification, the full
  * on-chain-DS -> DNSKEY -> leaf-TLSA chain, and the fails-closed case — was
  * SILENTLY SKIPPED on the Windows packaging box, the one machine that builds
  * the installers we ship. The gate read green with the chain unaudited.
@@ -14,8 +14,8 @@
  * no private key). Its RRSIGs carry a fixed 30-day validity window, so every
  * check pins the clock to AT (inside that window) rather than the real time;
  * otherwise this file would turn red on the expiry date for a reason that is
- * not a defect. Refresh it with:
- *   cp ~/hns/dir.dnssec.json tests/fixtures/dir.dnssec.json
+ * not a defect. Refresh it by copying the signer's output for zone `dir` over
+ * tests/fixtures/dir.dnssec.json.
  */
 
 import { test } from 'node:test'

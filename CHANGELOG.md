@@ -3,9 +3,8 @@
 ## 0.10.0
 
 Sync with browser 2.78.40 (`39e5147`). **A setting is not an observation.** The
-content review this repository declined to merge on 2026-09-08
-(`REVIEW-DOCS-REWRITE-2026-09-12.md`) is answered where an answer belongs — in
-the code — and twenty-two modules changed with it. Ten of the review's fourteen
+content review this repository declined to merge on 2026-09-08 is answered
+where an answer belongs — in the code — and twenty-two modules changed with it. Ten of the review's fourteen
 findings are closed by behaviour; the rest are written down as what is still
 owed (`REVIEW.md`, new). Every chapter that owns one of those modules is
 rewritten to describe what it now does.
@@ -151,10 +150,7 @@ rewritten to describe what it now does.
   code: what is closed and where, and what is still owed (the measurements no
   fixture test can stand in for, the evidence channel this repository does not
   specify, v1 receipts, the tunnel's remaining boundaries, ActivityPub, `w3://`
-  and the document-versioning question). **`REVIEW-DOCS-REWRITE-2026-09-12.md`**
-  (new) — why the 2026-09-08 documentation rewrite was not merged, and the rule
-  a future prose pass is held to: the entry schema, the normative citations,
-  the `§` and `src/file.js:123` pointers and the counts may not be removed.
+  and the document-versioning question).
 - Deviation ledger — **added**: `HS-17`, `HS-18`, `HS-19`, `IC-17`, `IC-18`,
   `IC-19`, `IC-D5`, `IP-12`, `RT-14`, `EN-8`, `DI-12`, `DI-13`, `DI-14`,
   `TO-8`, `TO-D6`, `KY-12`, `AP-8`, and the uncertainties Chapter 1 §2.8,

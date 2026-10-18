@@ -3,8 +3,8 @@
 //   _hns.alice.wildroot TXT
 //   "v=hns1;pubkey=<64-hex>;epoch=1;receipt=<created_at>.<base64url sig>"
 //
-// SAME SCHEMA, DIFFERENT RECORD (Matt, 2026-08-20). Every field here is the
-// one `nostr/DESIGN.md` §2 already defines and `~/hns/nostr/src/record.js`
+// SAME SCHEMA, DIFFERENT RECORD. Every field here is the one hns-nostr's
+// `DESIGN.md` §2 already defines and its `src/record.js`
 // already parses — `v=`, `pubkey=`, `epoch=`, `receipt=`, multi-string merge,
 // unknown fields ignored. Only the owner name and the version tag differ,
 // because this record answers a different question:

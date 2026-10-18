@@ -12,8 +12,8 @@
  *
  * Runs the vendored nsd.py against the FROZEN zone in tests/fixtures/resolver
  * (a stubbed chain is not even needed — this is pure authoritative DNS). It
- * used to run against ~/hns/zones.json and skip when that was absent, so all
- * four of these were silently unrun on the Windows packaging box, and on the
+ * used to run against the live operator zones.json and skip when that was
+ * absent, so all four of these were silently unrun on the Windows packaging box, and on the
  * machine that had them they asserted against whatever host live operator data
  * happened to be shaped like today. No skips remain: if it cannot run, it
  * fails.

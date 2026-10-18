@@ -4,7 +4,7 @@
  * NO NETWORK. The chain resource is a fake spv whose `persist` carries the
  * three NS records the real name carries on mainnet, and the RPC is an
  * injected fetch that answers eth_call by selector — the same fixture shape
- * ~/hns/dsld/service/test.cjs uses to prove the WRITER, so both ends of the
+ * the registry service's own test uses to prove the WRITER, so both ends of the
  * ABI are pinned by the same bytes. The fallback half is real: the vendored
  * nsd.py answers as the TLD's nameserver, so "fell back to DNS" is a resolved
  * address and not a mock's say-so.
@@ -15,7 +15,7 @@
  * bug this file exists to catch.
  *
  * The nodes, name keys and selectors below were computed with the INDEPENDENT
- * implementation that writes these records (~/hns/dsld/service/voucher.cjs)
+ * implementation that writes these records (the registry service's voucher.cjs)
  * and are hard-coded here, so a matching bug in namehash could not make the
  * fixture and the resolver agree with each other and disagree with the chain.
  */
@@ -45,7 +45,7 @@ const SEL = {
   dnsRecord: '0xa8fa5682'
 }
 
-/** namehash(<name>.persist), from ~/hns/dsld/service/voucher.cjs. */
+/** namehash(<name>.persist), computed by the registry service's voucher.cjs. */
 const NODE = {
   maya: '0x39f92e0e170eb962b0bd0ca46090a914492cd08b30f1d41d3955ff82de7ea708',
   ark: '0x1d8b0377147f2fd033f3060629ae1bed7315acb36cbb869f897429229b097369',

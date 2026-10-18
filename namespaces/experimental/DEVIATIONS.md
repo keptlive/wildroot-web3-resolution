@@ -70,7 +70,7 @@ them costs a written convention nobody else implements.
 have to be rewritten: links, documentation, and any other client's
 interoperation.
 
-**Status.** DECIDED (Matt, 2026-09-06): pure-number names are excluded by
+**Status.** DECIDED (2026-09-06): pure-number names are excluded by
 default for simplicity. The resolution method and the `_` URL form of Part B
 stay in the code and in this chapter; `setNumericNames()` in
 `../../src/classify-host.cjs` is the one switch (the browser exposes it as

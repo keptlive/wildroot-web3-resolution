@@ -6,7 +6,7 @@ that builds the installers we ship.
 
 | File | What it is |
 |---|---|
-| `nsd.py` | Verbatim copy of the HNS.one authoritative nameserver (`~/hns/nsd.py`). Python standard library only; its one optional import (`parked`) is guarded |
+| `nsd.py` | Verbatim copy of the HNS.one authoritative nameserver. Python standard library only; its one optional import (`parked`) is guarded |
 | `zones.json` | The **operator** view of zone `wrfixture` |
 | `zones-tenant.json` | The **tenant** view — one label the operator file does not have |
 | `wrfixture.dnssec.json` | The signer's output over the MERGED view: every RRset with its RRSIG, the DNSKEY, and the NSEC chain. `nsd.py` serves these when a query carries the DO bit |
@@ -14,12 +14,12 @@ that builds the installers we ship.
 | `zones-children.json` | The two child zones, served by a SECOND `nsd.py` instance: `secure.wrparent` signed, `open.wrparent` unsigned |
 | `wrparent.dnssec.json`, `secure.wrparent.dnssec.json` | Their signed views. `dnssec-delegation-e2e.test.js` walks the referral from one instance to the other |
 
-## Why it is frozen, and not read out of `~/hns`
+## Why it is frozen, and not read from the live zone
 
 The tests used to read the live operator `zones.json` and *search* it for a
 host of a suitable shape. Two things were wrong with that:
 
-- On any machine without `~/hns` — the Windows packaging box — every one of
+- On any machine without the operator's files (the Windows packaging box), every one of
   those tests skipped. 22 tests, including the DNSSEC chain and its
   fail-closed case, were silently unaudited on the platform we ship from.
 - On the machine that *does* have it, what the tests asserted drifted with
@@ -51,7 +51,7 @@ fixture could: the DS link with real `hns` material is in
 `tests/fixtures/hns-delegation.json`, but the rule RFC 4035 §5.2 adds to a walk
 — a MISSING DS must be proven missing before the child is read unsigned — had
 no test, and was not implemented. Generation: sign `secure.wrparent` first (its
-own key), compute its DS with `dsDigest` + `keyTag` from `src/hns/dnssec.js`,
+own key), compute its DS with `dsDigest` + `keyTag` from `src/dnssec.js`,
 put that DS in the parent's `zones.json`, sign `wrparent`. The same `sed` for
 the 20-year window applies to both.
 
@@ -64,31 +64,33 @@ left the scratch directory it was made in.
 The RRSIGs carry a **20-year** validity window rather than the signer's
 production default of 30 days. That is not cosmetic. These tests drive the
 resolver through `validateChain`, which — by design — takes no clock argument
-and always reads the real one (see `tests/hns/dnssec-clock-guard.test.js`).
+and always reads the real one (see `tests/dnssec-clock-guard.test.js`).
 There is therefore nothing to pin: the window is the only lever, so it is set
 long, and `dnssec-e2e.test.js` FAILS if it ever drops below three years' head
 room. Re-generating this fixture with the default 30-day window turns the gate
 red immediately rather than a month later.
 
 Signature *expiry* itself is tested where a clock can be injected, against real
-production-signer output: `tests/hns/dnssec.test.js` with
+production-signer output: `tests/dnssec.test.js` with
 `tests/fixtures/dir.dnssec.json`.
 
 ## Regenerating it
 
-Only on a machine with the HNS.one toolchain (`~/hns`) and `openssl`. Nothing
-in the repo depends on being able to do this — the fixture is the artifact.
+Only with the HNS.one zone tooling (`dnssec.py`, `zonemerge.py`, `nsd.py`,
+which are not in this repository) and `openssl`. Nothing in the repo depends on
+being able to do this — the fixture is the artifact.
 
 ```sh
+HNS_TOOLS=/path/to/hns-tooling
 S=$(mktemp -d)
-cp ~/hns/dnssec.py ~/hns/zonemerge.py "$S"/
+cp "$HNS_TOOLS"/dnssec.py "$HNS_TOOLS"/zonemerge.py "$S"/
 sed -i 's/^VALIDITY_DAYS = 30$/VALIDITY_DAYS = 7300/' "$S"/dnssec.py
 mkdir -p "$S"/certs
 openssl ecparam -genkey -name prime256v1 -noout -out "$S"/certs/wrfixture.dnskey.pem
 cp tests/fixtures/resolver/zones.json tests/fixtures/resolver/zones-tenant.json "$S"/
 ( cd "$S" && python3 dnssec.py sign wrfixture )
 cp "$S"/wrfixture.dnssec.json tests/fixtures/resolver/
-cp ~/hns/nsd.py tests/fixtures/resolver/nsd.py
+cp "$HNS_TOOLS"/nsd.py tests/fixtures/resolver/nsd.py
 rm -rf "$S"          # the private key dies with it
 ```
 

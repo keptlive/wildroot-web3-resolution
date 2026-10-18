@@ -1,8 +1,8 @@
 /*
  * What the padlock means.
  *
- * Matt, 2026-09-04: "there should be different colored locks for trustless and
- * trusted". The distinction the lock exists to make is not "did this load" —
+ * There are different coloured locks for trustless and trusted. The
+ * distinction the lock exists to make is not "did this load" —
  * every browser's lock answers that — but **who did you have to believe**:
  *
  *   verified  TRUSTLESS. Every step was checked on this computer: a chain

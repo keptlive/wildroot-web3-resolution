@@ -258,7 +258,7 @@ export class DoHResolver {
    * WHY THIS EXISTS AND WHAT IT IS FOR. The chain-anchored path cannot answer
    * at all until the SPV node reaches the tip — the first sync, once per
    * install, and a user should not be locked out of their own product while
-   * it runs (Matt, 2026-09-01). The trade is the one this file's header
+   * it runs. The trade is the one this file's header
    * already states for browsing, now available to the sharing gate: we are
    * trusting the resolver's word for which key controls a name, instead of
    * the chain's. That is a REAL downgrade — a resolver that lies substitutes

@@ -19,9 +19,9 @@
  * WHY THE SUBJECTS ARE NAMED AGAIN, AFTER BEING DISCOVERED
  *   The first version hard-coded `dir` and went stale when the real zone
  *   changed under it. The fix was to DISCOVER a suitable host by searching
- *   ~/hns/zones.json — which cured the staleness and caused something worse:
- *   the whole file skipped on any machine without ~/hns, i.e. on the Windows
- *   box that builds our installers. Ten tests, including fail-closed
+ *   the live operator zones.json — which cured the staleness and caused
+ *   something worse: the whole file skipped on any machine without that file,
+ *   i.e. on the Windows box that builds our installers. Ten tests, including fail-closed
  *   validation, unaudited on the platform we ship from.
  *
  *   Both problems come from the same root: the tests were reading LIVE
@@ -112,7 +112,7 @@ test('the frozen RRSIGs have years of head room, not days', () => {
   assert.ok(yearsLeft > 3,
     `the frozen fixture expires in ${yearsLeft.toFixed(2)} years. Re-sign it ` +
     'with the long validity window — see tests/fixtures/resolver/README.md. ' +
-    'A plain `cp` from ~/hns brings a 30-day window with it.')
+    'A copy of the production-signed zone brings a 30-day window with it.')
 })
 
 // ---------------------------------------------------------------------------

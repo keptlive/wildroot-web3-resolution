@@ -18,7 +18,7 @@ const ICANN_TLDS = require('./icann-tlds.cjs')
 const { isReservedHost, NEVER_HNS_TLDS } = require('./reserved-names.cjs')
 
 // NUMERIC HANDSHAKE NAMES (`hello.14898`, `14898`) ARE OFF BY DEFAULT.
-// Matt, 2026-09-06 (NT-1 decided): pure-number names are excluded for
+// Decided 2026-09-06: pure-number names are excluded for
 // simplicity. ICANN has no all-numeric TLD, so the rule is sound, and
 // Handshake sells such names — but the URL Standard reads a host ending in
 // digits as an IPv4 address, so writing them needs the `_` marker of

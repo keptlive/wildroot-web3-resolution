@@ -5,27 +5,26 @@
 // in this directory puts private key material into a network request; a claim
 // sends the PUBLIC key and signatures, nothing else.
 //
-// WHY ONE KEY PER NAME (Matt, 2026-08-20 — this is load-bearing, not
+// WHY ONE KEY PER NAME (this is load-bearing, not
 // hygiene). The per-name secret IS the capability: handing someone the key
 // for `shop.wildroot` delegates control of that domain to them, and nothing
 // else. Names must therefore never share a key, and there must be no master
 // secret that derives them all — a phrase that regenerated every key would
 // turn "here, run my shop" into "here, take everything".
 //
-// WHY THERE IS NO RECOVERY PHRASE (Matt, same day: "I don't want a phrase").
+// WHY THERE IS NO RECOVERY PHRASE.
 // Twelve words in front of a first-run screen is where adoption dies, and a
 // phrase written down by nobody protects nothing. Keys are random, they live
 // in the vault, and backup is a file the user exports when they care — see
 // identity-account.js. The honest cost is stated there: nothing is
 // recoverable from memory, so the backup nudge has to be real.
 //
-// WHY IT IS NOT THE USER'S NOSTR KEY (Matt: "slightly different because it
-// has a different purpose"). Key separation is the point: a delegate who can
+// WHY IT IS NOT THE USER'S NOSTR KEY. The two keys have different purposes,
+// and keeping them separate is the point: a delegate who can
 // run your domain must not thereby be able to post as you. Everything about
 // the CRYPTOGRAPHY and the ENCODING is deliberately identical to Nostr's —
 // BIP-340 over secp256k1, NIP-01 signed events, NIP-19 npub/nsec — so every
-// existing tool can verify and carry these keys (Matt: "the encoding can be
-// the same, just maybe a different record name"). What differs is WHICH key
+// existing tool can verify and carry these keys. What differs is WHICH key
 // and WHERE it is published: control keys live at `_hns.<name>` (record.js),
 // and a social identity, when the user has one, is a different key at
 // `_nostr.<name>`.

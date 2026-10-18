@@ -388,7 +388,7 @@ export function classify (input, opts = {}) {
   //
   // `pinner` is a Handshake name; so are hnshosting, varo, 14898 and 🤝. Most
   // Handshake sites ARE bare TLDs, and a browser whose subject is names does
-  // not answer one by asking a search engine (Matt, 2026-09-04). This used to
+  // not answer one by asking a search engine. This used to
   // require a signal of navigation intent — a trailing `/` or `.`, or a
   // non-ASCII label — and search everything else.
   //

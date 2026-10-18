@@ -7,7 +7,7 @@
 // published the binding; the receipt proves the owner asked for it. This file
 // defines the receipt payload nostr/DESIGN.md §2 (INF-4) left pending.
 //
-// NOTHING HERE IS A NEW SIGNATURE FORMAT (Matt, 2026-08-20). Both objects are
+// NOTHING HERE IS A NEW SIGNATURE FORMAT. Both objects are
 // plain NIP-01 events with existing kinds:
 //   claim receipt  kind 30078 (NIP-78 app data), d-tag "hns:<name>", an
 //                  "epoch" tag — replaceable per name, storable on any relay

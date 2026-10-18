@@ -11,15 +11,15 @@
  *    nameserver could only ever have failed there — which nobody saw, because
  *    they were already skipping for reason 2.
  *
- * 2. THE TOOLCHAIN. They resolved nsd.py and zones.json out of ~/hns, a
- *    directory that exists on exactly one machine, and SKIPPED when it was
- *    absent. 22 resolver tests — the DNSSEC chain, fail-closed validation,
+ * 2. THE TOOLCHAIN. They resolved nsd.py and zones.json out of the operator's
+ *    working directory, which exists on exactly one machine, and SKIPPED when
+ *    it was absent. 22 resolver tests — the DNSSEC chain, fail-closed validation,
  *    the DO-bit regression pin, TLSA NODATA — silently did not run on the
  *    Windows packaging box. The same shape as the dnssec.test.js gap that
  *    tests/fixtures/dir.dnssec.json was vendored to close.
  *
- *    Reading ~/hns/zones.json was also a correctness problem on the machine
- *    that HAS it: that file is LIVE OPERATOR DATA. The tests searched it for a
+ *    Reading the operator's zones.json was also a correctness problem on the
+ *    machine that HAS it: that file is LIVE OPERATOR DATA. The tests searched it for a
  *    host of a suitable shape, so what they asserted drifted with production —
  *    and had already gone stale once (see the header of dnssec-e2e.test.js).
  *

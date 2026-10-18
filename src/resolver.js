@@ -250,7 +250,7 @@ export class HNSResolver {
    * existed the browser went on serving the previous CID from this cache for
    * up to a minute. Opening your own name straight after publishing to it
    * showed the old page, which reads as "the publish did not work" and is the
-   * single worst moment to be lying to someone (Matt, 2026-09-04).
+   * single worst moment to be lying to someone.
    *
    * Descendants go too, because what changed may be a TLD: republishing `w3`
    * changes what every `*.w3` resolves through, and keeping those would leave
