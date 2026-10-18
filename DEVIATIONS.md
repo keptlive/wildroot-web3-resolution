@@ -276,6 +276,9 @@ a departure that no longer exists is not described.
   - AP-4 WebSocket routing is decided by the target host, not by the initiating origin
   - AP-5 A native page's sign-in token is bound to a URL the request is not sent to
   - AP-6 Manifests are unsigned, so an installed application's identity is only its origin
+  - AP-9 Consent is a native dialog; only the name picker is a rendered surface
+  - AP-10 The picker's window is a child window, not an in-window sheet
+  - AP-11 A claim voucher is a bearer secret the application page holds for minutes
   - AP-7 A Handshake WebSocket is reachable on port 443 and nowhere else
   - AP-8 On the anonymized route the name is still disclosed to the exit, in SNI
   - 2.1 Whether the 101 is checked for Sec-WebSocket-Accept in our stack
@@ -7229,6 +7232,96 @@ on-chain DS, and let `verified` mean something. The install consent should then
 distinguish signed from unsigned rather than warning identically for both, and a
 downgrade from signed to unsigned on re-install should be refused rather than
 warned about.
+
+#### AP-9. Consent is a native dialog; only the name picker is a rendered surface
+
+**What.** The reference implementation renders the *name picker* as a
+main-process-owned window over one local page it loads from disk, with the
+application's renderer nowhere near it (browser `src/apps/name-picker-sheet.js`,
+`src/ui/name-picker.html`). The install consent, the **update** consent and,
+since 2026-09-13, the **register a name** consent (§5.7) are still native
+`dialog.showMessageBox` calls (browser `src/apps/handshake-ops.js`
+`promptInstall`, `promptUpdate`, `confirmClaimDialog`).
+
+**The standard says.** HANDSHAKE-APPS §5.4 requires consent to be
+"main-process-owned chrome … never DOM inside or over the app's renderer". A
+native dialog satisfies the security property — the page cannot draw over it,
+read it, or click it — but not the rendering requirements around it: a message
+box cannot show the disclosure ("show record"), the per-capability layout, or
+the distinct treatment §4.2 demands for dangerous capabilities.
+
+**Why.** No mutating capability is implemented yet, so nothing currently needs
+the disclosure or the dangerous-capability treatment; a message box states the
+effect sentences correctly for the capabilities that exist. The picker was moved
+to a rendered surface first because it is where the failure was: as a message
+box it could not show the full list, could not mark which names the application
+already held, and answered with a positional index (see AP-10).
+
+**Consequence.** When `records.propose` lands, the consent screens have to move
+to the rendered surface before it ships, not after — a plan preview cannot be
+rendered in a message box at all.
+
+**Status: OPEN.** Move `promptInstall`/`promptUpdate` onto the same sheet
+mechanism the picker now uses.
+
+#### AP-10. The picker's window is a child window, not an in-window sheet
+
+**What.** Every other overlay in the browser (the hand-off sheet, the publish
+sheet, the export sheet) is a `WebContentsView` composited into the window it
+belongs to. The name picker is a modal child `BrowserWindow` instead.
+
+**The standard says.** SPEC §5.2 "the name picker" requires mediator chrome the
+application cannot reach, shown even when the implementation cannot parent it to
+a window. It does not say which kind of window.
+
+**Why.** Two reasons, both about not reproducing the bug this replaced. The
+in-window overlay occupies a single per-window slot: a picker opened while a
+publish sheet was up would have resolved immediately as "dismissed", which is
+the silent decline the whole change exists to remove. And the overlay needs a
+window to attach to, while `names.request` can arrive from a tab whose window
+the manager cannot resolve — the old code answered `null` there, i.e. told the
+application the user declined. A child window has neither problem and is
+parentless-capable.
+
+**Consequence.** The picker looks like a small dialog rather than an in-window
+sheet, which is a visual inconsistency with the browser's other sheets.
+
+**Status: ACCEPTED.** Revisit if the overlay mechanism grows a second slot and a
+parentless mode.
+
+#### AP-11. A claim voucher is a bearer secret the application page holds for minutes
+
+**What.** `names.claim` (§5.7) takes a voucher string the application's server
+obtained from the registry with the partner token, and the page carries it from
+one to the other. For the length of that carry it is a bearer capability: the
+registry will honor it, once, from any claimant whose browser presents it with
+a valid claim, for the one label and the one sponsor it names.
+
+**The standard says.** HANDSHAKE-APPS invariant 1 forbids a key or a signing
+oracle crossing into a page; §5.8 designs the voucher precisely so that neither
+does. Nothing in the standard forbids a page holding a short-lived, narrowly
+bound capability — a bearer session token (§5.4 step 5) is the same shape.
+
+**Why.** The alternative bindings both cost more than they buy. Binding the
+voucher to the browser's future key is impossible (the key does not exist until
+the mediator generates it after consent). Binding it to the sponsor's signature
+would require the page to obtain a second `auth.token` for a registry URL —
+exactly the signing-oracle shape §5.3 gate 3 exists to refuse. A random
+256-bit token, stored hashed, bounded to ≤ 600 s and single use, is the
+smallest thing that works.
+
+**Consequence.** A voucher exfiltrated from the page (a compromised
+application, a browser extension reading the page) lets its holder claim *that
+one label* under *that sponsor's* allowance within the minutes it lives, with a
+key the attacker generates. That is the same act the sponsor was about to do,
+spent from the sponsor's three; it yields no other name, no key of the
+sponsor's, and no write anywhere else. The page never stores, logs or URL-encodes
+it; the mediator never logs it; the registry stores only its hash.
+
+**Status: ACCEPTED.** Revisit if a TLD's allowance is ever large enough that
+spending it on somebody's behalf is a meaningful harm, in which case the voucher
+should additionally carry the sponsor's own signature obtained through a
+purpose-built, non-oracle verb.
 
 #### AP-7. A Handshake WebSocket is reachable on port 443 and nowhere else
 
