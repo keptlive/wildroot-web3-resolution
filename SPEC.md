@@ -1,6 +1,6 @@
 # Web3 name resolution — a specification
 
-**Version:** 0.4 (draft for public comment)
+**Version:** 0.10.0 (draft for public comment)
 **Status:** Describes the behaviour of the reference implementation in this
 repository, which ships in the Wildroot browser. Not endorsed by any standards
 body. Normative statements describe what an implementation must do *to
