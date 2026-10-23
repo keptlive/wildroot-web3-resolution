@@ -13,6 +13,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createServer } from 'node:http'
+import { once } from 'node:events'
 
 import createHandler, { web3Response } from '../src/web3-protocol.js'
 import fetchToHandler from '../src/fetch-to-handler.js'
@@ -40,10 +42,21 @@ test('the CORS headers a protocol handler needs are present', async () => {
   assert.equal(res.headers.get('Allow-CSP-From'), '*')
 })
 
-test('a failing chain call is an error response, not a throw', async () => {
+test('a failing chain call is an error response, not a throw', { timeout: 10000 }, async (t) => {
   // The scheme must fail closed inside its own namespace: an unreachable RPC
   // is a status, never an exception escaping into the protocol layer.
-  const { handler } = await createHandler({ chainList: CHAIN_LIST })
+  // A deterministic local RPC error avoids OS/firewall-dependent timeouts on
+  // an assumed closed port while still exercising the real client failure path.
+  const rpc = createServer((req, res) => {
+    req.resume()
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: 'fixture failure' } }))
+  })
+  rpc.listen(0, '127.0.0.1')
+  await once(rpc, 'listening')
+  t.after(() => new Promise((resolve) => { rpc.closeAllConnections(); rpc.close(resolve) }))
+  const chainList = { 1: { ...CHAIN_LIST[1], rpcUrls: [`http://127.0.0.1:${rpc.address().port}/`] } }
+  const { handler } = await createHandler({ chainList })
   const res = await handler(new Request(CONTRACT))
   assert.equal(res.status, 500)
 })
