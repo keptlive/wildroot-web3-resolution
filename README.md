@@ -65,7 +65,7 @@ The modules are copies of the Wildroot browser's. `npm run parity` fails if
 the browser checkout is absent, so an unchecked run cannot look successful. It compares
 them with a browser checkout at `../browser` (or `$WILDROOT`). The browser
 source is not public, so without that checkout the command reports that
-nothing was checked and exits successfully.
+nothing was checked and exits with a nonzero status.
 
 ## Citing
 
