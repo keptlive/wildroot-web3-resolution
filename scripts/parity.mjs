@@ -194,7 +194,7 @@ function walk (dir, out = []) {
 
 if (!existsSync(WILDROOT)) {
   console.error(`parity: browser tree not found at ${WILDROOT} (set WILDROOT); nothing checked`)
-  process.exit(sync ? 1 : 0)
+  process.exit(1)
 }
 
 let failures = 0
